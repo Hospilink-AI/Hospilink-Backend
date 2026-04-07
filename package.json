@@ -1,0 +1,69 @@
+{
+  "name": "hospilink",
+  "version": "1.0.0",
+  "description": "Hospital Management System",
+  "main": "server.js",
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "start": "set NODE_ENV=production&&node server.js",
+    "dev": "set NODE_ENV=development&&nodemon server.js",
+    "test": "jest --coverage",
+    "lint": "eslint src/**/*.js",
+    "format": "prettier --write src/**/*.js",
+    "dev:win": "set NODE_ENV=development&&nodemon server.js",
+    "start:win": "set NODE_ENV=production&&node server.js",
+    "agent:health": "curl -s http://localhost:3002/v1/health",
+    "agent:start": "node agent/start.js",
+    "agent:dev": "nodemon agent/start.js"
+  },
+  "keywords": [
+    "hospital",
+    "management",
+    "healthcare"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1000.0",
+    "@aws-sdk/s3-request-presigner": "^3.1000.0",
+    "@google-cloud/vision": "^4.3.2",
+    "@google/generative-ai": "^0.21.0",
+    "axios": "^1.13.6",
+    "bcryptjs": "^2.4.3",
+    "cheerio": "^1.0.0-rc.12",
+    "commander": "^14.0.3",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "express-rate-limit": "^6.8.0",
+    "express-validator": "^7.0.1",
+    "form-data": "^4.0.5",
+    "googleapis": "^171.4.0",
+    "helmet": "^7.0.0",
+    "ioredis": "^5.10.0",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^7.0.3",
+    "morgan": "^1.10.0",
+    "multer": "^2.1.1",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^6.9.1",
+    "puppeteer": "^24.40.0",
+    "redis": "^5.11.0",
+    "sharp": "^0.34.5",
+    "socket.io": "^4.8.3",
+    "turndown": "^7.2.0",
+    "uuid": "^9.0.0",
+    "validator": "^13.9.0",
+    "winston": "^3.11.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "eslint": "^8.38.0",
+    "jest": "^29.5.0",
+    "nodemon": "^2.0.22",
+    "prettier": "^2.8.7"
+  }
+}
