@@ -1,0 +1,42 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hospilink-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+      - "3002:3002"
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - redis
+    networks:
+      - hospilink-network
+    volumes:
+      - ./.env:/app/.env
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+
+  redis:
+    image: redis:7-alpine
+    container_name: hospilink-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - hospilink-network
+    command: redis-server --appendonly yes
+
+networks:
+  hospilink-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local
