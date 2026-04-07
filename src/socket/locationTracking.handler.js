@@ -1,0 +1,123 @@
+const locationTrackingService = require('../services/locationTracking.service');
+const roomManager = require('./roomManager');
+const logger = require('../utils/logger');
+
+
+class LocationTrackingHandler {
+    constructor() {
+        this.setupEventHandlers();
+    }
+
+    setupEventHandlers() {
+        const { getIO } = require('./index');
+        const io = getIO();
+
+        // Start tracking session
+        io.on('connection', (socket) => {
+            socket.on('tracking_start', async (data) => {
+                try {
+                    await this.handleTrackingStart(socket, data);
+                } catch (error) {
+                    logger.error('Error handling tracking_start:', error);
+                    socket.emit('tracking_error', { message: error.message });
+                }
+            });
+
+            // Location update
+            socket.on('location_update', async (data) => {
+                try {
+                    await this.handleLocationUpdate(socket, data);
+                } catch (error) {
+                    logger.error('Error handling location_update:', error);
+                    socket.emit('tracking_error', { message: error.message });
+                }
+            });
+
+            // End tracking
+            socket.on('tracking_end', async (data) => {
+                try {
+                    await this.handleTrackingEnd(socket, data);
+                } catch (error) {
+                    logger.error('Error handling tracking_end:', error);
+                    socket.emit('tracking_error', { message: error.message });
+                }
+            });
+        });
+    }
+
+
+    // handle tracking start for a staff member
+    async handleTrackingStart(socket, data) {
+        const { staffId, dutyId, hospitalId, coordinates } = data;
+        const userId = socket.user._id.toString();
+
+        // Validate user is the staff member
+        if (userId !== staffId) {
+            throw new Error('Unauthorized: You can only start tracking for yourself');
+        }
+
+        // Store initial location
+        await locationTrackingService.storeInitialLocation(staffId, dutyId, hospitalId, coordinates);
+
+        // Join tracking room
+        const trackingRoom = roomManager.joinTrackingRoom(socket, staffId, dutyId);
+        const hospitalTrackingRoom = roomManager.joinHospitalTrackingRoom(socket, hospitalId);
+
+        socket.emit('tracking_started', {
+            success: true,
+            trackingRoom,
+            hospitalTrackingRoom,
+            updateInterval: 2000
+        });
+
+        logger.info(`Tracking started for staff ${staffId}, duty ${dutyId}`);
+    }
+
+
+    // handle location update for a staff member
+    async handleLocationUpdate(socket, data) {
+        const { staffId, coordinates, accuracy, speed } = data;
+        const userId = socket.user._id.toString();
+
+        // Validate user is the staff member
+        if (userId !== staffId) {
+            throw new Error('Unauthorized: You can only update your own location');
+        }
+
+        // Update location
+        const updatedData = await locationTrackingService.updateStaffLocation(staffId, coordinates, {
+            accuracy,
+            speed
+        });
+
+        socket.emit('location_confirmed', {
+            timestamp: updatedData.timestamp,
+            distanceToHospital: updatedData.distanceToHospital,
+            estimatedArrival: updatedData.estimatedArrival
+        });
+    }
+
+
+    // handle tracking end for a staff member
+    async handleTrackingEnd(socket, data) {
+        const { staffId, reason } = data;
+        const userId = socket.user._id.toString();
+
+        // Validate user is the staff member
+        if (userId !== staffId) {
+            throw new Error('Unauthorized: You can only end your own tracking');
+        }
+
+        // End tracking session
+        const cleanupData = await locationTrackingService.endTrackingSession(staffId, reason);
+
+        socket.emit('tracking_ended', {
+            success: true,
+            cleanupData
+        });
+
+        logger.info(`Tracking ended for staff ${staffId}, reason: ${reason}`);
+    }
+}
+
+module.exports = new LocationTrackingHandler();
