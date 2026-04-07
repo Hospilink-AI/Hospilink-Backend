@@ -1,0 +1,68 @@
+# Dependencies
+node_modules/
+# package-lock.json should be committed for reproducible builds
+
+# Environment variables
+.env
+.env.local
+.env.production
+.env.*.local
+.env.agent
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Build files
+dist/
+build/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Redis dumps
+dump.rdb
+
+# MongoDB dumps
+*.dump
+
+# Agent artifacts (optional - uncomment if you don't want to track)
+.gemini/
+
+# Google service account credentials (but allow package files)
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!jsconfig.json
+
+# Agent Excel Data
+agent/data/
+
+# Tesseract OCR language data (auto-downloaded by tesseract.js)
+*.traineddata
