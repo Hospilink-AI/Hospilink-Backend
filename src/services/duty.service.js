@@ -647,6 +647,100 @@ class DutyService {
 
 
 
+    async markIncompleteDuties() {
+        const istNow = getCurrentIST();
+        const istToday = new Date(istNow.getFullYear(), istNow.getMonth(), istNow.getDate());
+
+        // Find duties that are stuck in 'assigned' or 'enroute' status
+        const stuckDuties = await Duty.find({
+            status: { $in: ['assigned', 'enroute'] },
+            date: {
+                $gte: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() - 1),
+                $lt: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() + 1)
+            }
+        }).populate('hospital', 'hospitalLegalName')
+        .populate({
+            path: 'assignedTo',
+            populate: {
+                path: 'user',
+                select: 'name email'
+            }
+        });
+
+        const bulkOps = [];
+        const incompleteDuties = [];
+
+        for (const duty of stuckDuties) {
+            // Calculate duty start time in IST
+            const [startHours, startMinutes] = duty.startTime.split(':').map(Number);
+            const dutyStartDate = new Date(duty.date);
+            const istDutyDate = toIST(dutyStartDate);
+            const istDutyStartTime = new Date(istDutyDate);
+            istDutyStartTime.setHours(startHours, startMinutes, 0, 0);
+
+            // Check if 30 minutes have passed since duty start time
+            const thirtyMinutesAfterStart = new Date(istDutyStartTime.getTime() + 30 * 60 * 1000);
+
+            if (istNow >= thirtyMinutesAfterStart) {
+                const timeDiff = istNow - istDutyStartTime;
+                const minutesOverdue = Math.floor(timeDiff / (1000 * 60));
+
+                const staffName = duty.assignedTo?.user?.name || 'Unknown Staff';
+                const hospitalName = duty.hospital?.hospitalLegalName || 'Unknown Hospital';
+                
+                console.log(`Marking duty INCOMPLETE: ${hospitalName} - ${duty.staffRole} - ${staffName} (${minutesOverdue}min overdue)`);
+
+                incompleteDuties.push({
+                    dutyId: duty._id,
+                    hospitalName,
+                    staffName,
+                    staffRole: duty.staffRole,
+                    startTime: duty.startTime,
+                    previousStatus: duty.status,
+                    minutesOverdue
+                });
+
+                bulkOps.push({
+                    updateOne: {
+                        filter: { _id: duty._id },
+                        update: {
+                            $set: {
+                                status: 'incomplete',
+                                incompleteAt: istNow
+                            },
+                            $push: {
+                                statusHistory: {
+                                    status: 'incomplete',
+                                    timestamp: istNow,
+                                    changedBy: 'system',
+                                    reason: `Automatically marked incomplete - status was '${duty.status}' for ${minutesOverdue} minutes after duty start time`
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Execute bulk operations if any
+        let markedIncompleteCount = 0;
+        if (bulkOps.length > 0) {
+            const result = await Duty.bulkWrite(bulkOps);
+            markedIncompleteCount = result.modifiedCount;
+
+            console.log(`\n=== INCOMPLETE DUTIES SUMMARY ===`);
+            console.log(`Total duties marked incomplete: ${markedIncompleteCount}`);
+            incompleteDuties.forEach(duty => {
+                console.log(`• ${duty.staffName} - ${duty.staffRole} at ${duty.hospitalName} (${duty.minutesOverdue}min overdue)`);
+            });
+            console.log(`================================\n`);
+        }
+
+        return markedIncompleteCount;
+    }
+
+
+
     async getOngoingDutiesForStaff(userId) {
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {

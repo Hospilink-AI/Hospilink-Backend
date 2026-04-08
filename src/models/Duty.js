@@ -100,7 +100,7 @@ const dutySchema = new mongoose.Schema({
 
     status: {
         type: String,
-        enum: ['available', 'assigned', 'enroute', 'in-progress', 'completed', 'cancelled', 'expired'],
+        enum: ['available', 'assigned', 'enroute', 'in-progress', 'completed', 'cancelled', 'expired', 'incomplete'],
         default: 'available',
         required: true
     },
@@ -114,7 +114,7 @@ const dutySchema = new mongoose.Schema({
     statusHistory: [{
         status: {
             type: String,
-            enum: ['available', 'assigned', 'enroute', 'in-progress', 'completed', 'cancelled', 'expired'],
+            enum: ['available', 'assigned', 'enroute', 'in-progress', 'completed', 'cancelled', 'expired', 'incomplete'],
             required: true
         },
         timestamp: {
@@ -165,6 +165,10 @@ const dutySchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    incompleteAt: {
+        type: Date,
+        default: null
+    },
     createdAt: {
         type: Date,
         default: Date.now
@@ -212,12 +216,13 @@ dutySchema.methods.canChangeStatus = function (newStatus, userId) {
     // Define valid status transitions
     const validTransitions = {
         'available': ['assigned', 'cancelled', 'expired'],
-        'assigned': ['enroute', 'cancelled'],
-        'enroute': ['in-progress', 'cancelled'],
-        'in-progress': ['completed', 'cancelled'],
+        'assigned': ['enroute', 'cancelled', 'incomplete'],
+        'enroute': ['in-progress', 'cancelled', 'incomplete'],
+        'in-progress': ['completed', 'cancelled', 'incomplete'],
         'completed': [], // No transitions from completed
         'cancelled': [], // No transitions from cancelled
-        'expired': [] // No transitions from expired
+        'expired': [], // No transitions from expired
+        'incomplete': [] // No transitions from incomplete
     };
 
     if (!validTransitions[this.status].includes(newStatus)) {

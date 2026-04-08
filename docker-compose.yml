@@ -10,6 +10,7 @@ services:
       - "3002:3002"
     environment:
       - NODE_ENV=production
+      - ENABLE_CRON_JOBS=true
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     depends_on:
