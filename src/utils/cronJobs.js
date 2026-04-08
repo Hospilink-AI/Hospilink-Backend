@@ -33,8 +33,23 @@ class CronJobs {
             }
         }, 30 * 60 * 1000); // 30 minutes
         
+
+        // Mark incomplete duties job - run every 30 minutes
+        setInterval(async () => {
+            try {
+                const markedIncomplete = await DutyService.markIncompleteDuties();
+                if (markedIncomplete > 0) {
+                    console.log(`Marked ${markedIncomplete} duties incomplete at ${new Date().toLocaleString()}`);
+                }
+            } catch (error) {
+                console.error('Mark incomplete duties error:', error);
+            }
+        }, 30 * 60 * 1000); // 30 minutes
+
+
         console.log('Auto-complete job started (runs every minute)');
         console.log('TempUser cleanup job started (runs every 30 minutes)');
+        console.log('Mark incomplete duties job started (runs every 30 minutes)');
     }
 }
 

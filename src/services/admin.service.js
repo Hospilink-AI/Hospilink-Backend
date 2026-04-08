@@ -427,8 +427,7 @@ class AdminService {
 
             const nearbyStaff = await MedicalStaff.find(query)
                 .populate('user', 'name email')
-                .select('fullName jobRole city area phoneNumber coordinates isAvailable averageRating')
-                .lean();
+                .select('fullName jobRole city area phoneNumber coordinates isAvailable averageRating user');
 
             console.log('Found', nearbyStaff.length, 'candidates via bounding box');
 

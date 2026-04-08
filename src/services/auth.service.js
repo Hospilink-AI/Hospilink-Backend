@@ -298,7 +298,7 @@ class AuthService {
         // Store userId against token, 1 hour TTL
         await cacheService.set(tokenKey, { userId: user._id.toString() }, 3600);
 
-        const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
+        const resetUrl = `${process.env.FRONTEND_URL}/auth/reset-password?token=${token}`;
         await EmailService.sendPasswordResetEmail(user.email, user.name, resetUrl);
 
         logger.info(`Password reset requested for: ${emailLower}`);
