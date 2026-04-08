@@ -159,24 +159,6 @@ exports.getStaffStatistics = asyncHandler(async (req, res) => {
 });
 
 
-// GET /api/admin/nearby-staff - Get ALL available staff within distance from hospital
-exports.getNearbyAvailableStaff = asyncHandler(async (req, res) => {
-    // Extract from validated query object (set by middleware)
-    const { hospital_id, distance, role } = req.validatedQuery;
-
-    const result = await adminService.getNearbyAvailableStaff(
-        hospital_id,
-        distance,
-        role
-    );
-
-    res.status(200).json({
-        success: true,
-        data: result
-    });
-});
-
-
 
 // GET /api/admin/medical-staff/stats — dashboard stats
 exports.getMedicalStaffStats = asyncHandler(async (req, res) => {
@@ -202,17 +184,20 @@ exports.getMedicalStaffList = asyncHandler(async (req, res) => {
     });
 });
 
+
 // GET /api/admin/medical-staff/:staffId — detailed view
 exports.getMedicalStaffDetail = asyncHandler(async (req, res) => {
     const result = await adminService.getMedicalStaffDetail(req.params.staffId);
     res.status(200).json({ success: true, data: result });
 });
 
+
 // PATCH /api/admin/medical-staff/:staffId/verify
 exports.verifyMedicalStaff = asyncHandler(async (req, res) => {
     const result = await adminService.verifyMedicalStaff(req.params.staffId);
     res.status(200).json({ success: true, message: result.message, data: result });
 });
+
 
 // PATCH /api/admin/medical-staff/:staffId/reject
 exports.rejectMedicalStaff = asyncHandler(async (req, res) => {
@@ -221,6 +206,8 @@ exports.rejectMedicalStaff = asyncHandler(async (req, res) => {
     const result = await adminService.rejectMedicalStaff(req.params.staffId, reason);
     res.status(200).json({ success: true, message: result.message, data: result });
 });
+
+
 
 // GET /api/admin/nearby-staff - Get ALL available staff within distance from hospital
 exports.getNearbyAvailableStaff = asyncHandler(async (req, res) => {
@@ -262,12 +249,14 @@ exports.getAdminProfile = asyncHandler(async (req, res) => {
     });
 });
 
+
 // POST /api/admin/flush-sessions
 exports.flushUserSessions = asyncHandler(async (req, res) => {
     const cacheService = require('../services/cache.service');
     const count = await cacheService.invalidatePattern('session:*');
     res.status(200).json({ success: true, message: `Flushed ${count} cached sessions.` });
 });
+
 
 // GET /api/admin/documents
 exports.getAllDocuments = asyncHandler(async (req, res) => {
@@ -276,11 +265,13 @@ exports.getAllDocuments = asyncHandler(async (req, res) => {
     res.status(200).json({ success: true, ...result });
 });
 
+
 // GET /api/admin/documents/stats
 exports.getDocumentStats = asyncHandler(async (req, res) => {
     const result = await adminService.getDocumentStats();
     res.status(200).json({ success: true, data: result });
 });
+
 
 // PUT /api/admin/documents/:documentId/verify
 exports.verifyDocument = asyncHandler(async (req, res) => {
@@ -288,6 +279,7 @@ exports.verifyDocument = asyncHandler(async (req, res) => {
     const result = await documentService.verifyDocument(req.params.documentId, req.user._id || req.user.id);
     res.status(200).json({ success: true, message: 'Document verified successfully', data: result });
 });
+
 
 // PUT /api/admin/documents/:documentId/reject
 exports.rejectDocument = asyncHandler(async (req, res) => {
@@ -379,6 +371,7 @@ exports.getHospitalSimpleList = asyncHandler(async (req, res) => {
     res.status(200).json({ success: true, data: result });
 });
 
+
 // GET /api/admin/hospitals — paginated + filtered
 exports.listHospitals = asyncHandler(async (req, res) => {
     const { search, status, city, page, limit } = req.query;
@@ -386,17 +379,20 @@ exports.listHospitals = asyncHandler(async (req, res) => {
     res.status(200).json({ success: true, ...result });
 });
 
+
 // GET /api/admin/hospitals/:hospitalId — preview modal
 exports.getHospitalDetail = asyncHandler(async (req, res) => {
     const result = await adminService.getHospitalDetail(req.params.hospitalId);
     res.status(200).json({ success: true, data: result });
 });
 
+
 // PATCH /api/admin/hospitals/:hospitalId/verify
 exports.verifyHospital = asyncHandler(async (req, res) => {
     const result = await adminService.verifyHospital(req.params.hospitalId);
     res.status(200).json({ success: true, message: 'Hospital verified', data: result });
 });
+
 
 // PATCH /api/admin/hospitals/:hospitalId/reject
 exports.rejectHospital = asyncHandler(async (req, res) => {
