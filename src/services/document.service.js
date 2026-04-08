@@ -92,6 +92,167 @@ const ocrSupportedDocs = [
 // ];
 
 
+// exports.uploadDocument = async (user, file, documentType, options = {}) => {
+
+//     // if (!allowedDocumentTypes.includes(documentType)) {
+//     //     throw new Error("Invalid document type");
+//     // }
+
+//     validateDocumentType(user.role, documentType);
+
+//     let userDocs = await Document.findOne({ userId: user._id });
+//     //create document if not exists
+//     if (!userDocs) {
+//         userDocs = new Document({
+//             userId: user._id,
+//             userRole: user.role,
+//             documents: []
+//         });
+//     }
+//     // Check for existing document
+//     const existingDoc = userDocs?.documents.find(
+//         d => d.documentType === documentType && !d.isDeleted
+//     );
+
+//     if (existingDoc) {
+//         // If replace flag is true, soft-delete old doc and delete from S3
+//         if (options.replace) {
+//             try {
+//                 await deleteFromS3(existingDoc.s3Key);
+//                 existingDoc.isDeleted = true;
+//             } catch (error) {
+//                 console.error("Failed to delete old document from S3:", error);
+//                 // Continue with upload even if S3 delete fails
+//             }
+//         } else {
+//             throw new Error(`${documentType} already uploaded. Use replace=true to update.`);
+//         }
+//     }
+
+//     const folder = getFolderByRole(user.role);
+
+//     const timestamp = Date.now();
+
+//     // sanitize filename (remove spaces)
+//     const sanitizedFileName = file.originalname.replace(/\s+/g, "-");
+
+//     const key =
+//         `documents/${folder}/${user._id}/${documentType}/${timestamp}-${sanitizedFileName}`;
+
+//     await uploadToS3(file.buffer, key, file.mimetype);
+
+//     // let verificationStatus = "pending";
+//     // let hypervergeData = null;
+
+//     // try {
+
+//     //     if (documentType === "aadhaar-card") {
+
+//     //         const hvResponse = await verifyAadhaar(file.buffer);
+
+//     //         const verified = hvResponse?.status?.toLowerCase() === "success";
+
+//     //         verificationStatus = verified ? "auto-verified" : "rejected";
+
+//     //         hypervergeData = {
+//     //             confidenceScore: hvResponse?.result?.confidence || 0,
+//     //             extractedAadhaarNumber: hvResponse?.result?.aadhaar_number,
+//     //             verificationTimestamp: new Date(),
+//     //             rawResponse: hvResponse
+//     //         };
+
+//     //     }
+
+//     //     else {
+
+//     //         const hvResponse = await checkDocumentFraud(file.buffer);
+
+//     //         const fraudDetected =
+//     //             hvResponse?.result?.fraudDetected === true ||
+//     //             hvResponse?.result?.fraud === true;
+
+//     //         verificationStatus = fraudDetected ? "rejected" : "pending";
+
+//     //         hypervergeData = {
+//     //             confidenceScore: hvResponse?.result?.confidence || 0,
+//     //             verificationTimestamp: new Date(),
+//     //             rawResponse: hvResponse
+//     //         };
+
+//     //     }
+
+//     // } catch (error) {
+
+//     //     console.error("HyperVerge verification failed:", error);
+//     //     verificationStatus = "pending";
+
+//     // }
+
+//     // HyperVerge verification disabled temporarily
+//     // let verificationStatus = "pending";
+//     // let hypervergeData = null;
+
+//     // userDocs.documents.push({
+//     //     documentType,
+//     //     url: key,
+//     //     verificationStatus,
+//     //     hypervergeData
+//     // });
+
+//     let verificationStatus = "pending";
+//     let hypervergeData = null;
+
+//     let extractedText = "";
+//     let extractedData = {};
+
+//     // ✅ Run OCR only for supported docs
+//     try {
+
+//         if (ocrSupportedDocs.includes(documentType)) {
+
+//             // OCR
+//             extractedText = await extractTextFromBuffer(file.buffer, file.mimetype);
+
+//             //Parse
+//             if (parserMap[documentType]) {
+//                 extractedData = parserMap[documentType](extractedText);
+//             }
+
+//             //Better validation logic
+//             const hasValidData = Object.values(extractedData).some(v => v);
+
+//             if (hasValidData) {
+//                 verificationStatus = "manual-pending-verification";
+//             }
+
+//             //Strict auto verification example
+//             if (documentType === "aadhaar-card" && extractedData.aadhaarNumber) {
+//                 verificationStatus = "pending";
+//             }
+
+//         }
+//     } catch (err) {
+//         console.error("OCR failed:", err);
+//     }
+
+//     userDocs.documents.push({
+//         documentType,
+//         s3Key: key,
+//         fileName: file.originalname,
+//         extractedText,
+//         extractedData,
+//         verificationStatus,
+//         hypervergeData
+//     });
+//     await userDocs.save();
+
+//     return {
+//         documentType,
+//         verificationStatus,
+//         uploadedAt: new Date(),
+//         s3Key: key  // Return S3 key for rollback tracking
+//     };
+// };
 exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
     // if (!allowedDocumentTypes.includes(documentType)) {
@@ -205,7 +366,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
     let extractedText = "";
     let extractedData = {};
 
-    // ✅ Run OCR only for supported docs
+    // Run OCR only for supported docs
     try {
 
         if (ocrSupportedDocs.includes(documentType)) {
@@ -218,14 +379,87 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 extractedData = parserMap[documentType](extractedText);
             }
 
-            //Better validation logic
-            const hasValidData = Object.values(extractedData).some(v => v);
+            const {
+                extractQRFromBuffer,
+                detectQRType,
+                decodeBase64QR,
+                fetchQRUrlData
+            } = require("./qr.service");
 
-            if (hasValidData) {
+            const parseMCIMHtml = require("./parsers/mcimHtml.parser");
+            const { compareCertificateData } = require("../utils/compare");
+
+            let qrRaw = null;
+            let qrType = null;
+
+            try {
+                qrRaw = await extractQRFromBuffer(file.buffer);
+                qrType = detectQRType(qrRaw);
+
+                console.log("QR RAW:", qrRaw);
+                console.log("QR TYPE:", qrType);
+
+                // URL QR
+                if (qrType === "url") {
+
+                    const html = await fetchQRUrlData(qrRaw);
+
+                    if (html) {
+                        const qrData = parseMCIMHtml(html);
+
+                        const normalizedOCR = {
+                            name: extractedData.doctorName,
+                            registrationNumber: extractedData.registrationNumber
+                        };
+
+                        const result = compareCertificateData(normalizedOCR, qrData);
+
+                        if (result === "match" || result === "partial") {
+                            verificationStatus = "auto-verified";
+                        } else {
+                            verificationStatus = "manual-pending-verification";
+                        }
+                    } else {
+                        verificationStatus = "manual-pending-verification";
+                    }
+                }
+                // BASE64 QR
+                else if (qrType === "base64") {
+
+                    const decoded = decodeBase64QR(qrRaw);
+                    console.log("DECODED QR:", decoded);
+
+                    let ocrReg = extractedData.registrationNumber;
+
+                    // simple fallback
+                    if (!ocrReg && decoded) {
+                        ocrReg = decoded;
+                    }
+
+                    if (decoded && ocrReg) {
+                        const ocrNumber = ocrReg.toString().replace(/\D/g, "");
+
+                        if (ocrNumber.endsWith(decoded)) {
+                            verificationStatus = "auto-verified";
+                        } else {
+                            verificationStatus = "manual-pending-verification";
+                        }
+                        extractedData.registrationNumber = ocrNumber;
+                    } else {
+                        verificationStatus = "manual-pending-verification";
+                    }
+                }
+                // NO QR
+                else {
+                    verificationStatus = "manual-pending-verification";
+                }
+
+            } catch (err) {
+                console.error("QR verification error:", err);
                 verificationStatus = "manual-pending-verification";
             }
 
-            //Strict auto verification example
+            // auto verification 
             if (documentType === "aadhaar-card" && extractedData.aadhaarNumber) {
                 verificationStatus = "pending";
             }
