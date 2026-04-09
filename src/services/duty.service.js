@@ -30,15 +30,15 @@ class DutyService {
         const now = getCurrentIST();
         const dutyDate = new Date(dutyData.date);
         const [startHours, startMinutes] = dutyData.startTime.split(':');
-        
+
         // Convert duty date to IST and set time
         const istDutyDate = toIST(dutyDate);
         const dutyStartTime = new Date(istDutyDate);
         dutyStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
-        
+
         // Add 15 minute buffer
         const bufferTime = new Date(dutyStartTime.getTime() - 15 * 60 * 1000);
-        
+
         if (bufferTime <= now) {
             throw new Error('Duty start time must be at least 15 minutes in the future. Cannot create duties for past or immediate times.');
         }
@@ -55,7 +55,14 @@ class DutyService {
         });
 
         // Populate the created duty
-        await duty.populate('hospital');
+        await duty.populate({
+            path: 'hospital',
+            select: 'hospitalLegalName location coordinates user',
+            populate: {
+                path: 'user',
+                select: 'name'
+            }
+        });
 
         return {
             success: true,
@@ -659,13 +666,13 @@ class DutyService {
                 $lt: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() + 1)
             }
         }).populate('hospital', 'hospitalLegalName')
-        .populate({
-            path: 'assignedTo',
-            populate: {
-                path: 'user',
-                select: 'name email'
-            }
-        });
+            .populate({
+                path: 'assignedTo',
+                populate: {
+                    path: 'user',
+                    select: 'name email'
+                }
+            });
 
         const bulkOps = [];
         const incompleteDuties = [];
@@ -687,7 +694,7 @@ class DutyService {
 
                 const staffName = duty.assignedTo?.user?.name || 'Unknown Staff';
                 const hospitalName = duty.hospital?.hospitalLegalName || 'Unknown Hospital';
-                
+
                 console.log(`Marking duty INCOMPLETE: ${hospitalName} - ${duty.staffRole} - ${staffName} (${minutesOverdue}min overdue)`);
 
                 incompleteDuties.push({
@@ -1172,6 +1179,65 @@ class DutyService {
             console.error('Error in getAvailableJobsWithDistance:', error.message);
             throw new Error(error.message);
         }
+    }
+    async getNearbyStaffForEmergency(duty, maxDistanceKm = 10) {
+        const staffList = await MedicalStaff.find({
+            jobRole: duty.staffRole,
+            isAvailable: true
+        }).populate('user', '_id');
+
+        // Get hospital coordinates
+        if (
+            !duty.hospital ||
+            !duty.hospital.coordinates ||
+            !duty.hospital.coordinates.coordinates ||
+            !duty.hospital.coordinates.coordinates.latitude ||
+            !duty.hospital.coordinates.coordinates.longitude
+        ) {
+            return [];
+        }
+
+        const hospitalLat = duty.hospital.coordinates.coordinates.latitude;
+        const hospitalLng = duty.hospital.coordinates.coordinates.longitude;
+
+        const nearbyStaffUserIds = [];
+
+        for (const staff of staffList) {
+            if (!staff.coordinates) continue;
+
+            let staffLat, staffLng;
+
+            if (staff.coordinates.coordinates) {
+                staffLat = staff.coordinates.coordinates.latitude;
+                staffLng = staff.coordinates.coordinates.longitude;
+            } else {
+                staffLat = staff.coordinates.latitude;
+                staffLng = staff.coordinates.longitude;
+            }
+
+            if (!staffLat || !staffLng) continue;
+
+            try {
+                const distanceInfo = await geocodingService.calculateDistanceAndETA(
+                    staffLat,
+                    staffLng,
+                    hospitalLat,
+                    hospitalLng
+                );
+
+                const distanceKm = distanceInfo.distance / 1000;
+
+                console.log(`📍 Staff ${staff.user._id} distance: ${distanceKm} km`);
+                if (distanceKm <= maxDistanceKm) {
+                    nearbyStaffUserIds.push(staff.user._id.toString());
+                }
+
+            } catch (error) {
+                console.error('Distance calc failed:', error.message);
+            }
+        }
+        console.log("✅ Nearby Staff IDs:", nearbyStaffUserIds);
+        return nearbyStaffUserIds;
     }
 
 

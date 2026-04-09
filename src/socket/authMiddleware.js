@@ -11,10 +11,11 @@ async function authMiddleware(socket, next) {
     try {
         // Extract token from multiple possible locations for compatibility
         let token = socket.handshake.auth.token ||
+            socket.handshake.query?.token ||
             socket.handshake.headers.token;
 
         // Also check for Authorization header format
-        if (!token && socket.handshake.headers.authorization) {
+        if (!token && socket.handshake.headers?.authorization) {
             const authHeader = socket.handshake.headers.authorization;
             if (authHeader.startsWith('Bearer ')) {
                 token = authHeader.substring(7);

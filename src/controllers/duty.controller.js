@@ -48,6 +48,56 @@ exports.createDuty = asyncHandler(async (req, res) => {
     };
 
     const result = await DutyService.createDuty(dutyData, userId);
+    //  EMERGENCY NOTIFICATION TRIGGER
+    if (urgency && urgency.toLowerCase() === 'emergency') {
+        try {
+            const hospital = await Hospital.findOne({ user: userId })
+                .populate('user', 'name');
+
+            const nearbyStaffUserIds = await dutyService.getNearbyStaffForEmergency(result.duty, 10);
+
+            //  SOCKET EMIT
+            await notificationEmitter.emitEmergencyDutyRequest(
+                result.duty,
+                hospital,
+                nearbyStaffUserIds,
+                req.body.ward || 'General'
+            );
+
+            //  EMAIL LOGIC
+            let staffList = [];
+
+            if (nearbyStaffUserIds.length > 0) {
+                staffList = await MedicalStaff.find({
+                    user: { $in: nearbyStaffUserIds }
+                }).populate('user', 'email name');
+            } else {
+                staffList = await MedicalStaff.find({
+                    jobRole: result.duty.staffRole,
+                    isAvailable: true
+                }).populate('user', 'email name');
+            }
+
+            for (const staff of staffList) {
+                if (staff.user?.email) {
+                    await EmailService.sendEmergencyDutyEmail(
+                        staff.user.email,
+                        staff.user.name,
+                        {
+                            hospitalName: hospital.hospitalLegalName || hospital.user.name,
+                            staffRole: result.duty.staffRole,
+                            date: new Date(result.duty.date).toLocaleDateString(),
+                            time: `${result.duty.startTime} - ${result.duty.endTime}`,
+                            rate: result.duty.offeredRate
+                        }
+                    );
+                }
+            }
+
+        } catch (error) {
+            logger.error('Emergency notification failed: ' + error.message);
+        }
+    }
 
     // Emit WebSocket notification to matching available staff AND hospital
     try {

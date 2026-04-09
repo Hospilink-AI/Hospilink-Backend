@@ -134,7 +134,7 @@ class EmailService {
     }
 
 
-    
+
     async sendDutyAcceptanceEmail(email, userName, dutyDetails) {
         try {
             const mailOptions = {
@@ -416,8 +416,8 @@ class EmailService {
 
     async sendStaffDutyCancellationEmail(email, userName, dutyDetails, cancellationDetails) {
         try {
-            const cancelledByText = cancellationDetails.cancelledBy === 'hospital' 
-                ? 'the hospital' 
+            const cancelledByText = cancellationDetails.cancelledBy === 'hospital'
+                ? 'the hospital'
                 : 'you';
 
             const mailOptions = {
@@ -480,8 +480,8 @@ class EmailService {
 
     async sendHospitalDutyCancellationEmail(hospitalEmail, hospitalName, staffDetails, dutyDetails, cancellationDetails) {
         try {
-            const cancelledByText = cancellationDetails.cancelledBy === 'hospital' 
-                ? 'you' 
+            const cancelledByText = cancellationDetails.cancelledBy === 'hospital'
+                ? 'you'
                 : 'the assigned staff member';
 
             const staffInfo = staffDetails ? `
@@ -709,6 +709,53 @@ class EmailService {
             return true;
         } catch (error) {
             logger.error(`Error sending medical staff rejected email to ${email}: ${error.message}`);
+            return false;
+        }
+    }
+
+    async sendEmergencyDutyEmail(email, userName, dutyDetails) {
+        try {
+            const mailOptions = {
+                from: `HospiLink <${process.env.EMAIL_FROM}>`,
+                to: email,
+                subject: ` EMERGENCY: ${dutyDetails.staffRole.toUpperCase()} Required`,
+                html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+                    
+                    <div style="background-color: #e74c3c; padding: 20px; text-align: center;">
+                        <h2 style="color: white; margin: 0;"> EMERGENCY DUTY ALERT</h2>
+                    </div>
+
+                    <div style="padding: 20px;">
+                        <p>Hello <strong>${userName}</strong>,</p>
+
+                        <p><strong style="color:red;">Immediate ${dutyDetails.staffRole.toUpperCase()} required!</strong></p>
+
+                        <div style="background-color: #fff5f5; border-left: 5px solid red; padding: 15px; margin: 20px 0;">
+                            <p><b>Hospital:</b> ${dutyDetails.hospitalName}</p>
+                            <p><b>Date:</b> ${dutyDetails.date}</p>
+                            <p><b>Time:</b> ${dutyDetails.time}</p>
+                            <p><b>Rate:</b> ₹${dutyDetails.rate}</p>
+                        </div>
+
+                        <p style="color:red;"><b>This is a CRITICAL emergency request. Please respond immediately.</b></p>
+
+                        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                        <p style="color: #7f8c8d; font-size: 12px; text-align: center;">
+                            © ${new Date().getFullYear()} HospiLink
+                        </p>
+                    </div>
+                </div>
+            `
+            };
+
+            await this.transporter.sendMail(mailOptions);
+
+            logger.info(` Emergency email sent to ${email}`);
+            return true;
+
+        } catch (error) {
+            logger.error(` Error sending emergency email to ${email}: ${error.message}`);
             return false;
         }
     }

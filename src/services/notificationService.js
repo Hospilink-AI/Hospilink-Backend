@@ -21,7 +21,7 @@ class NotificationService {
                 isRead: false,
                 createdAt: new Date()
             });
-            
+
             await notification.save();
             console.log(`Notification created: ${type} for user ${recipientId}`);
             return notification;
@@ -45,7 +45,7 @@ class NotificationService {
                 .limit(limit)
                 .skip(skip)
                 .lean();
-            
+
             return notifications;
         } catch (error) {
             console.error('Error fetching user notifications:', error);
@@ -66,11 +66,11 @@ class NotificationService {
                 { isRead: true },
                 { new: true }
             );
-            
+
             if (notification) {
                 console.log(`Notification ${notificationId} marked as read`);
             }
-            
+
             return notification;
         } catch (error) {
             console.error('Error marking notification as read:', error);
@@ -90,7 +90,7 @@ class NotificationService {
                 { _id: { $in: notificationIds }, recipient: userId },
                 { isRead: true }
             );
-            
+
             console.log(`Marked ${result.modifiedCount} notifications as read`);
             return result;
         } catch (error) {
@@ -110,7 +110,7 @@ class NotificationService {
                 recipient: userId,
                 isRead: false
             });
-            
+
             return count;
         } catch (error) {
             console.error('Error fetching unread count:', error);
@@ -135,10 +135,11 @@ class NotificationService {
                 recipient: recipientId,
                 type,
                 payload,
+                priority: payload.priority || 'NORMAL',
                 isRead: false,
                 createdAt: new Date()
             }));
-            
+
             const result = await Notification.insertMany(notifications, { ordered: false });
             console.log(`Bulk created ${result.length} notifications of type ${type}`);
             return { insertedCount: result.length };
@@ -173,20 +174,20 @@ class NotificationService {
                     }
                 }
             ]);
-            
+
             // Convert array to object for easy lookup
             const countsMap = {};
             results.forEach(result => {
                 countsMap[result._id.toString()] = result.count;
             });
-            
+
             // Ensure all userIds have a count (even if 0)
             userIds.forEach(userId => {
                 if (countsMap[userId.toString()] === undefined) {
                     countsMap[userId.toString()] = 0;
                 }
             });
-            
+
             return countsMap;
         } catch (error) {
             console.error('Error fetching bulk unread counts:', error);
@@ -206,10 +207,10 @@ class NotificationService {
                 recipient: userId,
                 createdAt: { $gt: timestamp }
             })
-            .sort({ createdAt: 1 }) // Ascending order for chronological delivery
-            .limit(limit)
-            .lean();
-            
+                .sort({ createdAt: 1 }) // Ascending order for chronological delivery
+                .limit(limit)
+                .lean();
+
             return notifications;
         } catch (error) {
             console.error('Error fetching notifications since timestamp:', error);
@@ -234,15 +235,15 @@ class NotificationService {
                 isRead: false,
                 createdAt: new Date()
             });
-            
+
             await notification.save();
-            
+
             // Get unread count in the same operation
             const unreadCount = await Notification.countDocuments({
                 recipient: recipientId,
                 isRead: false
             });
-            
+
             console.log(`Notification created: ${type} for user ${recipientId} (unread: ${unreadCount})`);
             return { notification, unreadCount };
         } catch (error) {

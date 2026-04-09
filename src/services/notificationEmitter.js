@@ -49,10 +49,10 @@ class NotificationEmitter {
             if (matchingStaffUserIds.length > 0) {
                 try {
                     await notificationService.createBulkNotifications(matchingStaffUserIds, 'DUTY_CREATED', payload);
-                    
+
                     // Batch fetch unread counts for all staff
                     const unreadCounts = await notificationService.getBulkUnreadCounts(matchingStaffUserIds);
-                    
+
                     // Send unread counts to each staff member
                     for (const staffUserId of matchingStaffUserIds) {
                         const count = unreadCounts[staffUserId] || 0;
@@ -196,10 +196,10 @@ class NotificationEmitter {
             if (recipientUserIds.length > 0) {
                 try {
                     await notificationService.createBulkNotifications(recipientUserIds, 'DUTY_CANCELLED', payload);
-                    
+
                     // Batch fetch unread counts for all recipients
                     const unreadCounts = await notificationService.getBulkUnreadCounts(recipientUserIds);
-                    
+
                     // Send unread counts to each recipient
                     for (const recipientUserId of recipientUserIds) {
                         const count = unreadCounts[recipientUserId] || 0;
@@ -272,7 +272,7 @@ class NotificationEmitter {
                 rating: rating,
                 review: reviewText ? reviewText : "",
                 message: reviewText
-                    ? `You received a ${rating}⭐ review: "${reviewText}"`: `You received a ${rating}⭐ rating from hospital`,
+                    ? `You received a ${rating}⭐ review: "${reviewText}"` : `You received a ${rating}⭐ rating from hospital`,
                 timestamp: new Date().toISOString()
             };
 
@@ -296,6 +296,61 @@ class NotificationEmitter {
 
         } catch (error) {
             console.error('Error emitting review notification:', error);
+        }
+    }
+    // Emit Emergency Duty Request Notification
+    async emitEmergencyDutyRequest(duty, hospital, nearbyStaffUserIds, ward = 'General') {
+        try {
+            const role = duty.staffRole.replace(/_/g, ' ').toUpperCase();
+
+            const message = `EMERGENCY: Immediate ${role} required at ${hospital.hospitalLegalName || hospital.user?.name} — ${ward}. Critical response needed. Tap to accept.`;
+
+            const payload = {
+                type: 'EMERGENCY_DUTY_REQUEST',
+                priority: 'CRITICAL',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    urgency: duty.urgency,
+                    offeredRate: duty.offeredRate
+                },
+                hospital: {
+                    id: hospital._id.toString(),
+                    name: hospital.hospitalLegalName || hospital.user?.name
+                },
+                message,
+                ward,
+                timestamp: new Date().toISOString()
+            };
+
+            //  Persist notifications (bulk)
+            if (nearbyStaffUserIds.length > 0) {
+                await notificationService.createBulkNotifications(
+                    nearbyStaffUserIds,
+                    'EMERGENCY_DUTY_REQUEST',
+                    payload
+                );
+                // Send unread count
+                const unreadCounts = await notificationService.getBulkUnreadCounts(nearbyStaffUserIds);
+
+                for (const userId of nearbyStaffUserIds) {
+                    websocketManager.sendUnreadCount(userId, unreadCounts[userId] || 0);
+                }
+            }
+
+            if (nearbyStaffUserIds.length > 0) {
+                websocketManager.emitToUsers(nearbyStaffUserIds, 'notification', payload);
+            } else {
+                websocketManager.emitToStaffRole(duty.staffRole, 'notification', payload);
+            }
+
+            console.log(`🚨 Emergency notification sent to ${nearbyStaffUserIds.length} staff`);
+
+        } catch (error) {
+            console.error('Error emitting emergency duty notification:', error);
         }
     }
 }
