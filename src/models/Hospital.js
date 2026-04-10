@@ -104,7 +104,8 @@ const hospitalSchema = new mongoose.Schema({
     },
     rejectionReason: {
         type: String,
-        trim: true
+        trim: true,
+        maxlength: [500, 'Rejection reason cannot exceed 500 characters']
     },
     createdAt: {
         type: Date,
