@@ -9,3 +9,7 @@ coverage/
 .idea/
 docs/
 scripts/
+
+# Ignore Dockerfile to use Nixpacks instead
+Dockerfile
+docker-compose.yml
