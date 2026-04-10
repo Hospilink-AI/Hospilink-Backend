@@ -347,10 +347,26 @@ class NotificationEmitter {
                 websocketManager.emitToStaffRole(duty.staffRole, 'notification', payload);
             }
 
-            console.log(`🚨 Emergency notification sent to ${nearbyStaffUserIds.length} staff`);
+            console.log(`Emergency notification sent to ${nearbyStaffUserIds.length} staff`);
 
         } catch (error) {
             console.error('Error emitting emergency duty notification:', error);
+        }
+    }
+    async emitRateShiftNotification(hospitalUserId, payload) {
+        try {
+            const { unreadCount } =
+                await notificationService.createNotificationWithCount(
+                    hospitalUserId,
+                    'RATE_SHIFT',
+                    payload
+                );
+
+            websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
+            websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+
+        } catch (error) {
+            console.error('Error sending rate shift notification:', error);
         }
     }
 }

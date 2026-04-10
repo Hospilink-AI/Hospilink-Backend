@@ -9,7 +9,7 @@ const notificationSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['DUTY_CREATED', 'DUTY_ACCEPTED', 'DUTY_STATUS_CHANGED', 'DUTY_CANCELLED', 'DUTY_EDITED', 'REVIEW_RECEIVED', 'EMERGENCY_DUTY_REQUEST'],
+        enum: ['DUTY_CREATED', 'DUTY_ACCEPTED', 'DUTY_STATUS_CHANGED', 'DUTY_CANCELLED', 'DUTY_EDITED', 'REVIEW_RECEIVED', 'EMERGENCY_DUTY_REQUEST', 'RATE_SHIFT', 'DUTY_EXPIRING'],
         required: [true, 'Notification type is required']
     },
     priority: {

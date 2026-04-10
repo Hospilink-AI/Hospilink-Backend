@@ -6,8 +6,8 @@ const notificationEmitter = require('../services/notificationEmitter');
 const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
 const logger = require('../utils/logger');
-const dutyService = require('../services/duty.service');
 const locationTrackingService = require('../services/locationTracking.service');
+const delayedJobService = require('../services/delayedJob.service');
 
 // Extend logger with debug method
 logger.debug = (message) => {
@@ -54,7 +54,7 @@ exports.createDuty = asyncHandler(async (req, res) => {
             const hospital = await Hospital.findOne({ user: userId })
                 .populate('user', 'name');
 
-            const nearbyStaffUserIds = await dutyService.getNearbyStaffForEmergency(result.duty, 10);
+            const nearbyStaffUserIds = await DutyService.getNearbyStaffForEmergency(result.duty, 10);
 
             //  SOCKET EMIT
             await notificationEmitter.emitEmergencyDutyRequest(
@@ -115,6 +115,11 @@ exports.createDuty = asyncHandler(async (req, res) => {
 
         // Emit notification to both hospital and matching staff
         await notificationEmitter.emitDutyCreated(result.duty, hospital, staffUserIds, userId);
+        //  Schedule expiry job 
+        await delayedJobService.scheduleDutyExpiringJob(
+            result.duty,
+            staffUserIds
+        );
     } catch (error) {
         logger.error('Error emitting duty created notification: ' + error.message);
         // Don't fail the request if notification fails

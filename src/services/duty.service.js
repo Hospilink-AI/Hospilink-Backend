@@ -17,6 +17,7 @@ const {
     generateEarningsPDF,
     generateDutyReceiptPDF
 } = require('../utils/pdf.puppeteer');
+const delayedJobService = require('./delayedJob.service');
 
 class DutyService {
     async createDuty(dutyData, userId) {
@@ -444,6 +445,21 @@ class DutyService {
                 throw new Error(completeValidation.reason);
             }
             duty.completedAt = getCurrentIST();
+        }
+        // Schedule Rate Shift Notification
+        if (newStatus === 'completed') {
+
+            await duty.populate({
+                path: 'hospital',
+                populate: { path: 'user', select: '_id name' }
+            });
+
+            await duty.populate({
+                path: 'assignedTo',
+                populate: { path: 'user', select: 'name' }
+            });
+
+            await delayedJobService.scheduleRateShiftJob(duty);
         }
 
         // Update status and add to history
