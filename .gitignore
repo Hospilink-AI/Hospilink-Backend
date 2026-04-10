@@ -60,6 +60,8 @@ dump.rdb
 !package-lock.json
 !tsconfig.json
 !jsconfig.json
+!railway.json
+!vercel.json
 
 # Agent Excel Data
 agent/data/
