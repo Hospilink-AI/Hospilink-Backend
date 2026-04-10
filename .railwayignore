@@ -1,0 +1,11 @@
+# Don't deploy these to Railway
+node_modules/
+.git/
+.env.local
+.env.development
+*.log
+coverage/
+.vscode/
+.idea/
+docs/
+scripts/

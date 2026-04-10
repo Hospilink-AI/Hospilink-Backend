@@ -16,7 +16,9 @@
     "start:win": "set NODE_ENV=production&&node server.js",
     "agent:health": "curl -s http://localhost:3002/v1/health",
     "agent:start": "node agent/start.js",
-    "agent:dev": "nodemon agent/start.js"
+    "agent:dev": "nodemon agent/start.js",
+    "websocket": "node websocket-server.js",
+    "websocket:dev": "nodemon websocket-server.js"
   },
   "keywords": [
     "hospital",
