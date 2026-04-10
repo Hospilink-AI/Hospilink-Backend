@@ -584,8 +584,8 @@ class AdminService {
                                 location: 1,
                                 currentAddress: 1,
                                 staffCount: 1,
-                                verificationStatus: { $ifNull: ['$verificationStatus', 'pending'] },
-                                rejectionReason: { $ifNull: ['$rejectionReason', null] },
+                                verificationStatus: '$verificationStatus',
+                                rejectionReason: '$rejectionReason',
                                 createdAt: 1,
                                 totalDuties: { $ifNull: [{ $arrayElemAt: ['$dutyStats.total', 0] }, 0] },
                                 occupiedDuties: { $ifNull: [{ $arrayElemAt: ['$dutyStats.occupied', 0] }, 0] },
@@ -831,7 +831,8 @@ class AdminService {
                 $match: {
                     $or: [
                         { fullName: { $regex: search.trim(), $options: 'i' } },
-                        { 'userInfo.email': { $regex: search.trim(), $options: 'i' } }
+                        { 'userInfo.email': { $regex: search.trim(), $options: 'i' } },
+                        { 'userInfo.name': { $regex: search.trim(), $options: 'i' } }
                     ]
                 }
             }] : []),
