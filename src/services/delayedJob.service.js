@@ -10,8 +10,8 @@ class DelayedJobService {
         expiryTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
 
         // 5 minutes before expiry
-        const executeAt = new Date(Date.now() + 15000);
-        // const executeAt = new Date(expiryTime.getTime() - (5 * 60 * 1000));
+        //const executeAt = new Date(Date.now() + 15000);// for testing
+        const executeAt = new Date(expiryTime.getTime() - (5 * 60 * 1000));
         //  prevent past scheduling
         if (executeAt <= new Date()) return;
 
