@@ -168,7 +168,7 @@ exports.getMedicalStaffStats = asyncHandler(async (req, res) => {
 
 // GET /api/admin/medical-staff — paginated list with filters
 exports.getMedicalStaffList = asyncHandler(async (req, res) => {
-    const { search, role, availability, page = 1, limit = 10 } = req.query;
+    const { search, role, availability, page, limit } = req.validatedQuery;
 
     const result = await adminService.getMedicalStaffListWithFilters({
         search,
@@ -260,7 +260,7 @@ exports.flushUserSessions = asyncHandler(async (req, res) => {
 
 // GET /api/admin/documents
 exports.getAllDocuments = asyncHandler(async (req, res) => {
-    const { status, userRole, page, limit, sortBy, sortOrder } = req.query;
+    const { status, userRole, page, limit, sortBy, sortOrder } = req.validatedQuery;
     const result = await adminService.getAllDocuments({ status, userRole, page, limit, sortBy, sortOrder });
     res.status(200).json({ success: true, ...result });
 });
@@ -366,7 +366,7 @@ exports.getDutyRouteMap = asyncHandler(async (req, res) => {
 
 // GET /api/admin/hospitals/list — simple list
 exports.getHospitalSimpleList = asyncHandler(async (req, res) => {
-    const { name } = req.query;
+    const { name } = req.validatedQuery;
     const result = await adminService.getHospitalSimpleList(name);
     res.status(200).json({ success: true, data: result });
 });
@@ -374,7 +374,7 @@ exports.getHospitalSimpleList = asyncHandler(async (req, res) => {
 
 // GET /api/admin/hospitals — paginated + filtered
 exports.listHospitals = asyncHandler(async (req, res) => {
-    const { search, status, city, page, limit } = req.query;
+    const { search, status, city, page, limit } = req.validatedQuery;
     const result = await adminService.getHospitalList({ search, status, city, page, limit });
     res.status(200).json({ success: true, ...result });
 });

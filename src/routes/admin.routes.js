@@ -11,7 +11,13 @@ const {
     validateActiveDutiesQuery,
     validateDutyRouteMap,
     validateOvernightDutiesQuery,
-    validateDutyHistoryQuery
+    validateDutyHistoryQuery,
+    validateHospitalSimpleListQuery,
+    validateHospitalListQuery,
+    validateMedicalStaffListQuery,
+    validateDocumentsListQuery,
+    validateObjectId,
+    validateRejectionReason
 } = require('../middleware/admin.middleware');
 
 const { validateDutyCreation } = require('../middleware/validation.middleware');
@@ -30,11 +36,11 @@ router.use(authorize('admin'));
 router.get('/profile', adminController.getAdminProfile);
 
 //Hospital Management endpoints
-router.get('/hospitals-list', adminController.getHospitalSimpleList);
-router.get('/hospitals', adminController.listHospitals);
-router.get('/hospitals/:hospitalId', adminController.getHospitalDetail);
-router.patch('/hospitals/:hospitalId/verify', adminController.verifyHospital);
-router.patch('/hospitals/:hospitalId/reject', adminController.rejectHospital);
+router.get('/hospitals-list', validateHospitalSimpleListQuery, adminController.getHospitalSimpleList);
+router.get('/hospitals', validateHospitalListQuery, adminController.listHospitals);
+router.get('/hospitals/:hospitalId', validateObjectId('hospitalId'), adminController.getHospitalDetail);
+router.patch('/hospitals/:hospitalId/verify', validateObjectId('hospitalId'), adminController.verifyHospital);
+router.patch('/hospitals/:hospitalId/reject', validateObjectId('hospitalId'), validateRejectionReason, adminController.rejectHospital);
 
 //dashboard api's
 router.post('/create-duty', validateDutyCreation, adminController.createDutyForHospital);
@@ -44,10 +50,10 @@ router.get('/staff-stats', adminController.getStaffStatistics);
 
 //Medical Staff Management endpoints
 router.get('/medical-staff/stats', adminController.getMedicalStaffStats);
-router.get('/medical-staff/:staffId', adminController.getMedicalStaffDetail);
-router.get('/medical-staff', adminController.getMedicalStaffList);
-router.patch('/medical-staff/:staffId/verify', adminController.verifyMedicalStaff);
-router.patch('/medical-staff/:staffId/reject', adminController.rejectMedicalStaff);
+router.get('/medical-staff/:staffId', validateObjectId('staffId'), adminController.getMedicalStaffDetail);
+router.get('/medical-staff', validateMedicalStaffListQuery, adminController.getMedicalStaffList);
+router.patch('/medical-staff/:staffId/verify', validateObjectId('staffId'), adminController.verifyMedicalStaff);
+router.patch('/medical-staff/:staffId/reject', validateObjectId('staffId'), validateRejectionReason, adminController.rejectMedicalStaff);
 
 router.get('/nearby-staff', validateNearbyStaffQuery, adminController.getNearbyAvailableStaff);
 
@@ -65,8 +71,8 @@ router.post('/flush-sessions', adminController.flushUserSessions);
 
 // Document verification routes
 router.get('/documents/stats', adminController.getDocumentStats);
-router.get('/documents', adminController.getAllDocuments);
-router.put('/documents/:documentId/verify', adminController.verifyDocument);
-router.put('/documents/:documentId/reject', adminController.rejectDocument);
+router.get('/documents', validateDocumentsListQuery, adminController.getAllDocuments);
+router.put('/documents/:documentId/verify', validateObjectId('documentId'), adminController.verifyDocument);
+router.put('/documents/:documentId/reject', validateObjectId('documentId'), validateRejectionReason, adminController.rejectDocument);
 
 module.exports = router;

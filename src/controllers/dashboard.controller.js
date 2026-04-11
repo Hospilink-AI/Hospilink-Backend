@@ -1,7 +1,6 @@
 const DashboardService = require('../services/dashboard.service');
 const { asyncHandler } = require('../middleware/error.middleware');
 
-
 // Staff overview endpoint
 exports.getStaffOverview = asyncHandler(async (req, res) => {
     const userId = req.user.id;
@@ -79,3 +78,56 @@ exports.getAvailabilityStatus = asyncHandler(async (req, res) => {
         data: availability
     });
 });
+
+
+
+
+
+// Check location permission when accessing dashboard
+exports.checkDashboardLocationPermission = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const { latitude, longitude, permissionGranted } = req.body;
+
+    const result = await DashboardService.checkDashboardLocationPermission(
+        userId,
+        { latitude, longitude },
+        permissionGranted
+    );
+
+    res.status(200).json({
+        success: true,
+        ...result,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Update current location on subsequent dashboard visits
+exports.updateCurrentLocation = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const { latitude, longitude } = req.body;
+
+    const result = await DashboardService.updateCurrentLocation(
+        userId,
+        { latitude, longitude }
+    );
+
+    res.status(200).json({
+        success: true,
+        ...result,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Get current location status
+exports.getLocationStatus = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+
+    const status = await DashboardService.getCachedLocationPermission(userId);
+
+    res.status(200).json({
+        success: true,
+        ...status,
+        timestamp: new Date().toISOString()
+    });
+});
+

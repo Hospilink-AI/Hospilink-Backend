@@ -31,34 +31,21 @@ class ProfileService {
 
             let coordinates = null;
 
-            // Check if coordinates were pre-captured from initial permission
-            if (profileData.preCapturedLocation) {
-                // Location was captured when user first visited
+            // Always geocode from address - no location permission during profile creation
+            const address = `${profileData.area}, ${profileData.city}`;
+            try {
+                const geocoded = await geocodingService.geocodeAddress(address);
                 coordinates = {
                     type: 'Point',
                     coordinates: {
-                        latitude: profileData.preCapturedLocation.latitude,
-                        longitude: profileData.preCapturedLocation.longitude
+                        latitude: geocoded.latitude,
+                        longitude: geocoded.longitude
                     }
                 };
-                console.log('Using pre-captured location from initial permission:', coordinates);
-            } else {
-                // Permission was denied initially, geocode from address now
-                const address = `${profileData.area}, ${profileData.city}`;
-                try {
-                    const geocoded = await geocodingService.geocodeAddress(address);
-                    coordinates = {
-                        type: 'Point',
-                        coordinates: {
-                            latitude: geocoded.latitude,
-                            longitude: geocoded.longitude
-                        }
-                    };
-                    console.log('Geocoded from address after permission denial:', coordinates);
-                } catch (error) {
-                    console.error('Geocoding failed for staff profile:', error.message);
-                    throw new Error('Failed to geocode location. Please provide valid city and area.');
-                }
+                console.log('Geocoded from address for staff profile:', coordinates);
+            } catch (error) {
+                console.error('Geocoding failed for staff profile:', error.message);
+                throw new Error('Failed to geocode location. Please provide valid city and area.');
             }
 
             // Validate coordinates
@@ -94,7 +81,7 @@ class ProfileService {
             return {
                 success: true,
                 profile: medicalStaffProfile,
-                locationSource: profileData.preCapturedLocation ? 'browser_permission' : 'address_geocoded',
+                locationSource: 'address_geocoded',
                 message: 'Medical staff profile created successfully'
             };
         } catch (error) {
@@ -811,80 +798,6 @@ class ProfileService {
         }
     }
 
-
-    // Handle initial location permission check
-    async handleInitialLocationPermission(userId, locationData, permissionGranted) {
-        try {
-            // Check cache first
-            const cacheKey = `location:permission:${userId}`;
-            const cachedResult = await cacheService.get(cacheKey);
-
-            if (cachedResult) {
-                return {
-                    ...cachedResult,
-                    fromCache: true,
-                    cachedAt: new Date().toISOString()
-                };
-            }
-
-            // Parallel database queries for better performance
-            const [user, existingProfile] = await Promise.all([
-                User.findById(userId).select('role _id').lean(),
-                MedicalStaff.findOne({ user: userId }).select('coordinates _id').lean()
-            ]);
-
-            if (!user || user.role !== 'staff') {
-                throw new Error('Only staff members can check location permission');
-            }
-
-            if (existingProfile) {
-                const result = {
-                    success: true,
-                    message: 'Profile already exists',
-                    hasProfile: true,
-                    location: existingProfile.coordinates
-                };
-
-                // Cache result for 1 hour
-                await cacheService.set(cacheKey, result, 3600);
-                return result;
-            }
-
-            let locationInfo = null;
-
-            if (permissionGranted && locationData.latitude && locationData.longitude) {
-                // Permission granted - validate and store temporary location
-                geocodingService.validateCoordinates(locationData.latitude, locationData.longitude);
-
-                locationInfo = {
-                    latitude: locationData.latitude,
-                    longitude: locationData.longitude,
-                    source: 'browser_permission',
-                    message: 'Location permission granted - coordinates captured'
-                };
-            } else {
-                // Permission denied - will geocode from address later
-                locationInfo = {
-                    source: 'permission_denied',
-                    message: 'Location permission denied - will use address geocoding'
-                };
-            }
-
-            const result = {
-                success: true,
-                hasProfile: false,
-                locationInfo: locationInfo,
-                nextStep: permissionGranted ? 'fill_profile_form' : 'fill_profile_form_with_address'
-            };
-
-            // Cache result for 30 minutes 
-            await cacheService.set(cacheKey, result, 1800);
-
-            return result;
-        } catch (error) {
-            throw new Error(error.message);
-        }
-    }
 
 
     // Get nearby available staff for hospital map dashboard

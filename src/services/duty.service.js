@@ -17,6 +17,7 @@ const {
     generateEarningsPDF,
     generateDutyReceiptPDF
 } = require('../utils/pdf.puppeteer');
+const DashboardService = require('./dashboard.service');
 
 class DutyService {
     async createDuty(dutyData, userId) {
@@ -261,7 +262,7 @@ class DutyService {
 
 
 
-    async getUpcomingDutiesForStaff(userId, locationPermission = 'denied', currentLocation = null) {
+    async getUpcomingDutiesForStaff(userId) {
         // Find the medical staff profile for this user
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {
@@ -315,29 +316,19 @@ class DutyService {
             return false;
         });
 
-        // Add distance calculation if location is available
+        // Get staff location using dashboard service
         let staffLat, staffLng;
         let locationSource = 'profile';
 
-        // Use browser location if permission granted and location provided
-        if (locationPermission === 'granted' && currentLocation && currentLocation.latitude && currentLocation.longitude) {
-            staffLat = currentLocation.latitude;
-            staffLng = currentLocation.longitude;
-            locationSource = 'browser';
-        } else {
-            // Fallback to staff profile location
-            if (medicalStaff && medicalStaff.coordinates) {
-                if (medicalStaff.coordinates.coordinates) {
-                    staffLat = medicalStaff.coordinates.coordinates.latitude;
-                    staffLng = medicalStaff.coordinates.coordinates.longitude;
-                } else {
-                    staffLat = medicalStaff.coordinates.latitude;
-                    staffLng = medicalStaff.coordinates.longitude;
-                }
-            } else {
-                // Return duties without distance if no location available
-                return upcomingDuties;
-            }
+        try {
+            const locationInfo = await DashboardService.getStaffLocationForDuties(userId);
+            staffLat = locationInfo.location.latitude;
+            staffLng = locationInfo.location.longitude;
+            locationSource = locationInfo.source;
+        } catch (error) {
+            console.error('Failed to get staff location for upcoming duties:', error.message);
+            // Return duties without distance if no location available
+            return upcomingDuties;
         }
 
         console.log(`Using ${locationSource} location for upcoming duties - staff ${userId}:`, { lat: staffLat, lng: staffLng });
@@ -1023,45 +1014,31 @@ class DutyService {
 
 
     // Get available jobs with distance calculation for staff member
-    async getAvailableJobsWithDistance(staffId, filters = {}, locationPermission = 'denied', currentLocation = null) {
+    async getAvailableJobsWithDistance(staffId, filters = {}) {
         try {
-            // Always get staff information for role and fallback location
+            // Get staff location using new dashboard service
+            const locationInfo = await DashboardService.getStaffLocationForDuties(staffId);
+            
+            const staffLat = locationInfo.location.latitude;
+            const staffLng = locationInfo.location.longitude;
+            const locationSource = locationInfo.source;
+            
+            console.log(`Using ${locationSource} location for staff ${staffId}:`, { 
+                lat: staffLat, 
+                lng: staffLng,
+                permissionGranted: locationInfo.permissionGranted 
+            });
+
+            // Get staff information for role filtering
             const staff = await MedicalStaff.findOne({ user: staffId });
             if (!staff) {
                 throw new Error('Staff profile not found');
             }
 
-            let staffLat, staffLng;
-            let locationSource = 'profile';
-
-            // Use browser location if permission granted and location provided
-            if (locationPermission === 'granted' && currentLocation && currentLocation.latitude && currentLocation.longitude) {
-                staffLat = currentLocation.latitude;
-                staffLng = currentLocation.longitude;
-                locationSource = 'browser';
-            } else {
-                // Fallback to staff profile location
-                if (!staff.coordinates) {
-                    throw new Error('Staff location not found. Please update your location.');
-                }
-
-                // Handle both old and new coordinate structures
-                if (staff.coordinates.coordinates) {
-                    // New structure
-                    staffLat = staff.coordinates.coordinates.latitude;
-                    staffLng = staff.coordinates.coordinates.longitude;
-                } else {
-                    // Old structure (backward compatibility)
-                    staffLat = staff.coordinates.latitude;
-                    staffLng = staff.coordinates.longitude;
-                }
-            }
-
-            console.log(`Using ${locationSource} location for staff ${staffId}:`, { lat: staffLat, lng: staffLng });
-
             console.log(`Processing available duties for staff ${staffId}:`, {
                 staffLocation: { lat: staffLat, lng: staffLng },
-                staffRole: staff.jobRole
+                staffRole: staff.jobRole,
+                locationSource: locationSource
             });
 
             // Build query for available duties

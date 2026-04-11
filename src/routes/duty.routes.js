@@ -2,7 +2,18 @@ const express = require('express');
 const router = express.Router();
 const dutyController = require('../controllers/duty.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
-const { validateDutyStatusHistory, validateLocationPermission, validateDutyCreation } = require('../middleware/validation.middleware');
+const { 
+    validateDutyStatusHistory, 
+    validateLocationPermission, 
+    validateDutyCreation,
+    validateDutyAcceptance,
+    validateDutyStatusChange,
+    validateDutyCancellation,
+    validateDutyEdit,
+    validatePagination,
+    validateObjectId,
+    validateStatementQuery
+} = require('../middleware/validation.middleware');
 
 // Apply protection to all duty routes
 router.use(protect);
@@ -14,24 +25,25 @@ router.post(
     dutyController.createDuty
 );
 
-router.get('/duties-published', authorize('hospital'), dutyController.getDuties);
+router.get('/duties-published', authorize('hospital'), validatePagination, dutyController.getDuties);
 
+router.get('/duties/available', authorize('staff'), dutyController.getAvailableJobsWithDistance);
 
-router.get('/duties/available', authorize('staff'), validateLocationPermission, dutyController.getAvailableJobsWithDistance);
+router.get('/duties/my-upcoming', authorize('staff'), dutyController.getMyUpcomingDuties);
 
-router.get('/duties/my-upcoming', authorize('staff'), validateLocationPermission, dutyController.getMyUpcomingDuties);
-
-router.get('/duties/ongoing', authorize('staff'), dutyController.getOngoingDuties);
+router.get('/duties/ongoing', authorize('staff'), validatePagination, dutyController.getOngoingDuties);
 
 router.post(
     '/staff/accept-duty',
     authorize('staff'),
+    validateDutyAcceptance,
     dutyController.acceptDuty
 );
 
 router.patch(
     '/duties/status',
     authorize('staff'),
+    validateDutyStatusChange,
     dutyController.changeDutyStatus
 );
 
@@ -41,13 +53,12 @@ router.post(
     dutyController.getDutyStatusHistory
 );
 
-
-router.get('/completed-duties', authorize('staff'), dutyController.getCompletedDuties);
-
+router.get('/completed-duties', authorize('staff'), validatePagination, dutyController.getCompletedDuties);
 
 router.patch(
     '/duties/:id',
     authorize('hospital'),
+    validateDutyEdit,
     dutyController.editDuty
 );
 
@@ -55,15 +66,14 @@ router.patch(
 router.get(
     '/duties/statement',
     authorize('staff'),
+    validateStatementQuery,
     dutyController.getStatement
 );
 
-router.get('/duties/:id', dutyController.getDutyDetail);
+router.get('/duties/:id', validateObjectId('id'), dutyController.getDutyDetail);
 
+router.post('/duties/:id/route', authorize('staff'), dutyController.getDutyRoute);
 
-router.post('/duties/:id/route', authorize('staff'), validateLocationPermission, dutyController.getDutyRoute);
-
-
-router.patch('/duties/:id/cancel', authorize('hospital'), dutyController.cancelDuty);
+router.patch('/duties/:id/cancel', authorize('hospital'), validateDutyCancellation, dutyController.cancelDuty);
 
 module.exports = router;

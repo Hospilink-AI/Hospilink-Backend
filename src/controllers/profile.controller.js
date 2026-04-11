@@ -146,66 +146,21 @@ class ProfileController {
     });
 
 
-    // Check and capture location permission on first visit
-    checkLocationPermission = asyncHandler(async (req, res) => {
-        const userId = req.user.id;
-        const { latitude, longitude, permissionGranted } = req.body;
-
-        // Add request logging for monitoring
-        const startTime = Date.now();
-
-        try {
-            const result = await ProfileService.handleInitialLocationPermission(
-                userId,
-                { latitude, longitude },
-                permissionGranted
-            );
-
-            const responseTime = Date.now() - startTime;
-
-            // Log performance metrics
-            console.log(`Location permission check for user ${userId}: ${responseTime}ms, cache: ${result.fromCache || false}`);
-
-            res.status(200).json({
-                success: true,
-                ...result,
-                responseTime: responseTime
-            });
-        } catch (error) {
-            const responseTime = Date.now() - startTime;
-            console.error(`Location permission check failed for user ${userId}: ${responseTime}ms, error: ${error.message}`);
-
-            res.status(400).json({
-                success: false,
-                message: error.message,
-                responseTime: responseTime
-            });
-        }
-    });
-
-
-
     // Get nearby available staff for hospital map dashboard
     getNearbyStaff = asyncHandler(async (req, res) => {
         const hospitalUserId = req.user.id;
         const { radius = 5 } = req.query; // Default 5km radius
 
-        // Validate radius parameter
-        const radiusNum = parseFloat(radius);
-        if (isNaN(radiusNum) || radiusNum < 1 || radiusNum > 100) {
-            return res.status(400).json({
-                success: false,
-                message: 'Radius must be a number between 1 and 100 (kilometers)'
-            });
-        }
-
-        const result = await ProfileService.getNearbyAvailableStaff(hospitalUserId, radiusNum);
+        const result = await ProfileService.getNearbyAvailableStaff(hospitalUserId, parseFloat(radius));
 
         res.status(200).json({
             success: true,
             ...result
         });
     });
+
+
+
     // Upload profile picture
     uploadProfilePicture = asyncHandler(async (req, res) => {
         // Validate file exists
@@ -221,6 +176,7 @@ class ProfileController {
 
         res.status(200).json(result);
     });
+
 
     // Delete profile picture
     deleteProfilePicture = asyncHandler(async (req, res) => {
