@@ -6,7 +6,7 @@ const Review = require('../models/Review');
 const Document = require('../models/Document');
 const User = require('../models/User');
 const { generatePreSignedURL } = require('./s3.service');
-const { calculateDutyDuration} = require('../utils/helpers');
+const { calculateDutyDuration, formatDuration } = require('../utils/helpers');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
 const geocodingService = require('./geocoding.service');
 const locationTrackingService = require('./locationTracking.service');
@@ -87,18 +87,18 @@ class AdminService {
 
 
     // Helper function to format duration using existing calculateDutyDuration
-    formatDuration(startTime, endTime, date, isOvernightDuty, endDate) {
-        const durationHours = calculateDutyDuration(date, startTime, endTime, isOvernightDuty, endDate);
-        const totalMinutes = Math.floor(durationHours * 60);
+    // formatDuration(startTime, endTime, date, isOvernightDuty, endDate) {
+    //     const durationHours = calculateDutyDuration(date, startTime, endTime, isOvernightDuty, endDate);
+    //     const totalMinutes = Math.floor(durationHours * 60);
 
-        if (totalMinutes < 60) {
-            return `${totalMinutes} min`;
-        } else {
-            const hours = Math.floor(totalMinutes / 60);
-            const minutes = totalMinutes % 60;
-            return `${hours}h ${minutes}m`;
-        }
-    }
+    //     if (totalMinutes < 60) {
+    //         return `${totalMinutes} min`;
+    //     } else {
+    //         const hours = Math.floor(totalMinutes / 60);
+    //         const minutes = totalMinutes % 60;
+    //         return `${hours}h ${minutes}m`;
+    //     }
+    // }
 
 
 
@@ -1798,7 +1798,7 @@ class AdminService {
                 const hospital = duty.hospital;
                 
                 // Calculate hours completed
-                const duration = this.formatDuration(
+                const duration = formatDuration(
                     duty.startTime,
                     duty.endTime,
                     duty.date,

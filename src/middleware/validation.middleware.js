@@ -3,10 +3,10 @@ const { body, validationResult } = require('express-validator');
 const { ValidationError } = require('./error.middleware');
 const { getCurrentIST, toIST } = require('../utils/helpers');
 
+
 const validateSignup = (req, res, next) => {
     const { name, email, role, password } = req.body;
     const errors = [];
-
 
     // Check for unexpected fields
     const allowedFields = ['name', 'email', 'role', 'password'];
@@ -16,7 +16,6 @@ const validateSignup = (req, res, next) => {
     if (unexpectedFields.length > 0) {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
     }
-
 
     // Name validation
     if (!name || name.trim().length === 0) {
@@ -30,7 +29,6 @@ const validateSignup = (req, res, next) => {
         errors.push('Valid email is required');
     }
 
-
     // Password validation
     if (!password) {
         errors.push('Password is required');
@@ -40,7 +38,6 @@ const validateSignup = (req, res, next) => {
         errors.push('Password must contain at least one uppercase letter, one lowercase letter, and one number');
     }
 
-
     // Role validation
     const validRoles = ['admin', 'hospital', 'candidate', 'staff'];
     if (!role || !validRoles.includes(role)) {
@@ -48,7 +45,11 @@ const validateSignup = (req, res, next) => {
     }
 
     if (errors.length > 0) {
-        throw new ValidationError(errors.join(', '));
+        return res.status(400).json({  
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
     }
 
     next();
@@ -140,6 +141,71 @@ const validateSignin = (req, res, next) => {
 
     next();
 };
+
+
+
+const validateForgotPassword = (req, res, next) => {
+    const { email } = req.body;
+    const errors = [];
+
+    // Check for unexpected fields
+    const allowedFields = ['email'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
+    }
+
+    if (!email || !validator.isEmail(email)) {
+        errors.push('Valid email is required');
+    }
+
+    if (errors.length > 0) {
+        throw new ValidationError(errors.join(', '));
+    }
+
+    next();
+};
+
+
+
+const validateResetPassword = (req, res, next) => {
+    const { token, newPassword } = req.body;
+    const errors = [];
+
+    // Check for unexpected fields
+    const allowedFields = ['token', 'newPassword'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
+    }
+
+    // Token validation
+    if (!token || token.trim().length === 0) {
+        errors.push('Reset token is required');
+    } else if (token.length < 10) {
+        errors.push('Invalid reset token format');
+    }
+
+    // New password validation 
+    if (!newPassword) {
+        errors.push('New password is required');
+    } else if (newPassword.length < 6) {
+        errors.push('Password must be at least 6 characters long');
+    } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(newPassword)) {
+        errors.push('Password must contain at least one uppercase letter, one lowercase letter, and one number');
+    }
+
+    if (errors.length > 0) {
+        throw new ValidationError(errors.join(', '));
+    }
+
+    next();
+};
+
 
 
 const validateMedicalStaffProfile = (req, res, next) => {
@@ -311,76 +377,6 @@ const validateHospitalProfile = (req, res, next) => {
 
 
 
-
-const validateLocationPermission = (req, res, next) => {
-    // Support both GET (query params) and POST (body) requests
-    let locationPermission, currentLocation;
-
-    if (req.method === 'GET') {
-        // For GET requests - read from query parameters
-        locationPermission = req.query.locationPermission || 'denied';
-        currentLocation = req.query.currentLocation ? JSON.parse(req.query.currentLocation) : null;
-    } else {
-        // For POST requests - read from body
-        locationPermission = req.body.locationPermission || 'denied';
-        currentLocation = req.body.currentLocation || null;
-    }
-
-    const errors = [];
-
-    // Check for unexpected fields
-    const allowedFields = ['locationPermission', 'currentLocation'];
-    const receivedFields = req.method === 'GET' ? Object.keys(req.query) : Object.keys(req.body);
-    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
-
-    if (unexpectedFields.length > 0) {
-        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
-    }
-
-    if (!locationPermission || !['granted', 'denied'].includes(locationPermission)) {
-        errors.push('Valid location permission (granted/denied) is required');
-    }
-
-    if (locationPermission === 'granted' && !currentLocation) {
-        errors.push('Current location coordinates are required when permission is granted');
-    }
-
-    if (currentLocation) {
-        if (!currentLocation.latitude || !currentLocation.longitude) {
-            errors.push('Both latitude and longitude are required in currentLocation');
-        }
-
-        if (typeof currentLocation.latitude !== 'number' || typeof currentLocation.longitude !== 'number') {
-            errors.push('Location coordinates must be numbers');
-        }
-
-        // Add coordinate range validation
-        if (Math.abs(currentLocation.latitude) > 90) {
-            errors.push('Latitude must be between -90 and 90');
-        }
-
-        if (Math.abs(currentLocation.longitude) > 180) {
-            errors.push('Longitude must be between -180 and 180');
-        }
-    }
-
-    // Attach parsed data to request for controllers
-    req.locationPermission = locationPermission;
-    req.currentLocation = currentLocation;
-
-    if (errors.length > 0) {
-        return res.status(400).json({
-            success: false,
-            message: 'Validation failed',
-            errors: errors
-        });
-    }
-
-    next();
-};
-
-
-
 const validateDutyStatusHistory = (req, res, next) => {
     const { dutyId } = req.body;
     const errors = [];
@@ -541,34 +537,62 @@ const validateProfileUpdate = (req, res, next) => {
 
 
 // Validation for staff availability toggle
-const validateStaffAvailability = [
-    body('isAvailable')
-        .isBoolean()
-        .withMessage('isAvailable must be a boolean value (true or false)')
-        .custom(value => {
-            if (typeof value !== 'boolean') {
-                throw new Error('isAvailable must be a boolean value');
-            }
-            return true;
-        }),
-    
-    // Custom validation result handler
-    (req, res, next) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({
-                success: false,
-                message: 'Validation failed',
-                errors: errors.array().map(err => ({
-                    field: err.path,
-                    message: err.msg
-                }))
-            });
-        }
-        next();
-    }
-];
+const validateStaffAvailability = (req, res, next) => {
+    const { isAvailable } = req.body;
+    const errors = [];
 
+    // Check for unexpected fields
+    const allowedFields = ['isAvailable'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
+    }
+
+    // isAvailable validation
+    if (typeof isAvailable !== 'boolean') {
+        errors.push('isAvailable must be a boolean value (true or false)');
+    }
+
+    if (errors.length > 0) {
+        throw new ValidationError(errors.join(', '));
+    }
+
+    next();
+};
+
+
+
+
+// Validation for nearby staff search
+const validateNearbyStaff = (req, res, next) => {
+    const { radius } = req.query;
+    const errors = [];
+
+    // Check for unexpected fields
+    const allowedFields = ['radius'];
+    const receivedFields = Object.keys(req.query);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
+    }
+
+    // Radius validation (optional)
+    if (radius !== undefined) {
+        const radiusNum = parseFloat(radius);
+        if (isNaN(radiusNum) || radiusNum < 1 || radiusNum > 100) {
+            errors.push('Radius must be a number between 1 and 100 kilometers');
+        }
+    }
+
+    if (errors.length > 0) {
+        throw new ValidationError(errors.join(', '));
+    }
+
+    next();
+};
 
 
 // Validation for duty creation to prevent past/invalid times
@@ -609,23 +633,740 @@ const validateDutyCreation = (req, res, next) => {
             success: false,
             message: 'Validation failed',
             errors: errors
+               });
+    }
+    
+    next();
+};
+
+
+
+// Validation for duty acceptance
+const validateDutyAcceptance = (req, res, next) => {
+    const { duty_id } = req.body;
+    const errors = [];
+    
+    // Check for unexpected fields
+    const allowedFields = ['duty_id'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed: duty_id`);
+    }
+    
+    if (!duty_id) {
+        errors.push('duty_id is required');
+    } else if (!/^[0-9a-fA-F]{24}$/.test(duty_id)) {
+        errors.push('Invalid duty_id format');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
         });
     }
     
     next();
 };
 
+
+
+// Validation for duty status change
+const validateDutyStatusChange = (req, res, next) => {
+    const { status, duty_id } = req.body;
+    const errors = [];
+    
+    // Check for unexpected fields
+    const allowedFields = ['status', 'duty_id'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+    
+    const allowedStatuses = ['enroute', 'in-progress', 'completed'];
+    if (!status || !allowedStatuses.includes(status)) {
+        errors.push(`Invalid status. Allowed: ${allowedStatuses.join(', ')}`);
+    }
+    
+    if (!duty_id || !/^[0-9a-fA-F]{24}$/.test(duty_id)) {
+        errors.push('Valid duty_id is required');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for duty cancellation
+const validateDutyCancellation = (req, res, next) => {
+    const { reason, reasonText } = req.body;
+    const errors = [];
+    
+    // Check for unexpected fields
+    const allowedFields = ['reason', 'reasonText'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+    
+    const validReasons = ['staff_unavailable', 'emergency', 'hospital_request', 'mutual_agreement', 'other'];
+    if (!reason || !validReasons.includes(reason)) {
+        errors.push(`Valid reason is required. Allowed: ${validReasons.join(', ')}`);
+    }
+    
+    if (reason === 'other' && (!reasonText || reasonText.trim().length === 0)) {
+        errors.push('reasonText is required when reason is "other"');
+    }
+    
+    if (reasonText && reasonText.length > 500) {
+        errors.push('reasonText cannot exceed 500 characters');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for duty edit
+const validateDutyEdit = (req, res, next) => {
+    const errors = [];
+    const allowedFields = [
+        'staff_role', 'date', 'end_date', 'start_time', 'end_time',
+        'urgency', 'description', 'offered_rate', 'is_overnight_duty'
+    ];
+    
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Allowed: ${allowedFields.join(', ')}`);
+    }
+    
+    // Validate urgency if provided
+    if (req.body.urgency && !['low', 'medium', 'high', 'critical'].includes(req.body.urgency)) {
+        errors.push('Invalid urgency level');
+    }
+    
+    // Validate offered_rate if provided
+    if (req.body.offered_rate !== undefined) {
+        const rate = parseFloat(req.body.offered_rate);
+        if (isNaN(rate) || rate < 0 || rate > 50000) {
+            errors.push('offered_rate must be a positive number less than 50000');
+        }
+    }
+    
+    // Validate time format if provided
+    if (req.body.start_time && !/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(req.body.start_time)) {
+        errors.push('start_time must be in HH:MM format');
+    }
+    
+    if (req.body.end_time && !/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(req.body.end_time)) {
+        errors.push('end_time must be in HH:MM format');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for pagination parameters
+const validatePagination = (req, res, next) => {
+    const errors = [];
+    const { page, limit } = req.query;
+    
+    if (page !== undefined) {
+        const pageNum = parseInt(page);
+        if (isNaN(pageNum) || pageNum < 1 || pageNum > 1000) {
+            errors.push('Page must be a number between 1 and 1000');
+        }
+    }
+    
+    if (limit !== undefined) {
+        const limitNum = parseInt(limit);
+        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+            errors.push('Limit must be a number between 1 and 100');
+        }
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for review submission
+const validateReviewSubmission = (req, res, next) => {
+    const { rating, comment, staffId } = req.body;
+    const errors = [];
+    
+    // Check for unexpected fields
+    const allowedFields = ['rating', 'comment', 'staffId'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+    
+    // Rating validation
+    if (rating === undefined || typeof rating !== 'number' || rating < 1 || rating > 5) {
+        errors.push('Rating must be a number between 1 and 5');
+    }
+    
+    // Comment validation
+    if (comment && (typeof comment !== 'string' || comment.length > 1000)) {
+        errors.push('Comment must be a string with maximum 1000 characters');
+    }
+    
+    // Staff ID validation
+    if (!staffId || !/^[0-9a-fA-F]{24}$/.test(staffId)) {
+        errors.push('Valid staffId is required');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for staff ID parameter
+const validateStaffIdParam = (req, res, next) => {
+    const { staffId } = req.params;
+    const errors = [];
+    
+    if (!staffId || !/^[0-9a-fA-F]{24}$/.test(staffId)) {
+        errors.push('Valid staffId parameter is required');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for notification ID
+const validateNotificationId = (req, res, next) => {
+    const { id } = req.params;
+    const errors = [];
+    
+    if (!id || !/^[0-9a-fA-F]{24}$/.test(id)) {
+        errors.push('Valid notification ID is required');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for bulk notification read
+const validateBulkNotificationRead = (req, res, next) => {
+    const { notificationIds } = req.body;
+    const errors = [];
+    
+    // Check for unexpected fields
+    const allowedFields = ['notificationIds'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+    
+    if (!notificationIds || !Array.isArray(notificationIds) || notificationIds.length === 0) {
+        errors.push('notificationIds must be a non-empty array');
+    } else {
+        notificationIds.forEach((id, index) => {
+            if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+                errors.push(`Invalid notificationId at index ${index}`);
+            }
+        });
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for MongoDB ObjectId in params
+const validateObjectId = (paramName = 'id') => (req, res, next) => {
+    const id = req.params[paramName] || req.params.id;
+    const errors = [];
+    
+    if (!id || !/^[0-9a-fA-F]{24}$/.test(id)) {
+        errors.push(`Valid ${paramName} is required`);
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for statement query parameters
+const validateStatementQuery = (req, res, next) => {
+    const errors = [];
+    const { dutyId, startDate, endDate } = req.query;
+    
+    // Check for unexpected fields
+    const allowedFields = ['dutyId', 'startDate', 'endDate', 'page', 'limit'];
+    const receivedFields = Object.keys(req.query);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+    
+    // Validate dutyId if provided
+    if (dutyId && !/^[0-9a-fA-F]{24}$/.test(dutyId)) {
+        errors.push('Invalid dutyId format');
+    }
+    
+    // Validate date format if provided
+    if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+        errors.push('startDate must be in YYYY-MM-DD format');
+    }
+    
+    if (endDate && !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+        errors.push('endDate must be in YYYY-MM-DD format');
+    }
+    
+    // Validate date range
+    if (startDate && endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        if (start > end) {
+            errors.push('startDate cannot be greater than endDate');
+        }
+    }
+    
+    // Validate pagination
+    const { page, limit } = req.query;
+    if (page !== undefined) {
+        const pageNum = parseInt(page);
+        if (isNaN(pageNum) || pageNum < 1 || pageNum > 1000) {
+            errors.push('Page must be a number between 1 and 1000');
+        }
+    }
+    
+    if (limit !== undefined) {
+        const limitNum = parseInt(limit);
+        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+            errors.push('Limit must be a number between 1 and 100');
+        }
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for notification list query parameters
+const validateNotificationQuery = (req, res, next) => {
+    const errors = [];
+    const { page, limit, status, type } = req.query;
+    
+    // Check for unexpected fields
+    const allowedFields = ['page', 'limit', 'status', 'type'];
+    const receivedFields = Object.keys(req.query);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+    
+    // Validate pagination
+    if (page !== undefined) {
+        const pageNum = parseInt(page);
+        if (isNaN(pageNum) || pageNum < 1 || pageNum > 1000) {
+            errors.push('Page must be a number between 1 and 1000');
+        }
+    }
+    
+    if (limit !== undefined) {
+        const limitNum = parseInt(limit);
+        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+            errors.push('Limit must be a number between 1 and 100');
+        }
+    }
+    
+    // Validate status filter
+    if (status && !['read', 'unread', 'all'].includes(status)) {
+        errors.push('Status must be one of: read, unread, all');
+    }
+    
+    // Validate type filter
+    if (type && !['duty', 'system', 'review', 'payment', 'all'].includes(type)) {
+        errors.push('Type must be one of: duty, system, review, payment, all');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Simple validation for unread count 
+const validateUnreadCountQuery = (req, res, next) => {
+    const errors = [];
+    const { type } = req.query;
+    
+    // Check for unexpected fields
+    const allowedFields = ['type'];
+    const receivedFields = Object.keys(req.query);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+    
+    // Validate type filter
+    if (type && !['duty', 'system', 'review', 'payment', 'all'].includes(type)) {
+        errors.push('Type must be one of: duty, system, review, payment, all');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+
+// Validation for document list query parameters
+const validateDocumentQuery = (req, res, next) => {
+    const errors = [];
+    const { page, limit, status, type, verified } = req.query;
+    
+    // Check for unexpected fields
+    const allowedFields = ['page', 'limit', 'status', 'type', 'verified'];
+    const receivedFields = Object.keys(req.query);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+    
+    // Validate pagination
+    if (page !== undefined) {
+        const pageNum = parseInt(page);
+        if (isNaN(pageNum) || pageNum < 1 || pageNum > 1000) {
+            errors.push('Page must be a number between 1 and 1000');
+        }
+    }
+    
+    if (limit !== undefined) {
+        const limitNum = parseInt(limit);
+        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+            errors.push('Limit must be a number between 1 and 100');
+        }
+    }
+    
+    // Validate status filter
+    if (status && !['pending', 'verified', 'rejected', 'all'].includes(status)) {
+        errors.push('Status must be one of: pending, verified, rejected, all');
+    }
+    
+    // Validate type filter
+    if (type) {
+        const validTypes = [
+            "aadhaar-card", "pan-card", "degree-certificate", "mcim-certificate",
+            "ncim-certificate", "license-permit", "resume-experience", "recommendation-letter",
+            "cin-certificate", "gst-certificate", "nabh-certificate", "rohini-certificate",
+            "cghs-certificate", "live-picture", "registration-certificate", "Other"
+        ];
+        if (!validTypes.includes(type)) {
+            errors.push(`Invalid document type. Valid types: ${validTypes.join(', ')}`);
+        }
+    }
+    
+    // Validate verified filter
+    if (verified && !['true', 'false', 'all'].includes(verified)) {
+        errors.push('Verified must be one of: true, false, all');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for required status query parameters
+const validateRequiredStatusQuery = (req, res, next) => {
+    const errors = [];
+    const { userRole } = req.query;
+    
+    // Check for unexpected fields
+    const allowedFields = ['userRole'];
+    const receivedFields = Object.keys(req.query);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+    
+    // Validate userRole filter
+    if (userRole && !['staff', 'hospital', 'all'].includes(userRole)) {
+        errors.push('User role must be one of: staff, hospital, all');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validation for document ID parameter
+const validateDocumentIdParam = (req, res, next) => {
+    const { documentId } = req.params;
+    const errors = [];
+    
+    if (!documentId || !/^[0-9a-fA-F]{24}$/.test(documentId)) {
+        errors.push('Valid documentId parameter is required');
+    }
+    
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+    
+    next();
+};
+
+
+
+
+// Validation for dashboard location permission
+const validateDashboardLocationPermission = (req, res, next) => {
+    const { permissionGranted, latitude, longitude } = req.body;
+    const errors = [];
+
+    // Check for unexpected fields
+    const allowedFields = ['permissionGranted', 'latitude', 'longitude'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
+    }
+
+    // Permission granted validation
+    if (permissionGranted === undefined || typeof permissionGranted !== 'boolean') {
+        errors.push('permissionGranted must be a boolean (true or false)');
+    }
+
+    // If permission granted, validate coordinates
+    if (permissionGranted === true) {
+        if (!latitude || typeof latitude !== 'number') {
+            errors.push('Latitude is required and must be a number when permission is granted');
+        } else if (latitude < -90 || latitude > 90) {
+            errors.push('Latitude must be between -90 and 90');
+        }
+
+        if (!longitude || typeof longitude !== 'number') {
+            errors.push('Longitude is required and must be a number when permission is granted');
+        } else if (longitude < -180 || longitude > 180) {
+            errors.push('Longitude must be between -180 and 180');
+        }
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for dashboard location update
+const validateDashboardLocationUpdate = (req, res, next) => {
+    const { latitude, longitude } = req.body;
+    const errors = [];
+
+    // Check for unexpected fields
+    const allowedFields = ['latitude', 'longitude'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
+    }
+
+    // Latitude validation
+    if (!latitude || typeof latitude !== 'number') {
+        errors.push('Latitude is required and must be a number');
+    } else if (latitude < -90 || latitude > 90) {
+        errors.push('Latitude must be between -90 and 90');
+    }
+
+    // Longitude validation
+    if (!longitude || typeof longitude !== 'number') {
+        errors.push('Longitude is required and must be a number');
+    } else if (longitude < -180 || longitude > 180) {
+        errors.push('Longitude must be between -180 and 180');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
 module.exports = {
     validateSignup,
     validateOTP,
     validateResendOTP,
     validateSignin,
+    validateForgotPassword,
+    validateResetPassword,
     validateMedicalStaffProfile,
     validateHospitalProfile,
-    validateLocationPermission,
     validateDutyStatusHistory,
     validateDocumentUpload,
     validateProfileUpdate,
     validateStaffAvailability,
-    validateDutyCreation  
+    validateDutyCreation,
+    validateNearbyStaff,
+    validateDutyAcceptance,
+    validateDutyStatusChange,
+    validateDutyCancellation,
+    validateDutyEdit,
+    validatePagination,
+    validateReviewSubmission,
+    validateStaffIdParam,
+    validateNotificationId,
+    validateBulkNotificationRead,
+    validateObjectId,
+    validateStatementQuery,
+    validateNotificationQuery,
+    validateUnreadCountQuery,
+    validateDocumentQuery,
+    validateRequiredStatusQuery,
+    validateDocumentIdParam,
+    validateDashboardLocationPermission,
+    validateDashboardLocationUpdate
 };

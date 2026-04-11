@@ -8,6 +8,7 @@ const Hospital = require('../models/Hospital');
 const logger = require('../utils/logger');
 const dutyService = require('../services/duty.service');
 const locationTrackingService = require('../services/locationTracking.service');
+const DashboardService = require('../services/dashboard.service');
 
 // Extend logger with debug method
 logger.debug = (message) => {
@@ -160,12 +161,8 @@ exports.getDuties = asyncHandler(async (req, res) => {
 exports.getMyUpcomingDuties = asyncHandler(async (req, res) => {
     const userId = req.user.id;
 
-    // Use location data from validation middleware
-    const locationPermission = req.locationPermission;
-    const currentLocation = req.currentLocation;
-
     // Get duties that this staff member has accepted
-    const duties = await DutyService.getUpcomingDutiesForStaff(userId, locationPermission, currentLocation);
+    const duties = await DutyService.getUpcomingDutiesForStaff(userId);
     res.status(200).json({
         success: true,
         count: duties.length,
@@ -684,15 +681,18 @@ exports.getDutyRoute = asyncHandler(async (req, res) => {
     const staffId = req.user.id;
 
     try {
-        const result = await DutyService.getJobRouteInfo(id, staffId, req.currentLocation);
-        // Check if location permission is granted
-        if (!req.locationPermission || req.locationPermission !== 'granted') {
+        // Get staff location using dashboard service
+        const locationInfo = await DashboardService.getStaffLocationForDuties(staffId);
+        
+        if (!locationInfo.permissionGranted) {
             return res.status(400).json({
                 success: false,
-                message: 'Location permission is required to view directions',
+                message: 'Location permission is required to view directions. Please enable location in your dashboard.',
                 code: 'LOCATION_PERMISSION_REQUIRED'
             });
         }
+
+        const result = await DutyService.getJobRouteInfo(id, staffId, locationInfo.location);
 
         // Initialize tracking session
         await locationTrackingService.storeInitialLocation(
@@ -732,11 +732,7 @@ exports.getAvailableJobsWithDistance = asyncHandler(async (req, res) => {
     const staffId = req.user.id;
     const filters = req.query;
 
-    // Use location data from validation middleware
-    const locationPermission = req.locationPermission;
-    const currentLocation = req.currentLocation;
-
-    const result = await DutyService.getAvailableJobsWithDistance(staffId, filters, locationPermission, currentLocation);
+    const result = await DutyService.getAvailableJobsWithDistance(staffId, filters);
 
     // Additional safety check
     const availableJobs = result.jobs.filter(job => job.status === 'available');

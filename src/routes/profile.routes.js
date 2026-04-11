@@ -2,15 +2,18 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const profileController = require('../controllers/profile.controller');
+const dashboardController = require('../controllers/dashboard.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
 const {
     validateMedicalStaffProfile,
     validateHospitalProfile,
     validateProfileUpdate,
-    validateLocationPermission,
-    validateStaffAvailability
+    validateStaffAvailability,
+    validateNearbyStaff,
+    validateDashboardLocationPermission,
+    validateDashboardLocationUpdate
 } = require('../middleware/validation.middleware');
-const { locationPermissionRateLimit, staffAvailabilityRateLimit } = require('../middleware/rateLimit.middleware');
+const { staffAvailabilityRateLimit } = require('../middleware/rateLimit.middleware');
 const upload = require('../middleware/upload.middleware');
 
 // Apply protection to all profile routes
@@ -30,14 +33,6 @@ router.post('/medical-staff',
     authorize('staff'),
     validateMedicalStaffProfile,
     profileController.createMedicalStaffProfile
-);
-
-// Check location permission on first visit
-router.post('/check-location-permission',
-    locationPermissionRateLimit,
-    validateLocationPermission,
-    authorize('staff'),
-    profileController.checkLocationPermission
 );
 
 
@@ -63,6 +58,7 @@ router.patch('/staff-availability',
 // Get nearby available staff for hospital map dashboard
 router.get('/nearby-staff',
     authorize('hospital'),
+    validateNearbyStaff,
     profileController.getNearbyStaff
 );
 
@@ -72,6 +68,26 @@ router.post(
     protect,
     upload.single('profilePicture'),
     profileController.uploadProfilePicture
+);
+
+
+
+// Dashboard location permission routes
+router.post('/dashboard/location-permission',
+    authorize('staff'),
+    validateDashboardLocationPermission,  
+    dashboardController.checkDashboardLocationPermission
+);
+ 
+router.put('/dashboard/update-location',
+    authorize('staff'),
+    validateDashboardLocationUpdate,      
+    dashboardController.updateCurrentLocation
+);
+
+router.get('/dashboard/location-status',
+    authorize('staff'),
+    dashboardController.getLocationStatus
 );
 
 // Delete profile picture

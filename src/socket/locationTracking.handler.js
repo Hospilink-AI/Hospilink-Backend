@@ -51,16 +51,17 @@ class LocationTrackingHandler {
         const { staffId, dutyId, hospitalId, coordinates } = data;
         const userId = socket.user._id.toString();
 
-        // Validate user is the staff member
-        if (userId !== staffId) {
+        // Get MedicalStaff record to validate ownership
+        const medicalStaff = socket.medicalStaff;
+        if (!medicalStaff || medicalStaff._id.toString() !== staffId) {
             throw new Error('Unauthorized: You can only start tracking for yourself');
         }
 
-        // Store initial location
-        await locationTrackingService.storeInitialLocation(staffId, dutyId, hospitalId, coordinates);
+        // Use User ID for location tracking (consistent with admin.service.js)
+        await locationTrackingService.storeInitialLocation(userId, dutyId, hospitalId, coordinates);
 
-        // Join tracking room
-        const trackingRoom = roomManager.joinTrackingRoom(socket, staffId, dutyId);
+        // Join tracking room with User ID
+        const trackingRoom = roomManager.joinTrackingRoom(socket, userId, dutyId);
         const hospitalTrackingRoom = roomManager.joinHospitalTrackingRoom(socket, hospitalId);
 
         socket.emit('tracking_started', {
@@ -70,7 +71,7 @@ class LocationTrackingHandler {
             updateInterval: 2000
         });
 
-        logger.info(`Tracking started for staff ${staffId}, duty ${dutyId}`);
+        logger.info(`Tracking started for user ${userId}, staff ${staffId}, duty ${dutyId}`);
     }
 
 
@@ -80,12 +81,13 @@ class LocationTrackingHandler {
         const userId = socket.user._id.toString();
 
         // Validate user is the staff member
-        if (userId !== staffId) {
+        const medicalStaff = socket.medicalStaff;
+        if (!medicalStaff || medicalStaff._id.toString() !== staffId) {
             throw new Error('Unauthorized: You can only update your own location');
         }
 
-        // Update location
-        const updatedData = await locationTrackingService.updateStaffLocation(staffId, coordinates, {
+        // Use User ID for location tracking
+        const updatedData = await locationTrackingService.updateStaffLocation(userId, coordinates, {
             accuracy,
             speed
         });
@@ -104,19 +106,20 @@ class LocationTrackingHandler {
         const userId = socket.user._id.toString();
 
         // Validate user is the staff member
-        if (userId !== staffId) {
+        const medicalStaff = socket.medicalStaff;
+        if (!medicalStaff || medicalStaff._id.toString() !== staffId) {
             throw new Error('Unauthorized: You can only end your own tracking');
         }
 
-        // End tracking session
-        const cleanupData = await locationTrackingService.endTrackingSession(staffId, reason);
+        // Use User ID for location tracking
+        const cleanupData = await locationTrackingService.endTrackingSession(userId, reason);
 
         socket.emit('tracking_ended', {
             success: true,
             cleanupData
         });
 
-        logger.info(`Tracking ended for staff ${staffId}, reason: ${reason}`);
+        logger.info(`Tracking ended for user ${userId}, staff ${staffId}, reason: ${reason}`);
     }
 }
 

@@ -487,6 +487,368 @@ const validateDutyHistoryQuery = (req, res, next) => {
 };
 
 
+
+
+// Validate ObjectId parameter
+const validateObjectId = (paramName) => {
+    return (req, res, next) => {
+        const id = req.params[paramName];
+        
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: `${paramName} is required`
+            });
+        }
+        
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid ${paramName} format`
+            });
+        }
+        
+        req.validatedParams = req.validatedParams || {};
+        req.validatedParams[paramName] = id;
+        
+        next();
+    };
+};
+
+
+
+// Validate rejection reason for PATCH endpoints
+const validateRejectionReason = (req, res, next) => {
+    const { reason } = req.body;
+    
+    // Check for unexpected fields
+    const allowedFields = ['reason'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid fields: ${unexpectedFields.join(', ')}. Only allowed: reason`
+        });
+    }
+    
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Rejection reason is required and must be a non-empty string'
+        });
+    }
+    
+    if (reason.length > 500) {
+        return res.status(400).json({
+            success: false,
+            message: 'Rejection reason cannot exceed 500 characters'
+        });
+    }
+    
+    next();
+};
+
+
+
+// Validate hospital simple list query
+const validateHospitalSimpleListQuery = (req, res, next) => {
+    // Check for request body content - GET requests should not have body
+    if (req.body && Object.keys(req.body).length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'GET request should not contain request body. Use query parameters only.'
+        });
+    }
+    
+    // Validate allowed query parameters only
+    const allowedParams = ['name'];
+    const receivedParams = Object.keys(req.query);
+    
+    // Check for unexpected parameters
+    const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
+    if (unexpectedParams.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
+        });
+    }
+    
+    const { name } = req.query;
+    
+    // Validate name parameter (optional)
+    if (name && typeof name !== 'string') {
+        return res.status(400).json({
+            success: false,
+            message: 'Name parameter must be a string'
+        });
+    }
+    
+    req.validatedQuery = {
+        name: name || null
+    };
+    
+    next();
+};
+
+
+
+// Validate hospital list query parameters
+const validateHospitalListQuery = (req, res, next) => {
+    // Check for request body content - GET requests should not have body
+    if (req.body && Object.keys(req.body).length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'GET request should not contain request body. Use query parameters only.'
+        });
+    }
+    
+    // Validate allowed query parameters only
+    const allowedParams = ['search', 'status', 'city', 'page', 'limit'];
+    const receivedParams = Object.keys(req.query);
+    
+    // Check for unexpected parameters
+    const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
+    if (unexpectedParams.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
+        });
+    }
+    
+    const { search, status, city, page = 1, limit = 10 } = req.query;
+    
+    // Validate status parameter
+    const allowedStatuses = ['pending', 'verified', 'rejected'];
+    if (status && !allowedStatuses.includes(status)) {
+        return res.status(400).json({
+            success: false,
+            message: `Status parameter must be one of: ${allowedStatuses.join(', ')}`
+        });
+    }
+    
+    // Validate search parameter
+    if (search && typeof search !== 'string') {
+        return res.status(400).json({
+            success: false,
+            message: 'Search parameter must be a string'
+        });
+    }
+    
+    // Validate city parameter
+    if (city && typeof city !== 'string') {
+        return res.status(400).json({
+            success: false,
+            message: 'City parameter must be a string'
+        });
+    }
+    
+    // Validate page parameter
+    const pageNum = parseInt(page);
+    if (isNaN(pageNum) || pageNum < 1) {
+        return res.status(400).json({
+            success: false,
+            message: 'Page parameter must be a positive integer'
+        });
+    }
+    
+    // Validate limit parameter
+    const limitNum = parseInt(limit);
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+        return res.status(400).json({
+            success: false,
+            message: 'Limit parameter must be a positive integer between 1 and 100'
+        });
+    }
+    
+    req.validatedQuery = {
+        search: search || null,
+        status: status || null,
+        city: city || null,
+        page: pageNum,
+        limit: limitNum
+    };
+    
+    next();
+};
+
+
+
+// Validate medical staff list query parameters
+const validateMedicalStaffListQuery = (req, res, next) => {
+    // Check for request body content - GET requests should not have body
+    if (req.body && Object.keys(req.body).length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'GET request should not contain request body. Use query parameters only.'
+        });
+    }
+    
+    // Validate allowed query parameters only
+    const allowedParams = ['search', 'role', 'availability', 'page', 'limit'];
+    const receivedParams = Object.keys(req.query);
+    
+    // Check for unexpected parameters
+    const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
+    if (unexpectedParams.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
+        });
+    }
+    
+    const { search, role, availability, page = 1, limit = 10 } = req.query;
+    
+    // Validate role parameter
+    const allowedRoles = ['doctor', 'nurse', 'technician', 'pharmacist', 'therapist', 'other'];
+    if (role && !allowedRoles.includes(role)) {
+        return res.status(400).json({
+            success: false,
+            message: `Role parameter must be one of: ${allowedRoles.join(', ')}`
+        });
+    }
+    
+    // Validate availability parameter
+    const allowedAvailability = ['available', 'unavailable', 'on-duty'];
+    if (availability && !allowedAvailability.includes(availability)) {
+        return res.status(400).json({
+            success: false,
+            message: `Availability parameter must be one of: ${allowedAvailability.join(', ')}`
+        });
+    }
+    
+    // Validate search parameter
+    if (search && typeof search !== 'string') {
+        return res.status(400).json({
+            success: false,
+            message: 'Search parameter must be a string'
+        });
+    }
+    
+    // Validate page parameter
+    const pageNum = parseInt(page);
+    if (isNaN(pageNum) || pageNum < 1) {
+        return res.status(400).json({
+            success: false,
+            message: 'Page parameter must be a positive integer'
+        });
+    }
+    
+    // Validate limit parameter
+    const limitNum = parseInt(limit);
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+        return res.status(400).json({
+            success: false,
+            message: 'Limit parameter must be a positive integer between 1 and 100'
+        });
+    }
+    
+    req.validatedQuery = {
+        search: search || null,
+        role: role || null,
+        availability: availability || null,
+        page: pageNum,
+        limit: limitNum
+    };
+    
+    next();
+};
+
+
+
+// Validate documents list query parameters
+const validateDocumentsListQuery = (req, res, next) => {
+    // Check for request body content - GET requests should not have body
+    if (req.body && Object.keys(req.body).length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'GET request should not contain request body. Use query parameters only.'
+        });
+    }
+    
+    // Validate allowed query parameters only
+    const allowedParams = ['status', 'userRole', 'page', 'limit', 'sortBy', 'sortOrder'];
+    const receivedParams = Object.keys(req.query);
+    
+    // Check for unexpected parameters
+    const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
+    if (unexpectedParams.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
+        });
+    }
+    
+    const { status, userRole, page = 1, limit = 10, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+    
+    // Validate status parameter
+    const allowedStatuses = ['pending', 'verified', 'rejected'];
+    if (status && !allowedStatuses.includes(status)) {
+        return res.status(400).json({
+            success: false,
+            message: `Status parameter must be one of: ${allowedStatuses.join(', ')}`
+        });
+    }
+    
+    // Validate userRole parameter
+    const allowedUserRoles = ['staff', 'hospital'];
+    if (userRole && !allowedUserRoles.includes(userRole)) {
+        return res.status(400).json({
+            success: false,
+            message: `User role parameter must be one of: ${allowedUserRoles.join(', ')}`
+        });
+    }
+    
+    // Validate sortBy parameter
+    const allowedSortBy = ['createdAt', 'updatedAt', 'documentType', 'status'];
+    if (!allowedSortBy.includes(sortBy)) {
+        return res.status(400).json({
+            success: false,
+            message: `Sort by parameter must be one of: ${allowedSortBy.join(', ')}`
+        });
+    }
+    
+    // Validate sortOrder parameter
+    const allowedSortOrder = ['asc', 'desc'];
+    if (!allowedSortOrder.includes(sortOrder)) {
+        return res.status(400).json({
+            success: false,
+            message: `Sort order parameter must be one of: ${allowedSortOrder.join(', ')}`
+        });
+    }
+    
+    // Validate page parameter
+    const pageNum = parseInt(page);
+    if (isNaN(pageNum) || pageNum < 1) {
+        return res.status(400).json({
+            success: false,
+            message: 'Page parameter must be a positive integer'
+        });
+    }
+    
+    // Validate limit parameter
+    const limitNum = parseInt(limit);
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+        return res.status(400).json({
+            success: false,
+            message: 'Limit parameter must be a positive integer between 1 and 100'
+        });
+    }
+    
+    req.validatedQuery = {
+        status: status || null,
+        userRole: userRole || null,
+        page: pageNum,
+        limit: limitNum,
+        sortBy,
+        sortOrder
+    };
+    
+    next();
+};
+
+
 module.exports = {
     validateAdminSignin,
     validateAdminOTP,
@@ -496,5 +858,11 @@ module.exports = {
     validateActiveDutiesQuery,
     validateDutyRouteMap,
     validateOvernightDutiesQuery,
-    validateDutyHistoryQuery
+    validateDutyHistoryQuery,
+    validateHospitalSimpleListQuery,
+    validateHospitalListQuery,
+    validateMedicalStaffListQuery,
+    validateDocumentsListQuery,
+    validateObjectId,
+    validateRejectionReason
 };
