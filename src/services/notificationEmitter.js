@@ -369,6 +369,60 @@ class NotificationEmitter {
             console.error('Error sending rate shift notification:', error);
         }
     }
+    //Emit document verified notification
+    async emitDocumentVerified(userId, documentType) {
+        try {
+            const payload = {
+                type: 'DOCUMENT_VERIFIED',
+                message: `Your ${documentType} has been verified by the HospiLink team. You are fully compliant and eligible for duties.`,
+                documentType,
+                timestamp: new Date().toISOString()
+            };
+
+            const { unreadCount } =
+                await notificationService.createNotificationWithCount(
+                    userId,
+                    'DOCUMENT_VERIFIED',
+                    payload
+                );
+
+            websocketManager.sendUnreadCount(userId, unreadCount);
+            websocketManager.emitToUser(userId, 'notification', payload);
+
+            console.log(`Document verified notification sent to user ${userId}`);
+
+        } catch (error) {
+            console.error('Error sending document verified notification:', error);
+        }
+    }
+
+    //Emit document rejected notification
+    async emitDocumentRejected(userId, documentType, reason) {
+        try {
+            const payload = {
+                type: 'DOCUMENT_REJECTED',
+                message: `Your ${documentType} was not accepted. Reason: ${reason}. Please re-upload a clear, valid document.`,
+                documentType,
+                rejectionReason: reason,
+                timestamp: new Date().toISOString()
+            };
+
+            const { unreadCount } =
+                await notificationService.createNotificationWithCount(
+                    userId,
+                    'DOCUMENT_REJECTED',
+                    payload
+                );
+
+            websocketManager.sendUnreadCount(userId, unreadCount);
+            websocketManager.emitToUser(userId, 'notification', payload);
+
+            console.log(`Document rejected notification sent to user ${userId}`);
+
+        } catch (error) {
+            console.error('Error sending document rejected notification:', error);
+        }
+    }
 }
 
 module.exports = new NotificationEmitter();

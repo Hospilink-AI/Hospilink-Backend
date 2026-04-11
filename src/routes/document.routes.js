@@ -20,6 +20,18 @@ router.get("/", protect, controller.getDocuments);
 router.get("/required-status", protect, controller.getRequiredDocuments);
 
 router.get("/:documentId", protect, controller.getDocumentById);
+// Admin routes
+router.put(
+    "/verify/:documentId",
+    protect,
+    controller.verifyDocument
+);
+
+router.put(
+    "/reject/:documentId",
+    protect,
+    controller.rejectDocument
+);
 
 router.delete("/:documentId", protect, controller.deleteDocument);
 
