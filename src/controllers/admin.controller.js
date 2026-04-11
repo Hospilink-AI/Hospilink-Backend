@@ -110,7 +110,11 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
             isAvailable: true
         }).populate('user', '_id');
 
-        const staffUserIds = matchingStaff.map(s => s.user._id.toString());
+        // Filter out staff with null user references and map to user IDs
+        const staffUserIds = matchingStaff
+            .filter(s => s.user && s.user._id)
+            .map(s => s.user._id.toString());
+        
         const hospitalUserId = hospital.user._id.toString();
 
         await notificationEmitter.emitDutyCreated(result.duty, hospital, staffUserIds, hospitalUserId);

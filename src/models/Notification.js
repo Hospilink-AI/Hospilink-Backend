@@ -9,7 +9,9 @@ const notificationSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['DUTY_CREATED', 'DUTY_ACCEPTED', 'DUTY_STATUS_CHANGED', 'DUTY_CANCELLED', 'DUTY_EDITED', 'REVIEW_RECEIVED'],
+        enum: ['DUTY_CREATED', 'NEW_DUTY_OFFER', 'DUTY_CONFIRMED', 'STAFF_ASSIGNED', 'NAVIGATE_TO_DUTY', 'STAFF_EN_ROUTE', 
+            'STAFF_ON_SITE', 'DUTY_STATUS_CHANGED', 'DUTY_CANCELLED_BY_HOSPITAL', 'DUTY_CANCELLED_BY_STAFF', 
+            'DUTY_EDITED', 'DUTY_COMPLETED', 'REVIEW_RECEIVED'],
         required: [true, 'Notification type is required']
     },
     payload: {

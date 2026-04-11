@@ -521,10 +521,12 @@ class DutyService {
                 $gte: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate()),
                 $lt: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() + 1)
             }
-        });
+        }).populate('hospital', 'hospitalLegalName currentAddress location user')
+          .populate('assignedTo');
 
         // Prepare bulk operations
         const bulkOps = [];
+        const dutiesForNotification = []; // Track duties that will be completed
 
         for (const duty of dutiesToComplete) {
             // Create proper Date objects for duty end time in IST
@@ -560,6 +562,9 @@ class DutyService {
                         }
                     }
                 });
+                
+                // Store duty info for notification
+                dutiesForNotification.push(duty);
             }
         }
 
@@ -568,6 +573,31 @@ class DutyService {
         if (bulkOps.length > 0) {
             const result = await Duty.bulkWrite(bulkOps);
             completedCount = result.modifiedCount;
+            
+            // Send notifications for auto-completed duties
+            if (completedCount > 0 && dutiesForNotification.length > 0) {
+                const notificationEmitter = require('./notificationEmitter');
+                const MedicalStaff = require('../models/MedicalStaff');
+                
+                for (const duty of dutiesForNotification) {
+                    try {
+                        // Get staff details
+                        const staff = await MedicalStaff.findById(duty.assignedTo._id || duty.assignedTo)
+                            .populate('user', 'name');
+                        
+                        if (staff && duty.hospital && duty.hospital.user) {
+                            const hospitalUserId = duty.hospital.user._id?.toString() || duty.hospital.user.toString();
+                            
+                            // Emit duty completed notification to hospital
+                            await notificationEmitter.emitDutyCompleted(duty, staff, hospitalUserId);
+                            console.log(`Auto-complete notification sent for duty ${duty._id}`);
+                        }
+                    } catch (notifError) {
+                        console.error(`Error sending auto-complete notification for duty ${duty._id}:`, notifError);
+                        // Continue with other notifications even if one fails
+                    }
+                }
+            }
         }
 
         return completedCount;
@@ -643,6 +673,7 @@ class DutyService {
         const istToday = new Date(istNow.getFullYear(), istNow.getMonth(), istNow.getDate());
 
         // Find duties that are stuck in 'assigned' or 'enroute' status
+        // Only check today and yesterday (for overnight duties)
         const stuckDuties = await Duty.find({
             status: { $in: ['assigned', 'enroute'] },
             date: {
@@ -728,6 +759,78 @@ class DutyService {
         }
 
         return markedIncompleteCount;
+    }
+
+
+    async sendNavigationReminders() {
+        const istNow = getCurrentIST();
+
+        // Find duties that are in 'assigned' status and starting in approximately 30 minutes
+        // We check duties starting between 29-31 minutes from now to account for cron timing
+        const duties = await Duty.find({
+            status: 'assigned' // Only remind if they haven't started their journey yet
+        }).populate('hospital', 'hospitalLegalName user')
+          .populate({
+              path: 'assignedTo',
+              populate: {
+                  path: 'user',
+                  select: 'name email _id'
+              }
+          });
+
+        const remindersToSend = [];
+
+        for (const duty of duties) {
+            try {
+                // Calculate duty start time in IST
+                const [startHours, startMinutes] = duty.startTime.split(':').map(Number);
+                const dutyStartDate = new Date(duty.date);
+                const istDutyDate = toIST(dutyStartDate);
+                const istDutyStartTime = new Date(istDutyDate);
+                istDutyStartTime.setHours(startHours, startMinutes, 0, 0);
+
+                // Calculate time difference in minutes
+                const timeDiff = istDutyStartTime - istNow;
+                const minutesUntilStart = Math.floor(timeDiff / (1000 * 60));
+
+                // Send reminder if duty starts in 29-31 minutes (to account for cron timing)
+                if (minutesUntilStart >= 29 && minutesUntilStart <= 31) {
+                    if (duty.assignedTo && duty.assignedTo.user) {
+                        remindersToSend.push({
+                            duty,
+                            staff: duty.assignedTo,
+                            staffUserId: duty.assignedTo.user._id.toString(),
+                            minutesUntilStart
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error(`Error processing duty ${duty._id} for navigation reminder:`, error);
+            }
+        }
+
+        // Send notifications
+        if (remindersToSend.length > 0) {
+            const notificationEmitter = require('./notificationEmitter');
+            
+            for (const reminder of remindersToSend) {
+                try {
+                    await notificationEmitter.emitNavigateToDuty(
+                        reminder.duty,
+                        reminder.staff,
+                        reminder.staffUserId
+                    );
+                    
+                    const hospitalName = reminder.duty.hospital?.hospitalLegalName || 'Hospital';
+                    const staffName = reminder.staff.user?.name || 'Staff';
+                    console.log(`Navigation reminder sent: ${staffName} for duty at ${hospitalName} (starts in ${reminder.minutesUntilStart} min)`);
+                } catch (notifError) {
+                    console.error(`Error sending navigation reminder for duty ${reminder.duty._id}:`, notifError);
+                }
+            }
+        }
+
+        return remindersToSend.length;
     }
 
 
