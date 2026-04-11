@@ -17,6 +17,7 @@ module.exports = async (req, res) => {
         console.log(`[${istNow.toISOString()}] Starting incomplete duties check...`);
 
         // Find duties that are stuck in 'assigned' or 'enroute' status
+        // Only check today and yesterday (for overnight duties)
         const stuckDuties = await Duty.find({
             status: { $in: ['assigned', 'enroute'] },
             date: {

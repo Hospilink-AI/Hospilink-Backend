@@ -58,10 +58,18 @@ exports.createDuty = asyncHandler(async (req, res) => {
             isAvailable: true
         }).populate('user', '_id');
 
-        const staffUserIds = matchingStaff.map(staff => staff.user._id.toString());
+        // Filter out staff with null user references and map to user IDs
+        const staffUserIds = matchingStaff
+            .filter(staff => staff.user && staff.user._id)
+            .map(staff => staff.user._id.toString());
 
         // Get hospital details
         const hospital = await Hospital.findOne({ user: userId }).populate('user', 'name');
+
+        if (!hospital) {
+            logger.error('Hospital not found for user: ' + userId);
+            throw new Error('Hospital profile not found');
+        }
 
         // Emit notification to both hospital and matching staff
         await notificationEmitter.emitDutyCreated(result.duty, hospital, staffUserIds, userId);
@@ -312,15 +320,70 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
         const hospitalUserId = duty.hospital.user._id.toString();
         const staffUserId = userId;
 
-        await notificationEmitter.emitDutyStatusChanged(
-            duty,
-            previousStatus,
-            status,
-            hospitalUserId,
-            staffUserId
-        );
+        // If duty is completed, send completion notification to hospital
+        if (status === 'completed') {
+            const MedicalStaff = require('../models/MedicalStaff');
+            const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
+            
+            if (staff) {
+                await notificationEmitter.emitDutyCompleted(duty, staff, hospitalUserId);
+            }
+        } 
+        // If staff is en route, send en route notification to hospital
+        else if (status === 'enroute') {
+            const MedicalStaff = require('../models/MedicalStaff');
+            const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
+            
+            if (staff) {
+                // Try to calculate ETA if coordinates are available
+                let eta = null;
+                try {
+                    const geocodingService = require('../services/geocoding.service');
+                    const Hospital = require('../models/Hospital');
+                    const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
+                    
+                    const staffLat = staff.coordinates?.coordinates?.latitude;
+                    const staffLng = staff.coordinates?.coordinates?.longitude;
+                    const hospitalLat = hospital?.coordinates?.coordinates?.latitude;
+                    const hospitalLng = hospital?.coordinates?.coordinates?.longitude;
+
+                    if (staffLat && staffLng && hospitalLat && hospitalLng) {
+                        const distanceInfo = await geocodingService.calculateDistanceAndETA(
+                            staffLat,
+                            staffLng,
+                            hospitalLat,
+                            hospitalLng
+                        );
+                        eta = distanceInfo.duration; // in minutes
+                    }
+                } catch (etaError) {
+                    console.error('Error calculating ETA for en route notification:', etaError);
+                }
+                
+                await notificationEmitter.emitStaffEnRoute(duty, staff, hospitalUserId, eta);
+            }
+        }
+        // If staff is on-site (in-progress), send on-site notification to hospital
+        else if (status === 'in-progress') {
+            const MedicalStaff = require('../models/MedicalStaff');
+            const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
+            
+            if (staff) {
+                await notificationEmitter.emitStaffOnSite(duty, staff, hospitalUserId);
+            }
+        }
+        // For other status changes, send generic status change notification
+        else {
+            await notificationEmitter.emitDutyStatusChanged(
+                duty,
+                previousStatus,
+                status,
+                hospitalUserId,
+                staffUserId
+            );
+        }
     } catch (error) {
-        logger.error('Error emitting duty status changed notification: ' + error.message);
+        logger.error('Error emitting duty status notification: ' + error.message);
         // Don't fail the request if notification fails
     }
 
