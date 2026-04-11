@@ -17,7 +17,6 @@ const {
     generateEarningsPDF,
     generateDutyReceiptPDF
 } = require('../utils/pdf.puppeteer');
-const delayedJobService = require('./delayedJob.service');
 
 class DutyService {
     async createDuty(dutyData, userId) {
@@ -458,8 +457,6 @@ class DutyService {
                 path: 'assignedTo',
                 populate: { path: 'user', select: 'name' }
             });
-
-            await delayedJobService.scheduleRateShiftJob(duty);
         }
 
         // Update status and add to history

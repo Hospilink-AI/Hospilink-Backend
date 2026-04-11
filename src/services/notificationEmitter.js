@@ -352,23 +352,7 @@ class NotificationEmitter {
         } catch (error) {
             console.error('Error emitting emergency duty notification:', error);
         }
-    }
-    async emitRateShiftNotification(hospitalUserId, payload) {
-        try {
-            const { unreadCount } =
-                await notificationService.createNotificationWithCount(
-                    hospitalUserId,
-                    'RATE_SHIFT',
-                    payload
-                );
-
-            websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-            websocketManager.emitToUser(hospitalUserId, 'notification', payload);
-
-        } catch (error) {
-            console.error('Error sending rate shift notification:', error);
-        }
-    }
+    }    
     //Emit document verified notification
     async emitDocumentVerified(userId, documentType) {
         try {

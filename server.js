@@ -9,7 +9,7 @@ const websocketManager = require('./src/services/websocketManager');
 const PORT = process.env.PORT || 3000;
 const { initAgent } = require('./agent/api');
 const CronJobs = require('./src/utils/cronJobs');
-const jobProcessor = require('./src/jobs/processDelayedJobs');
+const startLocalCron = require('./src/jobs/localCron');
 
 // Start server
 const startServer = async () => {
@@ -49,17 +49,12 @@ const startServer = async () => {
             logger.info(`Redis Connected`);
             logger.info(`Agent Services initialized`);
             logger.info(`WebSocket server initialized`);
+            if (process.env.NODE_ENV !== 'production') {
+                startLocalCron();
+            }
         });
-        // Background Job Processor 
-        if (process.env.ENABLE_JOB_PROCESSOR === 'true') {
-            setInterval(async () => {
-                try {
-                    await jobProcessor.process();
-                } catch (err) {
-                    console.error('Job processor failed:', err);
-                }
-            }, 60 * 1000); // every 1 min
-        }
+
+
     } catch (error) {
         logger.error(`Failed to start server: ${error.message}`);
         process.exit(1);

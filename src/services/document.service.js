@@ -442,16 +442,6 @@ exports.verifyDocument = async (documentId, adminId) => {
     document.updatedAt = new Date();
 
     await docRecord.save();
-    // Send notification
-    try {
-        await notificationEmitter.emitDocumentVerified(
-            docRecord.userId._id.toString(),
-            document.documentType
-        );
-    } catch (err) {
-        console.error('Notification failed:', err);
-    }
-
 
     return {
         documentId: document._id,
@@ -497,16 +487,6 @@ exports.rejectDocument = async (documentId, adminId, reason) => {
     document.updatedAt = new Date();
 
     await docRecord.save();
-    // SEND NOTIFICATION 
-    try {
-        await notificationEmitter.emitDocumentRejected(
-            docRecord.userId._id.toString(),
-            document.documentType,
-            reason
-        );
-    } catch (err) {
-        console.error('Notification failed:', err);
-    }
 
     return {
         documentId: document._id,

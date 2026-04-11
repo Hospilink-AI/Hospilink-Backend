@@ -10,6 +10,7 @@ require("dotenv").config();
 const authRoutes = require("./routes/auth.routes");
 const reviewRoutes = require("./routes/review.routes");
 const logger = require("./utils/logger");
+const cronRoutes = require("./routes/cron.routes");
 // Only run interval-based cron in persistent environments (local dev)
 // On Vercel, cron jobs are handled via api/cron/* endpoints + vercel.json schedules
 
@@ -123,6 +124,9 @@ app.use("/api/agent", agentApp);
 
 // Admin routes
 app.use("/api/admin", require("./routes/admin.routes"));
+
+//Cron Routes
+app.use("/api/cron", cronRoutes);
 
 // General API routes (should be last to avoid matching Agent routes)
 app.use("/api", require("./routes/duty.routes"));

@@ -277,6 +277,14 @@ exports.getDocumentStats = asyncHandler(async (req, res) => {
 exports.verifyDocument = asyncHandler(async (req, res) => {
     const documentService = require('../services/document.service');
     const result = await documentService.verifyDocument(req.params.documentId, req.user._id || req.user.id);
+    try {
+        await notificationEmitter.emitDocumentVerified(
+            result.userId.toString(),
+            result.documentType
+        );
+    } catch (err) {
+        logger.error('Verify Document Notification Error: ' + err.message);
+    }
     res.status(200).json({ success: true, message: 'Document verified successfully', data: result });
 });
 
@@ -287,6 +295,15 @@ exports.rejectDocument = asyncHandler(async (req, res) => {
     if (!reason) return res.status(400).json({ success: false, message: 'Rejection reason is required' });
     const documentService = require('../services/document.service');
     const result = await documentService.rejectDocument(req.params.documentId, req.user._id || req.user.id, reason);
+    try {
+        await notificationEmitter.emitDocumentRejected(
+            result.userId.toString(),
+            result.documentType,
+            result.rejectionReason
+        );
+    } catch (err) {
+        logger.error('Reject Document Notification Error: ' + err.message);
+    }
     res.status(200).json({ success: true, message: 'Document rejected', data: result });
 });
 
@@ -325,17 +342,17 @@ exports.getActiveDuties = asyncHandler(async (req, res) => {
 // GET /api/admin/duty-route-map/:dutyId - Get duty route map with polyline
 exports.getDutyRouteMap = asyncHandler(async (req, res) => {
     const { dutyId } = req.validatedParams;
-    
+
     try {
         // Add request tracking for analytics
         const startTime = Date.now();
-        
+
         const routeMap = await adminService.getDutyRouteMap(dutyId);
-        
+
         // Log performance metrics
         const responseTime = Date.now() - startTime;
         console.log(`Duty route map generated in ${responseTime}ms for duty: ${dutyId}`);
-        
+
         // Enhanced response with metadata
         res.status(200).json({
             success: true,
@@ -348,7 +365,7 @@ exports.getDutyRouteMap = asyncHandler(async (req, res) => {
         });
     } catch (error) {
         console.error(`Error in getDutyRouteMap for duty ${dutyId}:`, error);
-        
+
         // Enhanced error response
         res.status(error.message.includes('not found') ? 404 : 400).json({
             success: false,
@@ -407,7 +424,7 @@ exports.rejectHospital = asyncHandler(async (req, res) => {
 exports.getOvernightDuties = asyncHandler(async (req, res) => {
     try {
         const result = await adminService.getOvernightDuties();
-        
+
         res.status(200).json({
             success: true,
             data: result.duties,
@@ -425,7 +442,7 @@ exports.getOvernightDuties = asyncHandler(async (req, res) => {
 // GET /api/admin/duty-history - Get completed duty history with filters
 exports.getDutyHistory = asyncHandler(async (req, res) => {
     const { date, startDate, endDate, hospitalName, page, limit } = req.validatedQuery;
-    
+
     try {
         const result = await adminService.getDutyHistory({
             date,
@@ -435,7 +452,7 @@ exports.getDutyHistory = asyncHandler(async (req, res) => {
             page,
             limit
         });
-        
+
         res.status(200).json({
             success: true,
             data: result.duties,

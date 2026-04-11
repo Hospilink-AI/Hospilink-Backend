@@ -21,6 +21,11 @@ const delayedJobSchema = new mongoose.Schema({
         default: 'pending',
         index: true
     },
+    processed: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
     attempts: {
         type: Number,
         default: 0
