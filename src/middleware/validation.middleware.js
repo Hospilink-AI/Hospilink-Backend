@@ -724,7 +724,7 @@ const validateDutyCancellation = (req, res, next) => {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
     }
     
-    const validReasons = ['staff_unavailable', 'emergency', 'hospital_request', 'mutual_agreement', 'other'];
+    const validReasons = ['no_longer_needed', 'found_alternative', 'emergency_resolved', 'budget_constraints', 'other'];
     if (!reason || !validReasons.includes(reason)) {
         errors.push(`Valid reason is required. Allowed: ${validReasons.join(', ')}`);
     }

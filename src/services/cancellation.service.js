@@ -48,12 +48,12 @@ class CancellationService {
     async _validateHospitalCancellation(duty) {
         const status = duty.status;
 
-        // First check status
-        if (status !== 'available') {
-            return { allowed: false, error: 'Hospital users can only cancel duties with status: available' };
+        // Hospital can cancel duties with status 'available' or 'assigned'
+        if (!['available', 'assigned'].includes(status)) {
+            return { allowed: false, error: 'Hospital users can only cancel duties with status: available or assigned' };
         }
         
-        // Then check time restriction (must be more than 30 minutes before start time)
+        // Check time restriction (must be more than 30 minutes before start time)
         if (!await this.canCancelWithin30MinutesWindow(duty)) {
             return { 
                 allowed: false, 

@@ -360,24 +360,22 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
                 await notificationEmitter.emitStaffEnRoute(duty, staff, hospitalUserId, eta);
             }
         }
-        // If staff is on-site (in-progress), send on-site notification to hospital
+        // If staff is on-site (in-progress), send on-site notification to hospital AND in-progress notification to staff
         else if (status === 'in-progress') {
             const MedicalStaff = require('../models/MedicalStaff');
             const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
             
             if (staff) {
+                // Send on-site notification to hospital
                 await notificationEmitter.emitStaffOnSite(duty, staff, hospitalUserId);
+                
+                // Send in-progress notification to staff
+                const Hospital = require('../models/Hospital');
+                const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
+                if (hospital) {
+                    await notificationEmitter.emitDutyInProgress(duty, hospital, staffUserId);
+                }
             }
-        }
-        // For other status changes, send generic status change notification
-        else {
-            await notificationEmitter.emitDutyStatusChanged(
-                duty,
-                previousStatus,
-                status,
-                hospitalUserId,
-                staffUserId
-            );
         }
     } catch (error) {
         logger.error('Error emitting duty status notification: ' + error.message);

@@ -25,14 +25,22 @@ class NotificationEmitter {
 
             const hospitalName = hospital.hospitalLegalName || hospital.user?.name || 'Hospital';
             const hospitalLocation = hospital.location || hospital.currentAddress || 'Hospital location';
-            
-            // Get hospital coordinates
-            const hospitalLat = hospital.coordinates?.coordinates?.latitude;
-            const hospitalLng = hospital.coordinates?.coordinates?.longitude;
 
-            // Payload for hospital (DUTY_CREATED - confirmation)
+            // Check if this is an emergency duty
+            const isEmergency = duty.urgency === 'emergency';
+
+            // Payload for hospital - different message for emergency vs regular
+            let hospitalMessage;
+            if (isEmergency) {
+                // Count matching staff for emergency acknowledgment
+                const staffCount = matchingStaffUserIds ? matchingStaffUserIds.length : 0;
+                hospitalMessage = `Your emergency request for ${duty.staffRole} has been broadcast to ${staffCount} available staff within radius.`;
+            } else {
+                hospitalMessage = `Duty created successfully for ${duty.staffRole}`;
+            }
+
             const hospitalPayload = {
-                type: 'DUTY_CREATED',
+                type: isEmergency ? 'EMERGENCY_REQUEST_ACKNOWLEDGED' : 'DUTY_CREATED',
                 duty: {
                     id: duty._id.toString(),
                     staffRole: duty.staffRole,
@@ -48,113 +56,46 @@ class NotificationEmitter {
                     id: hospital._id?.toString() || 'unknown',
                     name: hospitalName
                 },
-                message: `Duty created successfully for ${duty.staffRole}`,
+                message: hospitalMessage,
                 timestamp: new Date().toISOString()
             };
 
             // Persist notification for hospital (creator)
             try {
-                const { unreadCount } = await notificationService.createNotificationWithCount(hospitalUserId, 'DUTY_CREATED', hospitalPayload);
+                const hospitalNotificationType = isEmergency ? 'EMERGENCY_REQUEST_ACKNOWLEDGED' : 'DUTY_CREATED';
+                const { unreadCount } = await notificationService.createNotificationWithCount(hospitalUserId, hospitalNotificationType, hospitalPayload);
                 websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-                // Emit to hospital
                 websocketManager.emitToUser(hospitalUserId, 'notification', hospitalPayload);
             } catch (error) {
                 console.error(`Error creating notification for hospital ${hospitalUserId}:`, error);
             }
 
-            // Persist notifications for each staff member with personalized distance
+            // Create staff notification payload
             if (matchingStaffUserIds && matchingStaffUserIds.length > 0) {
                 try {
-                    // Get all staff with their coordinates
-                    const staffMembers = await MedicalStaff.find({
-                        user: { $in: matchingStaffUserIds }
-                    }).populate('user', '_id name');
+                    // Format date and time
+                    const dutyDate = new Date(duty.date).toLocaleDateString('en-US', { 
+                        month: 'short', 
+                        day: 'numeric',
+                        year: 'numeric'
+                    });
+                    const dutyTime = `${duty.startTime} - ${duty.endTime}`;
 
-                    // Filter out staff members without valid user references
-                    const validStaffMembers = staffMembers.filter(staff => staff.user && staff.user._id);
-
-                    if (validStaffMembers.length === 0) {
-                        console.log('No valid staff members found for notifications');
-                        return;
+                    // Check if this is an emergency duty
+                    const isEmergency = duty.urgency === 'emergency';
+                    const notificationType = isEmergency ? 'EMERGENCY_DUTY_REQUEST' : 'NEW_DUTY_OFFER';
+                    
+                    // Create message based on urgency
+                    let message;
+                    if (isEmergency) {
+                        message = `EMERGENCY: Immediate ${duty.staffRole} required at ${hospitalName} — ${hospitalLocation}. Critical response needed. Tap to accept.`;
+                    } else {
+                        message = `New duty available near you — ${duty.staffRole} at ${hospitalName}, ${dutyDate} ${dutyTime}. Tap to accept.`;
                     }
 
-                    // Create personalized notifications for each staff
-                    const notificationPromises = validStaffMembers.map(async (staff) => {
-                        try {
-                            const staffUserId = staff.user._id.toString();
-                            let distanceText = '';
-                            
-                            // Calculate distance if both coordinates are available
-                            if (hospitalLat && hospitalLng && staff.coordinates?.coordinates?.latitude && staff.coordinates?.coordinates?.longitude) {
-                                try {
-                                    const distanceInfo = await geocodingService.calculateDistanceAndETA(
-                                        staff.coordinates.coordinates.latitude,
-                                        staff.coordinates.coordinates.longitude,
-                                        hospitalLat,
-                                        hospitalLng
-                                    );
-                                    distanceText = `${distanceInfo.distance.toFixed(1)} km away. `;
-                                } catch (distError) {
-                                    console.error(`Error calculating distance for staff ${staffUserId}:`, distError);
-                                    distanceText = '';
-                                }
-                            }
-
-                            // Format date and time
-                            const dutyDate = new Date(duty.date).toLocaleDateString('en-US', { 
-                                month: 'short', 
-                                day: 'numeric',
-                                year: 'numeric'
-                            });
-                            const dutyTime = `${duty.startTime} - ${duty.endTime}`;
-
-                            // Create personalized payload for this staff member
-                            const staffPayload = {
-                                type: 'NEW_DUTY_OFFER',
-                                duty: {
-                                    id: duty._id.toString(),
-                                    staffRole: duty.staffRole,
-                                    date: duty.date,
-                                    startTime: duty.startTime,
-                                    endTime: duty.endTime,
-                                    offeredRate: duty.offeredRate,
-                                    urgency: duty.urgency,
-                                    description: duty.description,
-                                    location: hospitalLocation
-                                },
-                                hospital: {
-                                    id: hospital._id?.toString() || 'unknown',
-                                    name: hospitalName
-                                },
-                                message: `New duty available near you — ${duty.staffRole} at ${hospitalName}, ${dutyDate} ${dutyTime}. ${distanceText}Tap to accept.`,
-                                timestamp: new Date().toISOString()
-                            };
-
-                            // Create notification with count
-                            const { unreadCount } = await notificationService.createNotificationWithCount(
-                                staffUserId,
-                                'NEW_DUTY_OFFER',
-                                staffPayload
-                            );
-                            
-                            // Send unread count
-                            websocketManager.sendUnreadCount(staffUserId, unreadCount);
-                            
-                            // Emit real-time notification
-                            websocketManager.emitToUser(staffUserId, 'notification', staffPayload);
-                            
-                            return { success: true, staffUserId };
-                        } catch (error) {
-                            console.error(`Error creating notification for staff ${staff.user?._id}:`, error);
-                            return { success: false, staffUserId: staff.user?._id?.toString(), error };
-                        }
-                    });
-
-                    await Promise.all(notificationPromises);
-                    
-                    // Also emit to role room for any connected staff
-                    const genericStaffPayload = {
-                        type: 'NEW_DUTY_OFFER',
+                    // Create staff payload for role room broadcast
+                    const staffPayload = {
+                        type: notificationType,
                         duty: {
                             id: duty._id.toString(),
                             staffRole: duty.staffRole,
@@ -170,14 +111,29 @@ class NotificationEmitter {
                             id: hospital._id?.toString() || 'unknown',
                             name: hospitalName
                         },
-                        message: `New duty available — ${duty.staffRole} at ${hospitalName}. Tap to accept.`,
+                        message: message,
                         timestamp: new Date().toISOString()
                     };
-                    websocketManager.emitToStaffRole(duty.staffRole, 'notification', genericStaffPayload);
 
-                    console.log(`Duty created notification emitted to hospital and ${validStaffMembers.length} staff members received NEW_DUTY_OFFER`);
+                    // Persist notifications in bulk for all matching staff
+                    await notificationService.createBulkNotifications(matchingStaffUserIds, notificationType, staffPayload);
+                    
+                    // Batch fetch unread counts for all staff
+                    const unreadCounts = await notificationService.getBulkUnreadCounts(matchingStaffUserIds);
+                    
+                    // Send unread counts to each staff member
+                    for (const staffUserId of matchingStaffUserIds) {
+                        const count = unreadCounts[staffUserId] || 0;
+                        websocketManager.sendUnreadCount(staffUserId, count);
+                    }
+
+                    // Broadcast to role room for real-time notification
+                    websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
+
+                    const notificationTypeLabel = isEmergency ? 'EMERGENCY_DUTY_REQUEST' : 'NEW_DUTY_OFFER';
+                    console.log(`Duty created notification emitted to hospital and ${matchingStaffUserIds.length} staff members via role room (${notificationTypeLabel})`);
                 } catch (error) {
-                    console.error('Error creating personalized notifications for staff:', error);
+                    console.error('Error creating staff notifications:', error);
                 }
             }
         } catch (error) {
@@ -288,7 +244,9 @@ class NotificationEmitter {
 
             // Persist notification for staff (isolated try-catch)
             try {
+                console.log(`Attempting to send DUTY_CONFIRMED to staff ${staffUserId}`);
                 const { unreadCount } = await notificationService.createNotificationWithCount(staffUserId, 'DUTY_CONFIRMED', staffPayload);
+                console.log(`DUTY_CONFIRMED notification created in DB for staff ${staffUserId}, unread count: ${unreadCount}`);
                 websocketManager.sendUnreadCount(staffUserId, unreadCount);
                 websocketManager.emitToUser(staffUserId, 'notification', staffPayload);
                 console.log(`Duty confirmed notification sent to staff ${staffUserId}`);
@@ -492,50 +450,6 @@ class NotificationEmitter {
     }
 
     /**
-     * Emit duty status changed notification to both parties
-     * @param {Object} duty - Duty object
-     * @param {string} previousStatus - Previous duty status
-     * @param {string} newStatus - New duty status
-     * @param {string} hospitalUserId - Hospital user ID
-     * @param {string} staffUserId - Staff user ID
-     */
-    async emitDutyStatusChanged(duty, previousStatus, newStatus, hospitalUserId, staffUserId) {
-        const payload = {
-            type: 'DUTY_STATUS_CHANGED',
-            duty: {
-                id: duty._id.toString(),
-                staffRole: duty.staffRole,
-                date: duty.date,
-                startTime: duty.startTime,
-                endTime: duty.endTime
-            },
-            previousStatus: previousStatus,
-            newStatus: newStatus,
-            timestamp: new Date().toISOString()
-        };
-
-        // Persist notification for hospital (isolated try-catch)
-        try {
-            const { unreadCount } = await notificationService.createNotificationWithCount(hospitalUserId, 'DUTY_STATUS_CHANGED', payload);
-            websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-            websocketManager.emitToUser(hospitalUserId, 'notification', payload);
-            console.log(`Duty status changed notification sent to hospital ${hospitalUserId}`);
-        } catch (error) {
-            console.error(`Error sending duty status changed notification to hospital ${hospitalUserId}:`, error);
-        }
-
-        // Persist notification for staff (isolated try-catch)
-        try {
-            const { unreadCount } = await notificationService.createNotificationWithCount(staffUserId, 'DUTY_STATUS_CHANGED', payload);
-            websocketManager.sendUnreadCount(staffUserId, unreadCount);
-            websocketManager.emitToUser(staffUserId, 'notification', payload);
-            console.log(`Duty status changed notification sent to staff ${staffUserId}`);
-        } catch (error) {
-            console.error(`Error sending duty status changed notification to staff ${staffUserId}:`, error);
-        }
-    }
-
-    /**
      * Emit duty cancelled notification
      * @param {Object} duty - Duty object
      * @param {Object} cancelledByUser - User who cancelled the duty
@@ -715,6 +629,66 @@ class NotificationEmitter {
     }
 
     /**
+     * Emit duty in-progress notification to staff
+     * @param {Object} duty - Duty object
+     * @param {Object} hospital - Hospital object
+     * @param {string} staffUserId - Staff user ID
+     */
+    async emitDutyInProgress(duty, hospital, staffUserId) {
+        try {
+            // Validate required parameters
+            if (!duty || !hospital || !staffUserId) {
+                console.error('Missing required parameters for emitDutyInProgress');
+                return;
+            }
+
+            const hospitalName = hospital.hospitalLegalName || hospital.user?.name || 'Hospital';
+            const hospitalLocation = hospital.location || hospital.currentAddress || 'the hospital';
+
+            // Get last 6 characters of duty ID for display
+            const dutyIdShort = duty._id.toString().slice(-6);
+
+            const payload = {
+                type: 'DUTY_IN_PROGRESS',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    offeredRate: duty.offeredRate,
+                    location: hospitalLocation
+                },
+                hospital: {
+                    id: hospital._id?.toString() || 'unknown',
+                    name: hospitalName,
+                    location: hospitalLocation
+                },
+                message: `Duty #${dutyIdShort} is now in progress at ${hospitalName}. Remember to mark complete when finished.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Persist notification for staff
+            try {
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    staffUserId,
+                    'DUTY_IN_PROGRESS',
+                    payload
+                );
+                
+                websocketManager.sendUnreadCount(staffUserId, unreadCount);
+                websocketManager.emitToUser(staffUserId, 'notification', payload);
+                
+                console.log(`Duty in-progress notification sent to staff ${staffUserId}`);
+            } catch (error) {
+                console.error(`Error sending duty in-progress notification to staff ${staffUserId}:`, error);
+            }
+        } catch (error) {
+            console.error('Error emitting duty in-progress notification:', error);
+        }
+    }
+
+    /**
      * Emit duty completed notification to hospital
      * @param {Object} duty - Duty object
      * @param {Object} staff - Medical staff object
@@ -772,6 +746,143 @@ class NotificationEmitter {
             }
         } catch (error) {
             console.error('Error emitting duty completed notification:', error);
+        }
+    }
+
+    /**
+     * Emit new hospital registration notification to admin
+     * @param {Object} hospital - Hospital object
+     * @param {Object} user - User object
+     */
+    async emitNewHospitalRegistration(hospital, user) {
+        try {
+            // Validate required parameters
+            if (!hospital || !user) {
+                console.error('Missing required parameters for emitNewHospitalRegistration');
+                return;
+            }
+
+            const hospitalName = hospital.hospitalLegalName || user.name || 'New Hospital';
+            const location = hospital.location || hospital.currentAddress || 'Location not provided';
+
+            const payload = {
+                type: 'NEW_HOSPITAL_REGISTRATION',
+                hospital: {
+                    id: hospital._id.toString(),
+                    name: hospitalName,
+                    location: location,
+                    email: user.email,
+                    phone: user.phone || 'Not provided'
+                },
+                user: {
+                    id: user._id.toString(),
+                    name: user.name,
+                    email: user.email
+                },
+                message: `New hospital registered: ${hospitalName} at ${location}. Review and approve the registration.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Get all admin users
+            const User = require('../models/User');
+            const adminUsers = await User.find({ role: 'admin' }).select('_id');
+
+            if (adminUsers.length === 0) {
+                console.log('No admin users found to notify');
+                return;
+            }
+
+            const adminUserIds = adminUsers.map(admin => admin._id.toString());
+
+            // Persist notifications for all admins
+            try {
+                await notificationService.createBulkNotifications(adminUserIds, 'NEW_HOSPITAL_REGISTRATION', payload);
+                
+                // Batch fetch unread counts
+                const unreadCounts = await notificationService.getBulkUnreadCounts(adminUserIds);
+                
+                // Send unread counts and emit to each admin
+                for (const adminUserId of adminUserIds) {
+                    const count = unreadCounts[adminUserId] || 0;
+                    websocketManager.sendUnreadCount(adminUserId, count);
+                    websocketManager.emitToUser(adminUserId, 'notification', payload);
+                }
+
+                console.log(`New hospital registration notification sent to ${adminUserIds.length} admins`);
+            } catch (error) {
+                console.error('Error sending hospital registration notifications:', error);
+            }
+        } catch (error) {
+            console.error('Error emitting new hospital registration notification:', error);
+        }
+    }
+
+    /**
+     * Emit new staff registration notification to admin
+     * @param {Object} staff - Medical staff object
+     * @param {Object} user - User object
+     */
+    async emitNewStaffRegistration(staff, user) {
+        try {
+            // Validate required parameters
+            if (!staff || !user) {
+                console.error('Missing required parameters for emitNewStaffRegistration');
+                return;
+            }
+
+            const staffName = staff.fullName || user.name || 'New Staff Member';
+            const jobRole = staff.jobRole || 'Not specified';
+
+            const payload = {
+                type: 'NEW_STAFF_REGISTRATION',
+                staff: {
+                    id: staff._id.toString(),
+                    name: staffName,
+                    jobRole: jobRole,
+                    email: user.email,
+                    phone: user.phone || 'Not provided',
+                    experience: staff.experience || 'Not provided'
+                },
+                user: {
+                    id: user._id.toString(),
+                    name: user.name,
+                    email: user.email
+                },
+                message: `New ${jobRole} registered: ${staffName}. Review and verify the profile.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Get all admin users
+            const User = require('../models/User');
+            const adminUsers = await User.find({ role: 'admin' }).select('_id');
+
+            if (adminUsers.length === 0) {
+                console.log('No admin users found to notify');
+                return;
+            }
+
+            const adminUserIds = adminUsers.map(admin => admin._id.toString());
+
+            // Persist notifications for all admins
+            try {
+                await notificationService.createBulkNotifications(adminUserIds, 'NEW_STAFF_REGISTRATION', payload);
+                
+                // Batch fetch unread counts
+                const unreadCounts = await notificationService.getBulkUnreadCounts(adminUserIds);
+                
+                // Send unread counts and emit to each admin
+                for (const adminUserId of adminUserIds) {
+                    const count = unreadCounts[adminUserId] || 0;
+                    websocketManager.sendUnreadCount(adminUserId, count);
+                    websocketManager.emitToUser(adminUserId, 'notification', payload);
+                }
+
+                console.log(`New staff registration notification sent to ${adminUserIds.length} admins`);
+            } catch (error) {
+                console.error('Error sending staff registration notifications:', error);
+            }
+        } catch (error) {
+            console.error('Error emitting new staff registration notification:', error);
         }
     }
 }

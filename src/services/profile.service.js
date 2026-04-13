@@ -78,6 +78,16 @@ class ProfileService {
             // Invalidate location permission cache
             await cacheService.del(`location:permission:${userId}`);
 
+            // Emit notification to admins about new staff registration
+            try {
+                const notificationEmitter = require('./notificationEmitter');
+                const user = await User.findById(userId);
+                await notificationEmitter.emitNewStaffRegistration(medicalStaffProfile, user);
+            } catch (notifError) {
+                console.error('Error sending staff registration notification:', notifError);
+                // Don't fail the registration if notification fails
+            }
+
             return {
                 success: true,
                 profile: medicalStaffProfile,
@@ -196,6 +206,16 @@ class ProfileService {
 
             // Invalidate profile status cache
             await cacheService.invalidateProfileStatus(userId);
+
+            // Emit notification to admins about new hospital registration
+            try {
+                const notificationEmitter = require('./notificationEmitter');
+                const user = await User.findById(userId);
+                await notificationEmitter.emitNewHospitalRegistration(hospitalProfile, user);
+            } catch (notifError) {
+                console.error('Error sending hospital registration notification:', notifError);
+                // Don't fail the registration if notification fails
+            }
 
             return {
                 success: true,
