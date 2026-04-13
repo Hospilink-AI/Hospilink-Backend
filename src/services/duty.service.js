@@ -1261,14 +1261,17 @@ class DutyService {
             // Get duty details
             const duty = await Duty.findById(dutyId).populate('hospital', 'hospitalLegalName currentAddress location coordinates');
 
-
             if (!duty) {
                 throw new Error('Duty not found');
             }
 
-            // Use current location from browser
-            const staffLat = currentLocation.latitude;
-            const staffLng = currentLocation.longitude;
+            // Add proper null check before accessing location properties
+            if (!currentLocation || !currentLocation.latitude || !currentLocation.longitude) {
+                throw new Error('Staff location is required to get route information. Please enable location in your dashboard or update your profile location.');
+            }
+
+            const staffLat = currentLocation.latitude;  
+            const staffLng = currentLocation.longitude; 
 
             // Check for named coordinates structure
             if (!duty.hospital.coordinates ||
