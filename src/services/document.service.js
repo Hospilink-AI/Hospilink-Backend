@@ -3,6 +3,7 @@ const { uploadToS3, generatePreSignedURL, deleteFromS3 } = require("./s3.service
 const requiredDocsConfig = require("../config/requiredDocs");
 const { extractTextFromBuffer } = require("./ocr.service");
 const { paginateArray } = require("../utils/pagination");
+const notificationEmitter = require('./notificationEmitter');
 //const { verifyAadhaar, checkDocumentFraud } = require("./hyperverge.service");
 
 const getAllowedDocs = (role) => {
@@ -573,8 +574,9 @@ exports.getDocumentById = async (user, documentId) => {
     };
 };
 
-exports.verifyDocument = async (documentId, adminId) => {
 
+// Document verification
+exports.verifyDocument = async (documentId, adminId) => {
     const docRecord = await Document.findOne({
         "documents._id": documentId
     }).populate('userId', 'name email');
@@ -604,7 +606,7 @@ exports.verifyDocument = async (documentId, adminId) => {
 
     await docRecord.save();
 
-    return {
+    const result = {
         documentId: document._id,
         documentType: document.documentType,
         verificationStatus: document.verificationStatus,
@@ -614,10 +616,21 @@ exports.verifyDocument = async (documentId, adminId) => {
         userName: docRecord.userId.name,
         userEmail: docRecord.userId.email
     };
+
+    // Emit notification to user
+    try {
+        await notificationEmitter.emitDocumentVerified(result, docRecord.userRole);
+    } catch (error) {
+        console.error('Error emitting document verification notification:', error);
+    }
+
+    return result;
 };
 
-exports.rejectDocument = async (documentId, adminId, reason) => {
 
+
+// Document rejection
+exports.rejectDocument = async (documentId, adminId, reason) => {
     const docRecord = await Document.findOne({
         "documents._id": documentId
     }).populate('userId', 'name email');
@@ -649,7 +662,7 @@ exports.rejectDocument = async (documentId, adminId, reason) => {
 
     await docRecord.save();
 
-    return {
+    const result = {
         documentId: document._id,
         documentType: document.documentType,
         verificationStatus: document.verificationStatus,
@@ -660,8 +673,20 @@ exports.rejectDocument = async (documentId, adminId, reason) => {
         userName: docRecord.userId.name,
         userEmail: docRecord.userId.email
     };
+
+    // Emit notification to user
+    try {
+        await notificationEmitter.emitDocumentRejected(result, docRecord.userRole);
+    } catch (error) {
+        console.error('Error emitting document rejection notification:', error);
+    }
+
+    return result;
 };
 
+
+
+// Get required documents status
 exports.getRequiredDocumentsStatus = async (user) => {
     if (!requiredDocsConfig[user.role]) {
         throw new Error("Invalid role for document requirements");
