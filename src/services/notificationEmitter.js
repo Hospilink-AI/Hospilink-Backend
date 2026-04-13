@@ -885,6 +885,94 @@ class NotificationEmitter {
             console.error('Error emitting new staff registration notification:', error);
         }
     }
+
+    // Document verification notifications
+    async emitDocumentVerified(document, userRole) {
+        try {
+            if (!document || !document.userId) {
+                console.error('Missing required parameters for emitDocumentVerified');
+                return;
+            }
+
+            const documentType = document.documentType.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            
+            const payload = {
+                type: 'DOCUMENT_VERIFIED',
+                document: {
+                    id: document.documentId,
+                    type: document.documentType,
+                    typeName: documentType,
+                    verifiedAt: document.verifiedAt
+                },
+                message: `Your ${documentType} has been verified by the HospiLink team`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Persist notification for user
+            try {
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    document.userId,
+                    'DOCUMENT_VERIFIED',
+                    payload
+                );
+                
+                websocketManager.sendUnreadCount(document.userId, unreadCount);
+                websocketManager.emitToUser(document.userId, 'notification', payload);
+                
+                console.log(`Document verified notification sent to ${userRole} ${document.userId}`);
+            } catch (error) {
+                console.error(`Error sending document verified notification to ${userRole} ${document.userId}:`, error);
+            }
+        } catch (error) {
+            console.error('Error emitting document verified notification:', error);
+        }
+    }
+
+   
+
+    // Document rejection notifications
+    async emitDocumentRejected(document, userRole) {
+        try {
+            if (!document || !document.userId) {
+                console.error('Missing required parameters for emitDocumentRejected');
+                return;
+            }
+
+            const documentType = document.documentType.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const rejectionReason = document.rejectionReason || 'No reason provided';
+            
+            const payload = {
+                type: 'DOCUMENT_REJECTED',
+                document: {
+                    id: document.documentId,
+                    type: document.documentType,
+                    typeName: documentType,
+                    rejectionReason: rejectionReason,
+                    rejectedAt: document.verifiedAt
+                },
+                message: `Your ${documentType} was not accepted. Reason: ${rejectionReason}. Please re-upload a clear, valid document.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Persist notification for user
+            try {
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    document.userId,
+                    'DOCUMENT_REJECTED',
+                    payload
+                );
+                
+                websocketManager.sendUnreadCount(document.userId, unreadCount);
+                websocketManager.emitToUser(document.userId, 'notification', payload);
+                
+                console.log(`Document rejected notification sent to ${userRole} ${document.userId}`);
+            } catch (error) {
+                console.error(`Error sending document rejected notification to ${userRole} ${document.userId}:`, error);
+            }
+        } catch (error) {
+            console.error('Error emitting document rejected notification:', error);
+        }
+    }
 }
 
 module.exports = new NotificationEmitter();
