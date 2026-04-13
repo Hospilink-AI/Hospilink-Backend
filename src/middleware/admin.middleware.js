@@ -12,9 +12,9 @@ const validateAdminSignin = (req, res, next) => {
             message: 'Request body is required'
         });
     }
- 
+
     const { email, password } = req.body;
- 
+
     // Validate email
     if (!email) {
         return res.status(400).json({
@@ -22,14 +22,14 @@ const validateAdminSignin = (req, res, next) => {
             message: 'Email is required'
         });
     }
- 
+
     if (typeof email !== 'string' || !email.includes('@')) {
         return res.status(400).json({
             success: false,
             message: 'Valid email is required'
         });
     }
- 
+
     // Validate password
     if (!password) {
         return res.status(400).json({
@@ -37,22 +37,22 @@ const validateAdminSignin = (req, res, next) => {
             message: 'Password is required'
         });
     }
- 
+
     if (typeof password !== 'string' || password.length < 6) {
         return res.status(400).json({
             success: false,
             message: 'Password must be at least 6 characters long'
         });
     }
- 
+
     next();
 };
- 
+
 
 // Validate admin OTP verification request
 const validateAdminOTP = (req, res, next) => {
     const { email, otp } = req.body;
- 
+
     // Validate email
     if (!email) {
         return res.status(400).json({
@@ -60,14 +60,14 @@ const validateAdminOTP = (req, res, next) => {
             message: 'Email is required'
         });
     }
- 
+
     if (typeof email !== 'string' || !email.includes('@')) {
         return res.status(400).json({
             success: false,
             message: 'Valid email is required'
         });
     }
- 
+
     // Validate OTP
     if (!otp) {
         return res.status(400).json({
@@ -75,22 +75,22 @@ const validateAdminOTP = (req, res, next) => {
             message: 'OTP is required'
         });
     }
- 
+
     if (typeof otp !== 'string' || !/^\d{6}$/.test(otp)) {
         return res.status(400).json({
             success: false,
             message: 'OTP must be a 6-digit number'
         });
     }
- 
+
     next();
 };
- 
+
 
 // Validate admin resend OTP request
 const validateAdminResendOTP = (req, res, next) => {
     const { email } = req.body;
- 
+
     // Validate email
     if (!email) {
         return res.status(400).json({
@@ -98,14 +98,14 @@ const validateAdminResendOTP = (req, res, next) => {
             message: 'Email is required'
         });
     }
- 
+
     if (typeof email !== 'string' || !email.includes('@')) {
         return res.status(400).json({
             success: false,
             message: 'Valid email is required'
         });
     }
- 
+
     next();
 };
 
@@ -120,11 +120,11 @@ const validateStaffDutyReportQuery = (req, res, next) => {
             message: 'GET request should not contain request body. Use query parameters only.'
         });
     }
-    
+
     // Validate allowed query parameters only
     const allowedParams = ['days', 'role', 'page', 'limit'];
     const receivedParams = Object.keys(req.query);
-    
+
     // Check for unexpected parameters
     const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
     if (unexpectedParams.length > 0) {
@@ -133,9 +133,9 @@ const validateStaffDutyReportQuery = (req, res, next) => {
             message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
         });
     }
-    
+
     const { days, role, page = 1, limit = 10 } = req.query;
-    
+
     // Validate days parameter
     const daysNum = days ? parseInt(days) : null;
     if (days && (isNaN(daysNum) || daysNum < 1 || daysNum > 365)) {
@@ -144,7 +144,7 @@ const validateStaffDutyReportQuery = (req, res, next) => {
             message: 'Days parameter must be a positive integer between 1 and 365'
         });
     }
-    
+
     // Validate role parameter
     if (role && typeof role !== 'string') {
         return res.status(400).json({
@@ -152,7 +152,7 @@ const validateStaffDutyReportQuery = (req, res, next) => {
             message: 'Role parameter must be a string'
         });
     }
-    
+
     // Validate page parameter
     const pageNum = parseInt(page);
     if (isNaN(pageNum) || pageNum < 1) {
@@ -161,7 +161,7 @@ const validateStaffDutyReportQuery = (req, res, next) => {
             message: 'Page parameter must be a positive integer'
         });
     }
-    
+
     // Validate limit parameter
     const limitNum = parseInt(limit);
     if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
@@ -170,7 +170,7 @@ const validateStaffDutyReportQuery = (req, res, next) => {
             message: 'Limit parameter must be a positive integer between 1 and 100'
         });
     }
-    
+
     // Add validated values to request object
     req.validatedQuery = {
         days: daysNum,
@@ -178,7 +178,7 @@ const validateStaffDutyReportQuery = (req, res, next) => {
         page: pageNum,
         limit: limitNum
     };
-    
+
     next();
 };
 
@@ -194,11 +194,11 @@ const validateNearbyStaffQuery = (req, res, next) => {
             message: 'GET request should not contain request body. Use query parameters only.'
         });
     }
-    
+
     // Validate allowed query parameters only
     const allowedParams = ['hospital_id', 'distance', 'role'];
     const receivedParams = Object.keys(req.query);
-    
+
     // Check for unexpected parameters
     const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
     if (unexpectedParams.length > 0) {
@@ -207,48 +207,48 @@ const validateNearbyStaffQuery = (req, res, next) => {
             message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
         });
     }
-    
+
     // Validate hospital_id - required parameter
-    if (!req.query.hospital_id) { 
+    if (!req.query.hospital_id) {
         return res.status(400).json({
             success: false,
             message: 'hospital_id is required'
         });
     }
-    
+
     // Validate hospital_id format
-    if (!mongoose.Types.ObjectId.isValid(req.query.hospital_id)) { 
+    if (!mongoose.Types.ObjectId.isValid(req.query.hospital_id)) {
         return res.status(400).json({
             success: false,
             message: 'Invalid hospital_id format'
         });
     }
-    
+
     // Validate distance parameter (1-100 km)
-    const distanceNum = parseFloat(req.query.distance) || 10; 
+    const distanceNum = parseFloat(req.query.distance) || 10;
     if (isNaN(distanceNum) || distanceNum < 1 || distanceNum > 100) {
         return res.status(400).json({
             success: false,
             message: 'Distance must be a number between 1 and 100 km'
         });
     }
-    
+
     // Validate role parameter (optional)
-    const roleParam = req.query.role || null; 
+    const roleParam = req.query.role || null;
     if (roleParam && typeof roleParam !== 'string') {
         return res.status(400).json({
             success: false,
             message: 'Role parameter must be a string'
         });
     }
-    
+
     // Add validated values to request object
-    req.validatedQuery = { 
+    req.validatedQuery = {
         hospital_id: req.query.hospital_id,
         distance: distanceNum,
         role: roleParam
     };
-    
+
     next();
 };
 
@@ -263,11 +263,11 @@ const validateActiveDutiesQuery = (req, res, next) => {
             message: 'GET request should not contain request body. Use query parameters only.'
         });
     }
-    
+
     // Validate allowed query parameters only
     const allowedParams = ['role', 'location', 'page', 'limit', 'status'];
     const receivedParams = Object.keys(req.query);
-    
+
     // Check for unexpected parameters
     const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
     if (unexpectedParams.length > 0) {
@@ -276,9 +276,9 @@ const validateActiveDutiesQuery = (req, res, next) => {
             message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
         });
     }
-    
+
     const { role, location, page = 1, limit = 10, status } = req.query;
-    
+
     // Validate role parameter 
     if (role && typeof role !== 'string') {
         return res.status(400).json({
@@ -286,7 +286,7 @@ const validateActiveDutiesQuery = (req, res, next) => {
             message: 'Role parameter must be a string'
         });
     }
-    
+
     // Validate location parameter 
     if (location && typeof location !== 'string') {
         return res.status(400).json({
@@ -294,7 +294,7 @@ const validateActiveDutiesQuery = (req, res, next) => {
             message: 'Location parameter must be a string'
         });
     }
-    
+
     // Validate status parameter 
     const allowedStatuses = ['assigned', 'enroute', 'in-progress'];
     if (status && !allowedStatuses.includes(status)) {
@@ -303,7 +303,7 @@ const validateActiveDutiesQuery = (req, res, next) => {
             message: `Status parameter must be one of: ${allowedStatuses.join(', ')}`
         });
     }
-    
+
     // Validate page parameter
     const pageNum = parseInt(page);
     if (isNaN(pageNum) || pageNum < 1) {
@@ -312,7 +312,7 @@ const validateActiveDutiesQuery = (req, res, next) => {
             message: 'Page parameter must be a positive integer'
         });
     }
-    
+
     // Validate limit parameter
     const limitNum = parseInt(limit);
     if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
@@ -321,7 +321,7 @@ const validateActiveDutiesQuery = (req, res, next) => {
             message: 'Limit parameter must be a positive integer between 1 and 100'
         });
     }
-    
+
     // Add validated values to request object
     req.validatedQuery = {
         role: role || null,
@@ -330,7 +330,7 @@ const validateActiveDutiesQuery = (req, res, next) => {
         page: pageNum,
         limit: limitNum
     };
-    
+
     next();
 };
 
@@ -345,9 +345,9 @@ const validateDutyRouteMap = (req, res, next) => {
             message: 'GET request should not contain request body. Use path parameters only.'
         });
     }
-    
+
     const { dutyId } = req.params;
-    
+
     // Validate dutyId format
     if (!mongoose.Types.ObjectId.isValid(dutyId)) {
         return res.status(400).json({
@@ -355,12 +355,12 @@ const validateDutyRouteMap = (req, res, next) => {
             message: 'Invalid duty ID format'
         });
     }
-    
+
     // Add validated values to request object
     req.validatedParams = {
         dutyId
     };
-    
+
     next();
 };
 
@@ -374,10 +374,10 @@ const validateOvernightDutiesQuery = (req, res, next) => {
             message: 'GET request should not contain request body. Use query parameters only.'
         });
     }
-    
+
     // No query parameters needed for overnight duties - it returns all live overnight duties
     req.validatedQuery = {};
-    
+
     next();
 };
 
@@ -391,11 +391,11 @@ const validateDutyHistoryQuery = (req, res, next) => {
             message: 'GET request should not contain request body. Use query parameters only.'
         });
     }
-    
+
     // Validate allowed query parameters only
     const allowedParams = ['date', 'startDate', 'endDate', 'hospitalName', 'page', 'limit'];
     const receivedParams = Object.keys(req.query);
-    
+
     // Check for unexpected parameters
     const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
     if (unexpectedParams.length > 0) {
@@ -404,33 +404,33 @@ const validateDutyHistoryQuery = (req, res, next) => {
             message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
         });
     }
-    
+
     const { date, startDate, endDate, hospitalName, page = 1, limit = 10 } = req.query;
-    
+
     // Validate date format (DD-MM-YYYY)
     const dateRegex = /^\d{2}-\d{2}-\d{4}$/;
-    
+
     if (date && !dateRegex.test(date)) {
         return res.status(400).json({
             success: false,
             message: 'Date must be in DD-MM-YYYY format (e.g., 23-10-2025)'
         });
     }
-    
+
     if (startDate && !dateRegex.test(startDate)) {
         return res.status(400).json({
             success: false,
             message: 'Start date must be in DD-MM-YYYY format (e.g., 23-10-2025)'
         });
     }
-    
+
     if (endDate && !dateRegex.test(endDate)) {
         return res.status(400).json({
             success: false,
             message: 'End date must be in DD-MM-YYYY format (e.g., 23-10-2025)'
         });
     }
-    
+
     // Cannot use both single date and date range
     if (date && (startDate || endDate)) {
         return res.status(400).json({
@@ -438,7 +438,7 @@ const validateDutyHistoryQuery = (req, res, next) => {
             message: 'Cannot use both single date and date range filters'
         });
     }
-    
+
     // If using date range, both startDate and endDate are required
     if ((startDate && !endDate) || (!startDate && endDate)) {
         return res.status(400).json({
@@ -446,7 +446,7 @@ const validateDutyHistoryQuery = (req, res, next) => {
             message: 'Both startDate and endDate are required for date range filter'
         });
     }
-    
+
     // Validate hospitalName parameter
     if (hospitalName && typeof hospitalName !== 'string') {
         return res.status(400).json({
@@ -454,7 +454,7 @@ const validateDutyHistoryQuery = (req, res, next) => {
             message: 'Hospital name parameter must be a string'
         });
     }
-    
+
     // Validate page parameter
     const pageNum = parseInt(page);
     if (isNaN(pageNum) || pageNum < 1) {
@@ -463,7 +463,7 @@ const validateDutyHistoryQuery = (req, res, next) => {
             message: 'Page parameter must be a positive integer'
         });
     }
-    
+
     // Validate limit parameter
     const limitNum = parseInt(limit);
     if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
@@ -472,7 +472,7 @@ const validateDutyHistoryQuery = (req, res, next) => {
             message: 'Limit parameter must be a positive integer between 1 and 100'
         });
     }
-    
+
     // Add validated values to request object
     req.validatedQuery = {
         date: date || null,
@@ -482,7 +482,7 @@ const validateDutyHistoryQuery = (req, res, next) => {
         page: pageNum,
         limit: limitNum
     };
-    
+
     next();
 };
 
@@ -493,24 +493,24 @@ const validateDutyHistoryQuery = (req, res, next) => {
 const validateObjectId = (paramName) => {
     return (req, res, next) => {
         const id = req.params[paramName];
-        
+
         if (!id) {
             return res.status(400).json({
                 success: false,
                 message: `${paramName} is required`
             });
         }
-        
+
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({
                 success: false,
                 message: `Invalid ${paramName} format`
             });
         }
-        
+
         req.validatedParams = req.validatedParams || {};
         req.validatedParams[paramName] = id;
-        
+
         next();
     };
 };
@@ -520,33 +520,33 @@ const validateObjectId = (paramName) => {
 // Validate rejection reason for PATCH endpoints
 const validateRejectionReason = (req, res, next) => {
     const { reason } = req.body;
-    
+
     // Check for unexpected fields
     const allowedFields = ['reason'];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
-    
+
     if (unexpectedFields.length > 0) {
         return res.status(400).json({
             success: false,
             message: `Invalid fields: ${unexpectedFields.join(', ')}. Only allowed: reason`
         });
     }
-    
+
     if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
         return res.status(400).json({
             success: false,
             message: 'Rejection reason is required and must be a non-empty string'
         });
     }
-    
+
     if (reason.length > 500) {
         return res.status(400).json({
             success: false,
             message: 'Rejection reason cannot exceed 500 characters'
         });
     }
-    
+
     next();
 };
 
@@ -561,11 +561,11 @@ const validateHospitalSimpleListQuery = (req, res, next) => {
             message: 'GET request should not contain request body. Use query parameters only.'
         });
     }
-    
+
     // Validate allowed query parameters only
     const allowedParams = ['name'];
     const receivedParams = Object.keys(req.query);
-    
+
     // Check for unexpected parameters
     const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
     if (unexpectedParams.length > 0) {
@@ -574,9 +574,9 @@ const validateHospitalSimpleListQuery = (req, res, next) => {
             message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
         });
     }
-    
+
     const { name } = req.query;
-    
+
     // Validate name parameter (optional)
     if (name && typeof name !== 'string') {
         return res.status(400).json({
@@ -584,11 +584,11 @@ const validateHospitalSimpleListQuery = (req, res, next) => {
             message: 'Name parameter must be a string'
         });
     }
-    
+
     req.validatedQuery = {
         name: name || null
     };
-    
+
     next();
 };
 
@@ -603,11 +603,11 @@ const validateHospitalListQuery = (req, res, next) => {
             message: 'GET request should not contain request body. Use query parameters only.'
         });
     }
-    
+
     // Validate allowed query parameters only
     const allowedParams = ['search', 'status', 'city', 'page', 'limit'];
     const receivedParams = Object.keys(req.query);
-    
+
     // Check for unexpected parameters
     const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
     if (unexpectedParams.length > 0) {
@@ -616,9 +616,9 @@ const validateHospitalListQuery = (req, res, next) => {
             message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
         });
     }
-    
+
     const { search, status, city, page = 1, limit = 10 } = req.query;
-    
+
     // Validate status parameter
     const allowedStatuses = ['pending', 'verified', 'rejected'];
     if (status && !allowedStatuses.includes(status)) {
@@ -627,7 +627,7 @@ const validateHospitalListQuery = (req, res, next) => {
             message: `Status parameter must be one of: ${allowedStatuses.join(', ')}`
         });
     }
-    
+
     // Validate search parameter
     if (search && typeof search !== 'string') {
         return res.status(400).json({
@@ -635,7 +635,7 @@ const validateHospitalListQuery = (req, res, next) => {
             message: 'Search parameter must be a string'
         });
     }
-    
+
     // Validate city parameter
     if (city && typeof city !== 'string') {
         return res.status(400).json({
@@ -643,7 +643,7 @@ const validateHospitalListQuery = (req, res, next) => {
             message: 'City parameter must be a string'
         });
     }
-    
+
     // Validate page parameter
     const pageNum = parseInt(page);
     if (isNaN(pageNum) || pageNum < 1) {
@@ -652,7 +652,7 @@ const validateHospitalListQuery = (req, res, next) => {
             message: 'Page parameter must be a positive integer'
         });
     }
-    
+
     // Validate limit parameter
     const limitNum = parseInt(limit);
     if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
@@ -661,7 +661,7 @@ const validateHospitalListQuery = (req, res, next) => {
             message: 'Limit parameter must be a positive integer between 1 and 100'
         });
     }
-    
+
     req.validatedQuery = {
         search: search || null,
         status: status || null,
@@ -669,7 +669,7 @@ const validateHospitalListQuery = (req, res, next) => {
         page: pageNum,
         limit: limitNum
     };
-    
+
     next();
 };
 
@@ -684,11 +684,11 @@ const validateMedicalStaffListQuery = (req, res, next) => {
             message: 'GET request should not contain request body. Use query parameters only.'
         });
     }
-    
+
     // Validate allowed query parameters only
     const allowedParams = ['search', 'role', 'availability', 'page', 'limit'];
     const receivedParams = Object.keys(req.query);
-    
+
     // Check for unexpected parameters
     const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
     if (unexpectedParams.length > 0) {
@@ -697,9 +697,9 @@ const validateMedicalStaffListQuery = (req, res, next) => {
             message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
         });
     }
-    
+
     const { search, role, availability, page = 1, limit = 10 } = req.query;
-    
+
     // Validate role parameter
     const allowedRoles = ['doctor', 'nurse', 'technician', 'pharmacist', 'therapist', 'other'];
     if (role && !allowedRoles.includes(role)) {
@@ -708,7 +708,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
             message: `Role parameter must be one of: ${allowedRoles.join(', ')}`
         });
     }
-    
+
     // Validate availability parameter
     const allowedAvailability = ['available', 'unavailable', 'on-duty'];
     if (availability && !allowedAvailability.includes(availability)) {
@@ -717,7 +717,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
             message: `Availability parameter must be one of: ${allowedAvailability.join(', ')}`
         });
     }
-    
+
     // Validate search parameter
     if (search && typeof search !== 'string') {
         return res.status(400).json({
@@ -725,7 +725,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
             message: 'Search parameter must be a string'
         });
     }
-    
+
     // Validate page parameter
     const pageNum = parseInt(page);
     if (isNaN(pageNum) || pageNum < 1) {
@@ -734,7 +734,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
             message: 'Page parameter must be a positive integer'
         });
     }
-    
+
     // Validate limit parameter
     const limitNum = parseInt(limit);
     if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
@@ -743,7 +743,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
             message: 'Limit parameter must be a positive integer between 1 and 100'
         });
     }
-    
+
     req.validatedQuery = {
         search: search || null,
         role: role || null,
@@ -751,7 +751,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
         page: pageNum,
         limit: limitNum
     };
-    
+
     next();
 };
 
@@ -766,11 +766,11 @@ const validateDocumentsListQuery = (req, res, next) => {
             message: 'GET request should not contain request body. Use query parameters only.'
         });
     }
-    
+
     // Validate allowed query parameters only
     const allowedParams = ['status', 'userRole', 'page', 'limit', 'sortBy', 'sortOrder'];
     const receivedParams = Object.keys(req.query);
-    
+
     // Check for unexpected parameters
     const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
     if (unexpectedParams.length > 0) {
@@ -779,18 +779,18 @@ const validateDocumentsListQuery = (req, res, next) => {
             message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
         });
     }
-    
+
     const { status, userRole, page = 1, limit = 10, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
-    
+
     // Validate status parameter
-    const allowedStatuses = ['pending', 'verified', 'rejected'];
+    const allowedStatuses = ['pending', 'verified', 'rejected', 'auto-verified', 'manual-pending-verification'];
     if (status && !allowedStatuses.includes(status)) {
         return res.status(400).json({
             success: false,
             message: `Status parameter must be one of: ${allowedStatuses.join(', ')}`
         });
     }
-    
+
     // Validate userRole parameter
     const allowedUserRoles = ['staff', 'hospital'];
     if (userRole && !allowedUserRoles.includes(userRole)) {
@@ -799,7 +799,7 @@ const validateDocumentsListQuery = (req, res, next) => {
             message: `User role parameter must be one of: ${allowedUserRoles.join(', ')}`
         });
     }
-    
+
     // Validate sortBy parameter
     const allowedSortBy = ['createdAt', 'updatedAt', 'documentType', 'status'];
     if (!allowedSortBy.includes(sortBy)) {
@@ -808,7 +808,7 @@ const validateDocumentsListQuery = (req, res, next) => {
             message: `Sort by parameter must be one of: ${allowedSortBy.join(', ')}`
         });
     }
-    
+
     // Validate sortOrder parameter
     const allowedSortOrder = ['asc', 'desc'];
     if (!allowedSortOrder.includes(sortOrder)) {
@@ -817,7 +817,7 @@ const validateDocumentsListQuery = (req, res, next) => {
             message: `Sort order parameter must be one of: ${allowedSortOrder.join(', ')}`
         });
     }
-    
+
     // Validate page parameter
     const pageNum = parseInt(page);
     if (isNaN(pageNum) || pageNum < 1) {
@@ -826,7 +826,7 @@ const validateDocumentsListQuery = (req, res, next) => {
             message: 'Page parameter must be a positive integer'
         });
     }
-    
+
     // Validate limit parameter
     const limitNum = parseInt(limit);
     if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
@@ -835,7 +835,7 @@ const validateDocumentsListQuery = (req, res, next) => {
             message: 'Limit parameter must be a positive integer between 1 and 100'
         });
     }
-    
+
     req.validatedQuery = {
         status: status || null,
         userRole: userRole || null,
@@ -844,7 +844,7 @@ const validateDocumentsListQuery = (req, res, next) => {
         sortBy,
         sortOrder
     };
-    
+
     next();
 };
 
