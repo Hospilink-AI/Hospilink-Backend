@@ -22,10 +22,17 @@ const {
 
 const { validateDutyCreation } = require('../middleware/validation.middleware');
 
+const { 
+    authRateLimit, 
+    otpRateLimit 
+} = require('../middleware/rateLimit.middleware');
+
+
 // Public admin auth routes
-router.post('/signin', validateAdminSignin, adminController.adminSignin);
-router.post('/signin/verify-otp', validateAdminOTP, adminController.adminVerifyOTP);
-router.post('/signin/resend-otp', validateAdminResendOTP, adminController.adminResendOTP);
+// Public admin auth routes
+router.post('/signin', authRateLimit, validateAdminSignin, adminController.adminSignin);
+router.post('/signin/verify-otp', otpRateLimit, validateAdminOTP, adminController.adminVerifyOTP);
+router.post('/signin/resend-otp', otpRateLimit, validateAdminResendOTP, adminController.adminResendOTP);
 
 
 // Protected admin routes 

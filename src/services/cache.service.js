@@ -270,6 +270,40 @@ class CacheService {
         }));
         
         return await this.pipeline(operations);
+    
+
+    }
+
+    
+    // Temporary user methods with redis ttl
+    // Store temp user data with TTL
+    async setTempUser(email, userData, ttl = 600) {
+        const key = `tempuser:${email.toLowerCase()}`;
+        return await this.set(key, userData, ttl);
+    }
+
+    // Get temp user data
+    async getTempUser(email) {
+        const key = `tempuser:${email.toLowerCase()}`;
+        return await this.get(key);
+    }
+
+    // Delete temp user data
+    async deleteTempUser(email) {
+        const key = `tempuser:${email.toLowerCase()}`;
+        return await this.del(key);
+    }
+
+    // Store OTP separately for faster verification
+    async setTempUserOTP(email, otpData, ttl = 600) {
+        const key = `otp:${email.toLowerCase()}`;
+        return await this.set(key, otpData, ttl);
+    }
+
+    // Get OTP for verification
+    async getTempUserOTP(email) {
+        const key = `otp:${email.toLowerCase()}`;
+        return await this.get(key);
     }
 
 }
