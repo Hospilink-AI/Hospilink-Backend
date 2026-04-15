@@ -35,8 +35,8 @@ exports.authRateLimit = createRateLimit(
 );
 
 exports.otpRateLimit = createRateLimit(
-    60 * 1000, // 1 minute
-    3, // 3 OTP requests per minute
+    15 * 60 * 1000, // 15 minute
+    3, // 3 OTP requests per 15 minute
     'Too many OTP requests. Please wait before requesting another.'
 );
 

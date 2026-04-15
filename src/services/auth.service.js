@@ -1,9 +1,9 @@
 const User = require('../models/User');
-const TempUser = require('../models/TempUser');
 const OTPService = require('./otp.service');
 const EmailService = require('./email.service');
 const logger = require('../utils/logger');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const cacheService = require('./cache.service');
 const { 
     ConflictError, 
@@ -16,7 +16,7 @@ const {
 class AuthService {
     async signup(userData) {
         if (userData.role === 'admin') {
-            throw new ValidationError('Admin accounts cannot be created through signup');
+            throw new ValidationError('Admin role is not allowed for signup');
         }
 
         const email = userData.email.toLowerCase();
@@ -31,43 +31,48 @@ class AuthService {
         // Check database with lean query for performance
         const existingUser = await User.findOne({ email }).lean();
         if (existingUser) {
-            await cacheService.set(cacheKey, true, 300); // Cache for 5 minutes
+            await cacheService.set(cacheKey, true, 300);
             throw new ConflictError('User already exists with this email');
         }
 
-        // Clean up existing temp user
-        await TempUser.deleteOne({ email });
+        // Clean up existing temp user in Redis
+        await cacheService.deleteTempUser(email);
+        await cacheService.del(`otp:${email}`);
 
         // Generate OTP
         const otp = OTPService.generateOTP();
         const otpExpiry = OTPService.getOTPExpiry();
 
-        // Create temp user
-        const tempUser = await TempUser.create({
+        // Hash password before storing in Redis
+        const hashedPassword = await bcrypt.hash(userData.password, 10);
+
+        // Store temp user data in Redis (10 minute TTL)
+        const tempUserData = {
             name: userData.name,
             email,
             role: userData.role,
-            password: userData.password,
-            otp: { code: otp, expiresAt: otpExpiry }
-        });
+            password: hashedPassword,
+            createdAt: new Date().toISOString()
+        };
 
-        // Cache OTP for faster verification
-        await cacheService.set(`otp:${email}`, { code: otp, expiresAt: otpExpiry }, 600);
+        await cacheService.setTempUser(email, tempUserData, 600);
+
+        // Store OTP separately for faster verification
+        await cacheService.setTempUserOTP(email, { code: otp, expiresAt: otpExpiry }, 600);
 
         try {
-            await EmailService.sendOTPEmail(tempUser.email, otp, tempUser.name);
+            await EmailService.sendOTPEmail(email, otp, userData.name);
         } catch (emailError) {
-            await TempUser.findByIdAndDelete(tempUser._id);
+            await cacheService.deleteTempUser(email);
             await cacheService.del(`otp:${email}`);
             throw new Error('Failed to send OTP email. Please try again.');
         }
 
-        logger.info(`New user registered: ${tempUser.email}`);
+        logger.info(`New user registered: ${email}`);
         
         return {
             message: 'User registered successfully. Please verify your email with the OTP sent.',
-            userId: tempUser._id,
-            email: tempUser.email
+            email
         };
     }
 
@@ -76,7 +81,6 @@ class AuthService {
     async verifyOTP(email, otp) {
         const emailLower = email.toLowerCase();
         const lockKey = `verify:${emailLower}`;
-        const cacheKey = `otp:${emailLower}`;
         
         // Acquire distributed lock to prevent race conditions
         const lockAcquired = await cacheService.acquireLock(lockKey, 5);
@@ -85,27 +89,22 @@ class AuthService {
         }
         
         try {
-            // Check cache first
-            const cachedOTP = await cacheService.get(cacheKey);
-            let tempUser;
-
-            if (cachedOTP && cachedOTP.code === otp && cachedOTP.expiresAt > new Date()) {
-                // OTP valid in cache, get user from database
-                tempUser = await TempUser.findOne({ email: emailLower }).select('+password');
-            } else {
-                // Fallback to database
-                tempUser = await TempUser.findOne({ email: emailLower }).select('+password');
-                if (!tempUser || !tempUser.verifyOTP(otp)) {
-                    throw new UnauthorizedError('Invalid or expired OTP');
-                }
+            // Get OTP from Redis
+            const otpData = await cacheService.getTempUserOTP(emailLower);
+            
+            if (!otpData || otpData.code !== otp || new Date(otpData.expiresAt) < new Date()) {
+                throw new UnauthorizedError('Invalid or expired OTP');
             }
 
+            // Get temp user data from Redis
+            const tempUser = await cacheService.getTempUser(emailLower);
+            
             if (!tempUser) {
                 throw new NotFoundError('User not found or already verified');
             }
 
             try {
-                // Move to User collection
+                // Create permanent user in MongoDB
                 const user = await User.create({
                     name: tempUser.name,
                     email: tempUser.email,
@@ -114,12 +113,10 @@ class AuthService {
                     isEmailVerified: true
                 });
 
-                // Delete from tempUser collection
-                await TempUser.deleteOne({ _id: tempUser._id });
-
-                // Use pipeline for cache operations
+                // Delete from Redis
                 await cacheService.pipeline([
-                    { type: 'del', key: cacheKey },
+                    { type: 'del', key: `otp:${emailLower}` },
+                    { type: 'del', key: `tempuser:${emailLower}` },
                     { type: 'set', key: `user:exists:${emailLower}`, value: true, ttl: 3600 },
                     { type: 'set', key: `user:${emailLower}`, value: { id: user._id, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified }, ttl: 300 },
                     { 
@@ -164,7 +161,7 @@ class AuthService {
 
     async resendOTP(email) {
         const emailLower = email.toLowerCase();
-        const tempUser = await TempUser.findOne({ email: emailLower });
+        const tempUser = await cacheService.getTempUser(emailLower);
         
         if (!tempUser) {
             throw new NotFoundError('User not found or already verified');
@@ -174,14 +171,7 @@ class AuthService {
         const otp = OTPService.generateOTP();
         const otpExpiry = OTPService.getOTPExpiry();
 
-        // Update temp user with new OTP
-        tempUser.otp = {
-            code: otp,
-            expiresAt: otpExpiry
-        };
-        await tempUser.save();
-
-        // Cache new OTP with pipeline
+        // Update OTP in Redis
         await cacheService.pipeline([
             { 
                 type: 'set', 
@@ -191,7 +181,7 @@ class AuthService {
             },
             { 
                 type: 'del', 
-                key: `user:exists:${emailLower}` // Clear existence cache
+                key: `user:exists:${emailLower}`
             }
         ]);
 

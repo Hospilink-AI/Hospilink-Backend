@@ -1,12 +1,7 @@
 const DutyService = require('../services/duty.service');
-const TempUserCleanupService = require('../services/tempUserCleanup.service');
 
 class CronJobs {
-    /**
-     * Calculate milliseconds until next scheduled time
-     * @param {number} intervalMinutes - Interval in minutes (e.g., 30 for every 30 minutes)
-     * @returns {number} Milliseconds until next scheduled time
-     */
+    // calculate milliseconds until next scheduled time
     static getMillisecondsUntilNext(intervalMinutes) {
         const now = new Date();
         const minutes = now.getMinutes();
@@ -30,12 +25,8 @@ class CronJobs {
         return msUntilNext > 1000 ? msUntilNext : intervalMinutes * 60 * 1000;
     }
 
-    /**
-     * Schedule a job to run at specific intervals on the clock
-     * @param {Function} jobFunction - The function to execute
-     * @param {number} intervalMinutes - Interval in minutes
-     * @param {string} jobName - Name of the job for logging
-     */
+    
+    // schedule a job to run at specific intervals on the clock
     static scheduleJob(jobFunction, intervalMinutes, jobName) {
         const runJob = async () => {
             try {
@@ -79,18 +70,7 @@ class CronJobs {
             1,
             'Auto-complete job'
         );
-        
-        // TempUser cleanup job - run every 30 minutes on the clock (:00 and :30)
-        this.scheduleJob(
-            async () => {
-                const deleted = await TempUserCleanupService.cleanupExpiredTempUsers();
-                if (deleted > 0) {
-                    console.log(`Cleaned up ${deleted} expired temp users at ${new Date().toLocaleString()}`);
-                }
-            },
-            30,
-            'TempUser cleanup job'
-        );
+    
 
         // Mark incomplete duties job - run every 30 minutes on the clock (:00 and :30)
         this.scheduleJob(
@@ -104,7 +84,7 @@ class CronJobs {
             'Mark incomplete duties job'
         );
 
-        console.log('Cron jobs scheduled: Auto-complete (1 min), TempUser cleanup (30 min), Mark incomplete (30 min)');
+        console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min)');
     }
 }
 

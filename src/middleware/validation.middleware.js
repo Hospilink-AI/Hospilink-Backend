@@ -209,7 +209,7 @@ const validateResetPassword = (req, res, next) => {
 
 
 const validateMedicalStaffProfile = (req, res, next) => {
-    const { fullName, jobRole, city, area, phoneNumber, preCapturedLocation } = req.body;
+    const { fullName, jobRole, city, area, phoneNumber} = req.body;
     const errors = [];
 
     // Check for unexpected fields
@@ -219,7 +219,6 @@ const validateMedicalStaffProfile = (req, res, next) => {
         'city',
         'area',
         'phoneNumber',
-        'preCapturedLocation',
         'profileSummary',
         'education',
         'skills'
