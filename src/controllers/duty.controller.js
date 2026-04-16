@@ -3,6 +3,8 @@ const EmailService = require('../services/email.service');
 const { asyncHandler } = require('../middleware/error.middleware');
 const { normalizeRole } = require('../utils/helpers');
 const notificationEmitter = require('../services/notificationEmitter');
+const activityLogEmitter = require('../services/activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
 const logger = require('../utils/logger');
@@ -74,6 +76,11 @@ exports.createDuty = asyncHandler(async (req, res) => {
 
         // Emit notification to both hospital and matching staff
         await notificationEmitter.emitDutyCreated(result.duty, hospital, staffUserIds, userId);
+        
+        // Log duty creation activity
+        const isEmergency = result.duty.urgency === 'emergency';
+        activityLogEmitter.logDutyCreated(result.duty, hospital, req, isEmergency)
+            .catch(err => logger.error('Error logging duty creation:', err));
     } catch (error) {
         logger.error('Error emitting duty created notification: ' + error.message);
         // Don't fail the request if notification fails
@@ -211,6 +218,10 @@ exports.acceptDuty = asyncHandler(async (req, res) => {
             const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
 
             await notificationEmitter.emitDutyAccepted(duty, staff, hospitalUserId, userId);
+            
+            // Log duty acceptance activity
+            activityLogEmitter.logDutyAccepted(duty, staff, req)
+                .catch(err => logger.error('Error logging duty acceptance:', err));
         } catch (error) {
             logger.error('Error emitting duty accepted notification: ' + error.message);
             // Don't fail the request if notification fails
@@ -324,6 +335,10 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
             
             if (staff) {
                 await notificationEmitter.emitDutyCompleted(duty, staff, hospitalUserId);
+                
+                // Log duty completion activity
+                activityLogEmitter.logDutyStatusChange(duty, staff, status, req)
+                    .catch(err => logger.error('Error logging duty completion:', err));
             }
         } 
         // If staff is en route, send en route notification to hospital
@@ -358,6 +373,10 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
                 }
                 
                 await notificationEmitter.emitStaffEnRoute(duty, staff, hospitalUserId, eta);
+                
+                // Log duty started activity
+                activityLogEmitter.logDutyStatusChange(duty, staff, status, req)
+                    .catch(err => logger.error('Error logging duty start:', err));
             }
         }
         // If staff is on-site (in-progress), send on-site notification to hospital AND in-progress notification to staff
@@ -375,6 +394,10 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
                 if (hospital) {
                     await notificationEmitter.emitDutyInProgress(duty, hospital, staffUserId);
                 }
+                
+                // Log duty in-progress activity
+                activityLogEmitter.logDutyStatusChange(duty, staff, status, req)
+                    .catch(err => logger.error('Error logging duty in-progress:', err));
             }
         }
     } catch (error) {
@@ -472,6 +495,25 @@ exports.editDuty = asyncHandler(async (req, res) => {
             if (changes.length > 0) {
                 const staffUserId = dutyBeforeUpdate.assignedTo.user.toString();
                 await notificationEmitter.emitDutyEdited(duty, changes, staffUserId);
+                
+                // Log duty edit activity
+                const hospital = await Hospital.findOne({ user: userId });
+                if (hospital) {
+                    const actor = {
+                        userId: userId,
+                        name: hospital.hospitalLegalName || hospital.name,
+                        role: 'hospital',
+                        email: hospital.user?.email
+                    };
+                    
+                    activityLogEmitter.emitDutyActivity(
+                        ACTIVITY_ACTIONS.DUTY_EDITED,
+                        duty,
+                        actor,
+                        { changes },
+                        req
+                    ).catch(err => logger.error('Error logging duty edit:', err));
+                }
             }
         }
     } catch (error) {
@@ -623,6 +665,38 @@ exports.cancelDuty = asyncHandler(async (req, res) => {
                         recipientUserIds
                     );
                     logger.debug('WebSocket notifications sent successfully');
+                    
+                    // Log duty cancellation activity
+                    try {
+                        // Get user name from duty.hospital or duty.assignedTo
+                        let userName = req.user.name;
+                        if (!userName) {
+                            if (req.user.role === 'hospital' && duty.hospital) {
+                                userName = duty.hospital.hospitalLegalName || duty.hospital.user?.name || 'Hospital';
+                            } else if (req.user.role === 'staff' && duty.assignedTo) {
+                                userName = duty.assignedTo.fullName || duty.assignedTo.user?.name || 'Staff';
+                            } else {
+                                userName = 'User';
+                            }
+                        }
+                        
+                        const actor = {
+                            userId: req.user.id,
+                            name: userName,
+                            role: req.user.role,
+                            email: req.user.email || 'unknown'
+                        };
+                        
+                        activityLogEmitter.emitDutyActivity(
+                            ACTIVITY_ACTIONS.DUTY_CANCELLED,
+                            duty,
+                            actor,
+                            { reason, reasonText, cancelledBy: req.user.role },
+                            req
+                        ).catch(err => logger.error('Error logging duty cancellation:', err));
+                    } catch (logError) {
+                        logger.error('Error preparing duty cancellation log:', logError);
+                    }
                 } else {
                     logger.debug('No WebSocket recipients found');
                 }

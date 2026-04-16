@@ -1550,6 +1550,96 @@ class DutyService {
 
         return generateEarningsPDF(res, pdfData);
     }
+
+    /**
+     * Check for duties unassigned for 15 minutes and notify hospital (HIGH)
+     */
+    async checkUnassigned15MinDuties() {
+        const istNow = getCurrentIST();
+        const fifteenMinAgo = new Date(istNow.getTime() - 15 * 60 * 1000);
+        const sixteenMinAgo = new Date(istNow.getTime() - 16 * 60 * 1000);
+
+        // Duties still 'available' created between 15-16 minutes ago (1-min window to avoid repeat)
+        const duties = await Duty.find({
+            status: 'available',
+            createdAt: { $gte: sixteenMinAgo, $lte: fifteenMinAgo },
+            unassigned15MinNotified: { $ne: true }
+        }).populate('hospital', 'hospitalLegalName user location currentAddress');
+
+        if (duties.length === 0) return 0;
+
+        const notificationEmitter = require('./notificationEmitter');
+        let notified = 0;
+
+        for (const duty of duties) {
+            try {
+                if (!duty.hospital?.user) continue;
+                const hospitalUserId = duty.hospital.user._id?.toString() || duty.hospital.user.toString();
+
+                await notificationEmitter.emitDutyUnassigned15Min(duty, hospitalUserId);
+
+                // Mark as notified to prevent duplicates
+                await Duty.updateOne({ _id: duty._id }, { $set: { unassigned15MinNotified: true } });
+                notified++;
+            } catch (err) {
+                console.error(`Error sending 15-min unassigned notification for duty ${duty._id}:`, err);
+            }
+        }
+
+        return notified;
+    }
+
+    /**
+     * Check for duties still unassigned 30 minutes before shift start and notify hospital (CRITICAL)
+     */
+    async checkUnfilledCriticalDuties() {
+        const istNow = getCurrentIST();
+
+        // Find all available duties today
+        const istToday = new Date(istNow.getFullYear(), istNow.getMonth(), istNow.getDate());
+        const duties = await Duty.find({
+            status: 'available',
+            date: {
+                $gte: istToday,
+                $lt: new Date(istToday.getTime() + 24 * 60 * 60 * 1000)
+            },
+            unfilledCriticalNotified: { $ne: true }
+        }).populate('hospital', 'hospitalLegalName user location currentAddress');
+
+        if (duties.length === 0) return 0;
+
+        const notificationEmitter = require('./notificationEmitter');
+        let notified = 0;
+
+        for (const duty of duties) {
+            try {
+                if (!duty.hospital?.user) continue;
+
+                const [startHours, startMinutes] = duty.startTime.split(':').map(Number);
+                const dutyStartDate = new Date(duty.date);
+                const istDutyDate = toIST(dutyStartDate);
+                const istDutyStartTime = new Date(istDutyDate);
+                istDutyStartTime.setHours(startHours, startMinutes, 0, 0);
+
+                const minutesToShift = Math.floor((istDutyStartTime - istNow) / (1000 * 60));
+
+                // Notify in the 29-31 minute window before shift start
+                if (minutesToShift >= 29 && minutesToShift <= 31) {
+                    const hospitalUserId = duty.hospital.user._id?.toString() || duty.hospital.user.toString();
+
+                    await notificationEmitter.emitDutyUnfilledCritical(duty, hospitalUserId, minutesToShift);
+
+                    // Mark as notified to prevent duplicates
+                    await Duty.updateOne({ _id: duty._id }, { $set: { unfilledCriticalNotified: true } });
+                    notified++;
+                }
+            } catch (err) {
+                console.error(`Error sending critical unfilled notification for duty ${duty._id}:`, err);
+            }
+        }
+
+        return notified;
+    }
 }
 
 module.exports = new DutyService();

@@ -973,6 +973,98 @@ class NotificationEmitter {
             console.error('Error emitting document rejected notification:', error);
         }
     }
+
+    /**
+     * Emit duty unassigned 15-minute warning to hospital (HIGH priority)
+     * Triggered when duty has been live for 15 minutes with no acceptance
+     * @param {Object} duty - Duty object (populated with hospital)
+     * @param {string} hospitalUserId - Hospital user ID
+     */
+    async emitDutyUnassigned15Min(duty, hospitalUserId) {
+        try {
+            if (!duty || !hospitalUserId) {
+                console.error('Missing required parameters for emitDutyUnassigned15Min');
+                return;
+            }
+
+            const ward = duty.ward || duty.location || 'your ward';
+            const date = new Date(duty.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+            const payload = {
+                type: 'DUTY_UNASSIGNED_15MIN',
+                priority: 'HIGH',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    ward
+                },
+                message: `No staff assigned yet for your ${duty.staffRole} request at ${ward} on ${date}. Broaden the search radius or post as urgent?`,
+                timestamp: new Date().toISOString()
+            };
+
+            const { unreadCount } = await notificationService.createNotificationWithCount(
+                hospitalUserId,
+                'DUTY_UNASSIGNED_15MIN',
+                payload
+            );
+
+            websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
+            websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+
+            console.log(`Duty unassigned 15-min notification sent to hospital ${hospitalUserId} for duty ${duty._id}`);
+        } catch (error) {
+            console.error('Error emitting duty unassigned 15-min notification:', error);
+        }
+    }
+
+    /**
+     * Emit duty unfilled critical alert to hospital (CRITICAL priority)
+     * Triggered when duty is still unassigned 30 minutes before shift start
+     * @param {Object} duty - Duty object (populated with hospital)
+     * @param {string} hospitalUserId - Hospital user ID
+     * @param {number} minutesToShift - Minutes remaining until shift start
+     */
+    async emitDutyUnfilledCritical(duty, hospitalUserId, minutesToShift) {
+        try {
+            if (!duty || !hospitalUserId) {
+                console.error('Missing required parameters for emitDutyUnfilledCritical');
+                return;
+            }
+
+            const ward = duty.ward || duty.location || 'your ward';
+
+            const payload = {
+                type: 'DUTY_UNFILLED_CRITICAL',
+                priority: 'CRITICAL',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    ward
+                },
+                message: `ALERT: Your ${duty.staffRole} request at ${ward} remains unfilled with ${minutesToShift} minutes until shift start. Immediate action required.`,
+                timestamp: new Date().toISOString()
+            };
+
+            const { unreadCount } = await notificationService.createNotificationWithCount(
+                hospitalUserId,
+                'DUTY_UNFILLED_CRITICAL',
+                payload
+            );
+
+            websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
+            websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+
+            console.log(`Duty unfilled CRITICAL notification sent to hospital ${hospitalUserId} for duty ${duty._id}`);
+        } catch (error) {
+            console.error('Error emitting duty unfilled critical notification:', error);
+        }
+    }
 }
 
 module.exports = new NotificationEmitter();
