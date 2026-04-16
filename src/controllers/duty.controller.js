@@ -679,10 +679,26 @@ exports.getDutyRoute = asyncHandler(async (req, res) => {
     const staffId = req.user.id;
 
     try {
-        // Get staff location using dashboard service
-        const locationInfo = await DashboardService.getStaffLocationForDuties(staffId);
+        let currentLocation;
+        let permissionGranted = false;
+        let locationSource = 'unknown';
+
+        // Use location from request body if provided
+        if (req.body.currentLocation && 
+            req.body.currentLocation.latitude && 
+            req.body.currentLocation.longitude) {
+            currentLocation = req.body.currentLocation;
+            permissionGranted = req.body.locationPermission === 'granted';
+            locationSource = 'request_body'; // Location from client request
+        } else {
+            // Fallback to dashboard service
+            const locationInfo = await DashboardService.getStaffLocationForDuties(staffId);
+            currentLocation = locationInfo.location;
+            permissionGranted = locationInfo.permissionGranted;
+            locationSource = locationInfo.source; // 'browser' or 'profile' from dashboard service
+        }
         
-        if (!locationInfo.permissionGranted) {
+        if (!permissionGranted) {
             return res.status(400).json({
                 success: false,
                 message: 'Location permission is required to view directions. Please enable location in your dashboard.',
@@ -690,21 +706,24 @@ exports.getDutyRoute = asyncHandler(async (req, res) => {
             });
         }
 
-        const result = await DutyService.getJobRouteInfo(id, staffId, locationInfo.location);
+        const result = await DutyService.getJobRouteInfo(id, staffId, currentLocation);
 
         // Initialize tracking session
         await locationTrackingService.storeInitialLocation(
             staffId,
             id,
             result.hospital.id,
-            req.currentLocation
+            currentLocation
         );
 
         res.status(200).json({
             success: true,
             job: result.job,
             hospital: result.hospital,
-            staffLocation: req.body.currentLocation,
+            staffLocation: {
+                ...currentLocation,
+                source: locationSource
+            },
             route: result.route,
             tracking: {
                 sessionId: `tracking_${staffId}_${Date.now()}`,

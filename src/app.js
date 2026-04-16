@@ -9,6 +9,13 @@ require("dotenv").config();
 
 const authRoutes = require("./routes/auth.routes");
 const reviewRoutes = require("./routes/review.routes");
+const adminRoutes = require("./routes/admin.routes");
+const dashboardRoutes = require("./routes/dashboard.routes");
+const documentRoutes = require("./routes/document.routes");
+const dutyRoutes = require("./routes/duty.routes");
+const hospitalDashboardRoutes = require("./routes/hospitalDashboard.routes");
+const notificationRoutes = require("./routes/notification.routes");
+const profileRoutes = require("./routes/profile.routes");
 const logger = require("./utils/logger");
 // Only run interval-based cron in persistent environments (local dev)
 // On Vercel, cron jobs are handled via api/cron/* endpoints + vercel.json schedules
@@ -108,24 +115,27 @@ app.get("/", (req, res) => {
 
 // API Routes
 app.use("/api/auth", authRoutes);
-app.use("/api/profile", require("./routes/profile.routes"));
-app.use("/api/dashboard", require("./routes/dashboard.routes"));
-app.use("/api/notifications", require("./routes/notification.routes"));
+app.use("/api/profile", profileRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/notifications", notificationRoutes);
 app.use("/api/reviews", reviewRoutes);
 
 
 // Document Management Routes
-app.use("/api/documents", require("./routes/document.routes"));
+app.use("/api/documents", documentRoutes);
 
 // Agent - AI Job Finder routes (mounted BEFORE general /api route to avoid auth conflicts)
 const agentApp = require("../agent/api").app;
 app.use("/api/agent", agentApp);
 
 // Admin routes
-app.use("/api/admin", require("./routes/admin.routes"));
+app.use("/api/admin", adminRoutes);
+
+// Hospital dashboard routes
+app.use("/api/hospital-dashboard", hospitalDashboardRoutes);
 
 // General API routes (should be last to avoid matching Agent routes)
-app.use("/api", require("./routes/duty.routes"));
+app.use("/api", dutyRoutes);
 
 // 404 handler - FIXED: Use a function instead of *
 app.use((req, res, next) => {
