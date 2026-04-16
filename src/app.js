@@ -134,6 +134,9 @@ app.use("/api/admin", adminRoutes);
 // Hospital dashboard routes
 app.use("/api/hospital-dashboard", hospitalDashboardRoutes);
 
+// Activity Log routes (admin only)
+app.use("/api/admin/activity-logs", require("./routes/activityLog.routes"));
+
 // General API routes (should be last to avoid matching Agent routes)
 app.use("/api", dutyRoutes);
 
