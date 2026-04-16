@@ -75,13 +75,13 @@ router.post(
 // Dashboard location permission routes
 router.post('/dashboard/location-permission',
     authorize('staff'),
-    validateDashboardLocationPermission,  
+    validateDashboardLocationPermission,
     dashboardController.checkDashboardLocationPermission
 );
- 
+
 router.put('/dashboard/update-location',
     authorize('staff'),
-    validateDashboardLocationUpdate,      
+    validateDashboardLocationUpdate,
     dashboardController.updateCurrentLocation
 );
 
@@ -95,6 +95,24 @@ router.delete(
     '/delete-picture',
     protect, // Add authentication
     profileController.deleteProfilePicture
+);
+// Skills management (staff only)
+router.post(
+    '/skills',
+    authorize('staff'),
+    profileController.addSkills
+);
+
+router.get(
+    '/skills',
+    authorize('staff'),
+    profileController.getSkills
+);
+
+router.patch(
+    '/skills',
+    authorize('staff'),
+    profileController.updateSkills
 );
 
 module.exports = router;

@@ -185,6 +185,36 @@ class ProfileController {
 
         res.status(200).json(result);
     });
+    // Add skills
+    addSkills = asyncHandler(async (req, res) => {
+        const userId = req.user.id;
+        const { skills } = req.body;
+
+        const result = await ProfileService.addSkills(userId, skills);
+
+        res.status(200).json(result);
+    });
+
+
+    // Get skills
+    getSkills = asyncHandler(async (req, res) => {
+        const userId = req.user.id;
+
+        const result = await ProfileService.getSkills(userId);
+
+        res.status(200).json(result);
+    });
+
+
+    // Update skills
+    updateSkills = asyncHandler(async (req, res) => {
+        const userId = req.user.id;
+        const { skills } = req.body;
+
+        const result = await ProfileService.updateSkills(userId, skills);
+
+        res.status(200).json(result);
+    });
 
 }
 

@@ -994,7 +994,7 @@ class ProfileService {
                 // Save metadata in DB
                 await model.findOneAndUpdate(
                     { user: userId },
-                    { 
+                    {
                         profilePicture: {
                             s3Key: key,
                             uploadedAt: new Date(),
@@ -1083,6 +1083,81 @@ class ProfileService {
         } catch (error) {
             throw new Error(error.message);
         }
+    }
+    // Add skills (append unique)
+    async addSkills(userId, skills = []) {
+        if (!Array.isArray(skills) || skills.length === 0) {
+            throw new Error('Skills must be a non-empty array');
+        }
+
+        const cleanedSkills = skills.map(s => s.trim()).filter(Boolean);
+
+        const updated = await MedicalStaff.findOneAndUpdate(
+            { user: userId },
+            {
+                $addToSet: { skills: { $each: cleanedSkills } }, // ✅ no duplicates
+                $set: { updatedAt: new Date() }
+            },
+            {
+                new: true
+            }
+        );
+
+        if (!updated) throw new Error('Medical staff profile not found');
+
+        await cacheService.invalidateProfile(userId, 'staff');
+
+        return {
+            success: true,
+            skills: updated.skills,
+            message: 'Skills added successfully'
+        };
+    }
+
+
+    // Get skills
+    async getSkills(userId) {
+        const staff = await MedicalStaff.findOne({ user: userId })
+            .select('skills')
+            .lean();
+
+        if (!staff) throw new Error('Medical staff profile not found');
+
+        return {
+            success: true,
+            skills: staff.skills || []
+        };
+    }
+
+
+    // Update skills
+    async updateSkills(userId, skills = []) {
+        if (!Array.isArray(skills)) {
+            throw new Error('Skills must be an array');
+        }
+
+        const cleanedSkills = skills.map(s => s.trim()).filter(Boolean);
+
+        const updated = await MedicalStaff.findOneAndUpdate(
+            { user: userId },
+            {
+                $set: {
+                    skills: cleanedSkills,
+                    updatedAt: new Date()
+                }
+            },
+            { new: true }
+        );
+
+        if (!updated) throw new Error('Medical staff profile not found');
+
+        await cacheService.invalidateProfile(userId, 'staff');
+
+        return {
+            success: true,
+            skills: updated.skills,
+            message: 'Skills updated successfully'
+        };
     }
 
 }
