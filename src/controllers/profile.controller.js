@@ -1,5 +1,7 @@
 const ProfileService = require('../services/profile.service');
 const { asyncHandler } = require('../middleware/error.middleware');
+const activityLogEmitter = require('../services/activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 
 class ProfileController {
     // Create medical staff profile
@@ -8,6 +10,24 @@ class ProfileController {
         const profileData = req.body;
 
         const result = await ProfileService.createMedicalStaffProfile(userId, profileData);
+
+        // Log profile creation activity
+        if (result.profile) {
+            const actor = {
+                userId: userId,
+                name: result.profile.fullName || req.user.name,
+                role: 'staff',
+                email: req.user.email
+            };
+            
+            activityLogEmitter.emitUserActivity(
+                ACTIVITY_ACTIONS.PROFILE_CREATED,
+                req.user,
+                actor,
+                { jobRole: result.profile.jobRole, city: result.profile.city },
+                req
+            ).catch(err => console.error('Error logging profile creation:', err));
+        }
 
         res.status(201).json({
             success: true,
@@ -22,6 +42,24 @@ class ProfileController {
         const profileData = req.body;
 
         const result = await ProfileService.createHospitalProfile(userId, profileData);
+
+        // Log profile creation activity
+        if (result.profile) {
+            const actor = {
+                userId: userId,
+                name: result.profile.hospitalLegalName || req.user.name,
+                role: 'hospital',
+                email: req.user.email
+            };
+            
+            activityLogEmitter.emitUserActivity(
+                ACTIVITY_ACTIONS.PROFILE_CREATED,
+                req.user,
+                actor,
+                { hospitalName: result.profile.hospitalLegalName, location: result.profile.location },
+                req
+            ).catch(err => console.error('Error logging profile creation:', err));
+        }
 
         res.status(201).json({
             success: true,
@@ -49,6 +87,22 @@ class ProfileController {
         const updateData = req.body;
 
         const result = await ProfileService.updateUserProfile(userId, updateData);
+
+        // Log profile update activity
+        const actor = {
+            userId: userId,
+            name: req.user.name,
+            role: req.user.role,
+            email: req.user.email
+        };
+        
+        activityLogEmitter.emitUserActivity(
+            ACTIVITY_ACTIONS.PROFILE_UPDATED,
+            req.user,
+            actor,
+            { fieldsUpdated: Object.keys(updateData) },
+            req
+        ).catch(err => console.error('Error logging profile update:', err));
 
         res.status(200).json({
             success: true,

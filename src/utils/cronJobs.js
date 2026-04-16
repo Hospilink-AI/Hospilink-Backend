@@ -1,4 +1,6 @@
 const DutyService = require('../services/duty.service');
+const activityLogEmitter = require('../services/activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('./activityLog.constants');
 
 class CronJobs {
     // calculate milliseconds until next scheduled time
@@ -56,15 +58,35 @@ class CronJobs {
                 const completed = await DutyService.autoCompleteDuties();
                 const expired = await DutyService.expireUnacceptedDuties();
                 const reminders = await DutyService.sendNavigationReminders();
+                const unassigned15 = await DutyService.checkUnassigned15MinDuties();
+                const unfilledCritical = await DutyService.checkUnfilledCriticalDuties();
                 
                 if (completed > 0) {
                     console.log(`Auto-completed ${completed} duties at ${new Date().toLocaleString()}`);
+                    
+                    // Log auto-complete activity
+                    activityLogEmitter.emitSystemActivity(
+                        ACTIVITY_ACTIONS.DUTY_AUTO_COMPLETED,
+                        { dutiesCompleted: completed, timestamp: new Date().toISOString() }
+                    ).catch(err => console.error('Error logging auto-complete:', err));
                 }
                 if (expired > 0) {
                     console.log(`Auto-expired ${expired} duties at ${new Date().toLocaleString()}`);
+                    
+                    // Log duty expiration activity
+                    activityLogEmitter.emitSystemActivity(
+                        ACTIVITY_ACTIONS.DUTY_EXPIRED,
+                        { dutiesExpired: expired, timestamp: new Date().toISOString() }
+                    ).catch(err => console.error('Error logging duty expiration:', err));
                 }
                 if (reminders > 0) {
                     console.log(`Sent ${reminders} navigation reminders at ${new Date().toLocaleString()}`);
+                }
+                if (unassigned15 > 0) {
+                    console.log(`Sent ${unassigned15} duty unassigned 15-min notifications`);
+                }
+                if (unfilledCritical > 0) {
+                    console.log(`Sent ${unfilledCritical} duty unfilled critical notifications`);
                 }
             },
             1,
@@ -78,6 +100,12 @@ class CronJobs {
                 const markedIncomplete = await DutyService.markIncompleteDuties();
                 if (markedIncomplete > 0) {
                     console.log(`Marked ${markedIncomplete} duties incomplete at ${new Date().toLocaleString()}`);
+                    
+                    // Log mark incomplete activity
+                    activityLogEmitter.emitSystemActivity(
+                        ACTIVITY_ACTIONS.DUTY_MARKED_INCOMPLETE,
+                        { dutiesMarked: markedIncomplete, timestamp: new Date().toISOString() }
+                    ).catch(err => console.error('Error logging mark incomplete:', err));
                 }
             },
             30,
@@ -85,6 +113,16 @@ class CronJobs {
         );
 
         console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min)');
+        
+        // Log cron job initialization
+        activityLogEmitter.emitSystemActivity(
+            ACTIVITY_ACTIONS.CRON_JOB_EXECUTED,
+            { 
+                jobName: 'Cron Jobs Initialization',
+                jobs: ['Auto-complete', 'Mark incomplete'],
+                timestamp: new Date().toISOString()
+            }
+        ).catch(err => console.error('Error logging cron initialization:', err));
     }
 }
 

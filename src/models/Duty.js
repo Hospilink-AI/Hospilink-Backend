@@ -169,6 +169,14 @@ const dutySchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    unassigned15MinNotified: {
+        type: Boolean,
+        default: false
+    },
+    unfilledCriticalNotified: {
+        type: Boolean,
+        default: false
+    },
     createdAt: {
         type: Date,
         default: Date.now
