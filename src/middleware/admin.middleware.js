@@ -701,7 +701,17 @@ const validateMedicalStaffListQuery = (req, res, next) => {
     const { search, role, availability, page = 1, limit = 10 } = req.query;
 
     // Validate role parameter
-    const allowedRoles = ['doctor', 'nurse', 'technician', 'pharmacist', 'therapist', 'other'];
+    const allowedRoles = [
+        'rmo', 'dmo', 'general_physician', 'intensivist', 'emergency_doctor',
+        'anesthetist', 'pediatrician', 'gynecologist', 'orthopedic_surgeon',
+        'general_surgeon', 'radiologist', 'pathologist', 'staff_nurse',
+        'icu_nurse', 'emergency_nurse', 'ot_nurse', 'dialysis_nurse', 'nicu_nurse',
+        'lab_technician', 'radiology_technician', 'ot_technician', 'dialysis_technician',
+        'cath_lab_technician', 'icu_technician', 'ward_boy', 'ayah', 'opd_attendant',
+        'emergency_attendant', 'patient_care_taker', 'pharmacist', 'pharmacy_assistant',
+        'biomedical_engineer', 'housekeeping_staff', 'security_guard', 'ambulance_driver',
+        'receptionist', 'billing_executive', 'medical_records_staff', 'hr_accounts'
+    ];
     if (role && !allowedRoles.includes(role)) {
         return res.status(400).json({
             success: false,
