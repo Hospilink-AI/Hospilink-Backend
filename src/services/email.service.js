@@ -134,6 +134,68 @@ class EmailService {
     }
 
 
+
+    async sendAdminLoginAlertEmail(adminName, adminEmail, deviceName, location, time) {
+        try {
+            const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+            
+            if (!alertEmail) {
+                logger.warn('ADMIN_LOGIN_ALERT_EMAIL not configured, skipping alert email');
+                return false;
+            }
+
+            const mailOptions = {
+                from: `HospiLink Security <${process.env.EMAIL_FROM}>`,
+                to: alertEmail,
+                subject: `🔔 Admin Login Alert - ${adminName}`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: #3498db; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">🔔 Admin Login Notification</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p><strong>Admin Name:</strong> ${adminName}</p>
+                            <p><strong>Admin Email:</strong> ${adminEmail}</p>
+                            
+                            <div style="background-color: #f8f9fa; border-left: 4px solid #3498db; padding: 15px; margin: 20px 0;">
+                                <h4 style="margin-top: 0; color: #2c3e50;">Login Details</h4>
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <tr>
+                                        <td style="padding: 8px 0; color: #7f8c8d;"><strong>Device:</strong></td>
+                                        <td style="padding: 8px 0;">${deviceName}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 8px 0; color: #7f8c8d;"><strong>Location:</strong></td>
+                                        <td style="padding: 8px 0;">${location}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 8px 0; color: #7f8c8d;"><strong>Time:</strong></td>
+                                        <td style="padding: 8px 0;">${time}</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            
+                            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">
+                                © ${new Date().getFullYear()} HospiLink. All rights reserved.<br>
+                                This is an automated login notification. Please do not reply.
+                            </p>
+                        </div>
+                    </div>
+                `
+            };
+
+            await this.transporter.sendMail(mailOptions);
+            logger.info(`Admin login alert email sent to ${alertEmail} for admin ${adminEmail}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending admin login alert email: ${error.message}`);
+            // Don't throw error to avoid breaking login flow
+            return false;
+        }
+    }
+
+    
     
     async sendDutyAcceptanceEmail(email, userName, dutyDetails) {
         try {

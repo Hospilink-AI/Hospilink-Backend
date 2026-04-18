@@ -41,6 +41,27 @@ const userSchema = new mongoose.Schema({
         code: String,
         expiresAt: Date
     },
+
+    // Track admin login devices for security alerts
+    loginDevices: [{
+        deviceId: {
+            type: String,
+            required: true
+        },
+        deviceName: String,
+        ip: String,
+        userAgent: String,
+        location: {
+            city: String,
+            region: String,
+            country: String
+        },
+        lastLoginAt: {
+            type: Date,
+            default: Date.now
+        }
+    }],
+    
     createdAt: {
         type: Date,
         default: Date.now
