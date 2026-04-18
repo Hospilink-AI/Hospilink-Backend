@@ -24,7 +24,8 @@ const { validateDutyCreation } = require('../middleware/validation.middleware');
 
 const { 
     authRateLimit, 
-    otpRateLimit 
+    otpRateLimit,
+    generalRateLimit 
 } = require('../middleware/rateLimit.middleware');
 
 
@@ -33,7 +34,7 @@ const {
 router.post('/signin', authRateLimit, validateAdminSignin, adminController.adminSignin);
 router.post('/signin/verify-otp', otpRateLimit, validateAdminOTP, adminController.adminVerifyOTP);
 router.post('/signin/resend-otp', otpRateLimit, validateAdminResendOTP, adminController.adminResendOTP);
-
+router.post('/logout', generalRateLimit, protect, adminController.adminLogout);
 
 // Protected admin routes 
 router.use(protect);

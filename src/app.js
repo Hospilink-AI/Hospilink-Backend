@@ -62,7 +62,7 @@ app.use((req, res, next) => {
 app.use(morgan("combined"));
 
 // Add specific trust proxy setting
-app.set("trust proxy", ["loopback", "linklocal", "uniquelocal"]);
+app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal', '172.16.0.0/12', '192.168.0.0/16', '10.0.0.0/8']);
 
 // Request timeout middleware
 app.use((req, res, next) => {
