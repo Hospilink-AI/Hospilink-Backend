@@ -8,7 +8,8 @@ const {
     UnauthorizedError,
     ValidationError 
 } = require('../middleware/error.middleware');
-
+const deviceInfoService = require('./deviceInfo.service');
+const cacheService = require('./cache.service');
 
 
 class AdminAuthService {
@@ -71,7 +72,8 @@ class AdminAuthService {
     }
 
    
-    async verifyOTP(email, otp) {
+
+    async verifyOTP(email, otp, req = null) {
         try {
             // Find admin user
             const admin = await User.findOne({ 
@@ -107,6 +109,71 @@ class AdminAuthService {
             await redisClient.getClientAsync().then(redis => {
                 return redis.del(redisKey);
             });
+
+            // Track device and send alert on EVERY login
+            if (req) {
+                const deviceInfo = deviceInfoService.extractDeviceInfo(req);
+                
+                // Debug logging
+                logger.info(`Admin login attempt - IP: ${deviceInfo.ip}, User-Agent: ${deviceInfo.userAgent}`);
+                logger.info(`Request headers: ${JSON.stringify(req.headers)}`);
+                
+                const location = await deviceInfoService.getLocationFromIP(deviceInfo.ip);
+                const deviceId = deviceInfoService.generateDeviceId(deviceInfo.ip, deviceInfo.userAgent);
+                
+                // More debug logging
+                logger.info(`Generated device ID: ${deviceId}, Location: ${JSON.stringify(location)}`);
+
+                // Update device information
+                if (!admin.loginDevices) {
+                    admin.loginDevices = [];
+                }
+
+                // Check if device exists
+                const existingDevice = admin.loginDevices?.find(d => d.deviceId === deviceId);
+
+                if (existingDevice) {
+                    // Update last login time for existing device
+                    existingDevice.lastLoginAt = new Date();
+                } else {
+                    // Add new device
+                    admin.loginDevices.push({
+                        deviceId,
+                        deviceName: deviceInfo.deviceName,
+                        ip: deviceInfo.ip,
+                        userAgent: deviceInfo.userAgent,
+                        location,
+                        lastLoginAt: new Date()
+                    });
+                }
+
+                // Keep only last 10 devices to prevent array bloat
+                if (admin.loginDevices.length > 10) {
+                    admin.loginDevices = admin.loginDevices
+                        .sort((a, b) => new Date(b.lastLoginAt) - new Date(a.lastLoginAt))
+                        .slice(0, 10);
+                }
+
+                await admin.save();
+
+                // Send alert email on EVERY login
+                const loginTime = new Date().toLocaleString('en-IN', {
+                    timeZone: 'Asia/Kolkata',
+                    dateStyle: 'medium',
+                    timeStyle: 'short'
+                });
+                const locationString = `${location.city}, ${location.region}, ${location.country}`;
+                
+                await EmailService.sendAdminLoginAlertEmail(
+                    admin.name,
+                    admin.email,
+                    deviceInfo.deviceName,
+                    locationString,
+                    loginTime
+                );
+
+                logger.info(`Admin login alert sent for ${admin.email}`);
+            }
 
             // Generate JWT token
             const token = require('jsonwebtoken').sign(
@@ -182,6 +249,31 @@ class AdminAuthService {
         } catch (error) {
             logger.error(`Admin resend OTP error: ${error.message}`);
             throw error;
+        }
+    }
+
+
+    async logout(token, userId) {
+        try {
+            // Use pipeline for logout operations
+            await cacheService.pipeline([
+                { 
+                    type: 'set', 
+                    key: `blacklist:${token}`, 
+                    value: true, 
+                    ttl: 86400 // 24 hours
+                },
+                ...(userId ? [{ type: 'del', key: `session:${userId}` }] : [])
+            ]);
+            
+            logger.info(`Admin logged out: ${userId}`);
+            
+            return {
+                message: 'Admin logged out successfully'
+            };
+        } catch (error) {
+            logger.error(`Admin logout error: ${error.message}`);
+            throw new Error('Failed to logout. Please try again.');
         }
     }
     

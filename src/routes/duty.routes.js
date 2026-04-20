@@ -4,7 +4,6 @@ const dutyController = require('../controllers/duty.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
 const { 
     validateDutyStatusHistory, 
-    validateLocationPermission, 
     validateDutyCreation,
     validateDutyAcceptance,
     validateDutyStatusChange,

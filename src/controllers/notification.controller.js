@@ -80,10 +80,26 @@ exports.markMultipleAsRead = asyncHandler(async (req, res) => {
 });
 
 /**
- * Get unread notification count
- * @route GET /api/notifications/unread-count
+ * Mark all notifications as read
+ * @route PUT /api/notifications/read-all
  * @access Private
  */
+exports.markAllAsRead = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+
+    const result = await notificationService.markAllAsRead(userId);
+
+    const unreadCount = await notificationService.getUnreadCount(userId);
+    websocketManager.sendUnreadCount(userId, unreadCount);
+
+    res.status(200).json({
+        success: true,
+        message: `${result.modifiedCount} notifications marked as read`,
+        data: result
+    });
+});
+
+
 exports.getUnreadCount = asyncHandler(async (req, res) => {
     const userId = req.user.id;
 

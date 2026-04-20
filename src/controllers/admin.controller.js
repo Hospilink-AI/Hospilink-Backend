@@ -5,6 +5,7 @@ const adminService = require('../services/admin.service');
 const DutyService = require('../services/duty.service');
 const { asyncHandler } = require('../middleware/error.middleware');
 const notificationEmitter = require('../services/notificationEmitter');
+const activityLogEmitter = require('../services/activityLogEmitter');
 const MedicalStaff = require('../models/MedicalStaff');
 const { normalizeRole } = require('../utils/helpers');
 const logger = require('../utils/logger');
@@ -27,7 +28,7 @@ exports.adminSignin = asyncHandler(async (req, res) => {
 // Admin OTP verification - POST /api/admin/verify-otp
 exports.adminVerifyOTP = asyncHandler(async (req, res) => {
     const { email, otp } = req.body;
-    const result = await AdminAuthService.verifyOTP(email, otp);
+    const result = await AdminAuthService.verifyOTP(email, otp, req);
 
     res.status(200).json({
         success: true,
@@ -46,6 +47,27 @@ exports.adminResendOTP = asyncHandler(async (req, res) => {
         ...result
     });
 });
+
+
+
+// Admin logout - POST /api/admin/logout
+exports.adminLogout = asyncHandler(async (req, res) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    const userId = req.user?.id || req.user?._id;
+    
+    // Log logout before processing
+    if (req.user) {
+        activityLogEmitter.logUserLogout(req.user, req)
+            .catch(err => console.error('Error logging logout:', err));
+    }
+    
+    const result = await AdminAuthService.logout(token, userId);
+    res.status(200).json({
+        success: true,
+        ...result
+    });
+});
+
 
 
 // show all hospitals GET /api/admin/hospitals
