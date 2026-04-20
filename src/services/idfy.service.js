@@ -3,11 +3,6 @@ const crypto = require("crypto");
 const IDFY_BASE_URL = process.env.IDFY_BASE_URL;
 const IDFY_API_KEY = process.env.IDFY_API_KEY;
 const IDFY_ACCOUNT_ID = process.env.IDFY_ACCOUNT_ID;
-console.log("IDFY CONFIG:", {
-    baseUrl: IDFY_BASE_URL,
-    apiKey: IDFY_API_KEY,
-    accountId: IDFY_ACCOUNT_ID
-});
 
 const headers = {
     "api-key": IDFY_API_KEY,
