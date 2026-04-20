@@ -21,6 +21,9 @@ router.get('/unread-count', validateUnreadCountQuery, notificationController.get
 // Mark notification as read
 router.put('/:id/read', validateNotificationId, notificationController.markAsRead);
 
+// Mark all notifications as read
+router.put('/read-all', notificationController.markAllAsRead);
+
 // Mark multiple notifications as read
 router.put('/read-multiple', validateBulkNotificationRead, notificationController.markMultipleAsRead);
 

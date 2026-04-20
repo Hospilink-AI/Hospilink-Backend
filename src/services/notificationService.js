@@ -84,6 +84,20 @@ class NotificationService {
      * @param {string} userId - User ID (for authorization)
      * @returns {Promise<Object>} Update result
      */
+    async markAllAsRead(userId) {
+        try {
+            const result = await Notification.updateMany(
+                { recipient: userId, isRead: false },
+                { isRead: true }
+            );
+            console.log(`Marked all ${result.modifiedCount} notifications as read for user ${userId}`);
+            return result;
+        } catch (error) {
+            console.error('Error marking all notifications as read:', error);
+            throw error;
+        }
+    }
+
     async markMultipleAsRead(notificationIds, userId) {
         try {
             const result = await Notification.updateMany(
