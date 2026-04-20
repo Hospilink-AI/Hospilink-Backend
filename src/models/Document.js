@@ -110,11 +110,12 @@ const documentSchema = new Schema(
 
                 rejectionReason: String,
 
-                hypervergeData: {
-                    confidenceScore: Number,
-                    extractedAadhaarNumber: String,
-                    verificationTimestamp: Date,
-                    rawResponse: Schema.Types.Mixed
+                verificationMeta: {
+                    provider: String,
+                    rawResponse: Schema.Types.Mixed,
+                    requestId: String,
+                    status: String,
+                    verifiedAt: Date
                 }
             }
         ]

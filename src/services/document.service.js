@@ -4,7 +4,7 @@ const requiredDocsConfig = require("../config/requiredDocs");
 const { extractTextFromBuffer } = require("./ocr.service");
 const { paginateArray } = require("../utils/pagination");
 const notificationEmitter = require('./notificationEmitter');
-//const { verifyAadhaar, checkDocumentFraud } = require("./hyperverge.service");
+const idfyService = require("./idfy.service");
 
 const getAllowedDocs = (role) => {
     const config = requiredDocsConfig[role];
@@ -72,193 +72,7 @@ const ocrSupportedDocs = [
     "cghs-certificate"
 ];
 
-// Allowed document types
-// const allowedDocumentTypes = [
-//     "aadhaar-card",
-//     "pan-card",
-//     "degree-certificate",
-//     "mcim-certificate",
-//     "ncim-certificate",
-//     "license-permit",
-//     "resume-experience",
-//     "recommendation-letter",
-//     "cin-certificate",
-//     "gst-certificate",
-//     "nabh-certificate",
-//     "rohini-certificate",
-//     "cghs-certificate",
-//     "live-picture",
-//     "registration-certificate",
-//     "Other"
-// ];
-
-
-// exports.uploadDocument = async (user, file, documentType, options = {}) => {
-
-//     // if (!allowedDocumentTypes.includes(documentType)) {
-//     //     throw new Error("Invalid document type");
-//     // }
-
-//     validateDocumentType(user.role, documentType);
-
-//     let userDocs = await Document.findOne({ userId: user._id });
-//     //create document if not exists
-//     if (!userDocs) {
-//         userDocs = new Document({
-//             userId: user._id,
-//             userRole: user.role,
-//             documents: []
-//         });
-//     }
-//     // Check for existing document
-//     const existingDoc = userDocs?.documents.find(
-//         d => d.documentType === documentType && !d.isDeleted
-//     );
-
-//     if (existingDoc) {
-//         // If replace flag is true, soft-delete old doc and delete from S3
-//         if (options.replace) {
-//             try {
-//                 await deleteFromS3(existingDoc.s3Key);
-//                 existingDoc.isDeleted = true;
-//             } catch (error) {
-//                 console.error("Failed to delete old document from S3:", error);
-//                 // Continue with upload even if S3 delete fails
-//             }
-//         } else {
-//             throw new Error(`${documentType} already uploaded. Use replace=true to update.`);
-//         }
-//     }
-
-//     const folder = getFolderByRole(user.role);
-
-//     const timestamp = Date.now();
-
-//     // sanitize filename (remove spaces)
-//     const sanitizedFileName = file.originalname.replace(/\s+/g, "-");
-
-//     const key =
-//         `documents/${folder}/${user._id}/${documentType}/${timestamp}-${sanitizedFileName}`;
-
-//     await uploadToS3(file.buffer, key, file.mimetype);
-
-//     // let verificationStatus = "pending";
-//     // let hypervergeData = null;
-
-//     // try {
-
-//     //     if (documentType === "aadhaar-card") {
-
-//     //         const hvResponse = await verifyAadhaar(file.buffer);
-
-//     //         const verified = hvResponse?.status?.toLowerCase() === "success";
-
-//     //         verificationStatus = verified ? "auto-verified" : "rejected";
-
-//     //         hypervergeData = {
-//     //             confidenceScore: hvResponse?.result?.confidence || 0,
-//     //             extractedAadhaarNumber: hvResponse?.result?.aadhaar_number,
-//     //             verificationTimestamp: new Date(),
-//     //             rawResponse: hvResponse
-//     //         };
-
-//     //     }
-
-//     //     else {
-
-//     //         const hvResponse = await checkDocumentFraud(file.buffer);
-
-//     //         const fraudDetected =
-//     //             hvResponse?.result?.fraudDetected === true ||
-//     //             hvResponse?.result?.fraud === true;
-
-//     //         verificationStatus = fraudDetected ? "rejected" : "pending";
-
-//     //         hypervergeData = {
-//     //             confidenceScore: hvResponse?.result?.confidence || 0,
-//     //             verificationTimestamp: new Date(),
-//     //             rawResponse: hvResponse
-//     //         };
-
-//     //     }
-
-//     // } catch (error) {
-
-//     //     console.error("HyperVerge verification failed:", error);
-//     //     verificationStatus = "pending";
-
-//     // }
-
-//     // HyperVerge verification disabled temporarily
-//     // let verificationStatus = "pending";
-//     // let hypervergeData = null;
-
-//     // userDocs.documents.push({
-//     //     documentType,
-//     //     url: key,
-//     //     verificationStatus,
-//     //     hypervergeData
-//     // });
-
-//     let verificationStatus = "pending";
-//     let hypervergeData = null;
-
-//     let extractedText = "";
-//     let extractedData = {};
-
-//     // ✅ Run OCR only for supported docs
-//     try {
-
-//         if (ocrSupportedDocs.includes(documentType)) {
-
-//             // OCR
-//             extractedText = await extractTextFromBuffer(file.buffer, file.mimetype);
-
-//             //Parse
-//             if (parserMap[documentType]) {
-//                 extractedData = parserMap[documentType](extractedText);
-//             }
-
-//             //Better validation logic
-//             const hasValidData = Object.values(extractedData).some(v => v);
-
-//             if (hasValidData) {
-//                 verificationStatus = "manual-pending-verification";
-//             }
-
-//             //Strict auto verification example
-//             if (documentType === "aadhaar-card" && extractedData.aadhaarNumber) {
-//                 verificationStatus = "pending";
-//             }
-
-//         }
-//     } catch (err) {
-//         console.error("OCR failed:", err);
-//     }
-
-//     userDocs.documents.push({
-//         documentType,
-//         s3Key: key,
-//         fileName: file.originalname,
-//         extractedText,
-//         extractedData,
-//         verificationStatus,
-//         hypervergeData
-//     });
-//     await userDocs.save();
-
-//     return {
-//         documentType,
-//         verificationStatus,
-//         uploadedAt: new Date(),
-//         s3Key: key  // Return S3 key for rollback tracking
-//     };
-// };
 exports.uploadDocument = async (user, file, documentType, options = {}) => {
-
-    // if (!allowedDocumentTypes.includes(documentType)) {
-    //     throw new Error("Invalid document type");
-    // }
 
     validateDocumentType(user.role, documentType);
 
@@ -280,6 +94,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         // If replace flag is true, soft-delete old doc and delete from S3
         if (options.replace) {
             try {
+                // await deleteFromS3(existingDoc.s3Key || existingDoc.url);
                 await deleteFromS3(existingDoc.s3Key);
                 existingDoc.isDeleted = true;
             } catch (error) {
@@ -303,66 +118,8 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
     await uploadToS3(file.buffer, key, file.mimetype);
 
-    // let verificationStatus = "pending";
-    // let hypervergeData = null;
-
-    // try {
-
-    //     if (documentType === "aadhaar-card") {
-
-    //         const hvResponse = await verifyAadhaar(file.buffer);
-
-    //         const verified = hvResponse?.status?.toLowerCase() === "success";
-
-    //         verificationStatus = verified ? "auto-verified" : "rejected";
-
-    //         hypervergeData = {
-    //             confidenceScore: hvResponse?.result?.confidence || 0,
-    //             extractedAadhaarNumber: hvResponse?.result?.aadhaar_number,
-    //             verificationTimestamp: new Date(),
-    //             rawResponse: hvResponse
-    //         };
-
-    //     }
-
-    //     else {
-
-    //         const hvResponse = await checkDocumentFraud(file.buffer);
-
-    //         const fraudDetected =
-    //             hvResponse?.result?.fraudDetected === true ||
-    //             hvResponse?.result?.fraud === true;
-
-    //         verificationStatus = fraudDetected ? "rejected" : "pending";
-
-    //         hypervergeData = {
-    //             confidenceScore: hvResponse?.result?.confidence || 0,
-    //             verificationTimestamp: new Date(),
-    //             rawResponse: hvResponse
-    //         };
-
-    //     }
-
-    // } catch (error) {
-
-    //     console.error("HyperVerge verification failed:", error);
-    //     verificationStatus = "pending";
-
-    // }
-
-    // HyperVerge verification disabled temporarily
-    // let verificationStatus = "pending";
-    // let hypervergeData = null;
-
-    // userDocs.documents.push({
-    //     documentType,
-    //     url: key,
-    //     verificationStatus,
-    //     hypervergeData
-    // });
-
     let verificationStatus = "pending";
-    let hypervergeData = null;
+    let verificationMeta = null;
 
     let extractedText = "";
     let extractedData = {};
@@ -378,6 +135,91 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             //Parse
             if (parserMap[documentType]) {
                 extractedData = parserMap[documentType](extractedText);
+            }
+            console.log("EXTRACTED DATA:", extractedData);
+            // IDFY
+            if (
+                documentType === "pan-card" ||
+                documentType === "gst-certificate" ||
+                documentType === "cin-certificate"
+            ) {
+                verificationStatus = "manual-pending-verification";
+
+                try {
+                    let idfyResponse = null;
+
+                    const formatDOB = (dob) => {
+                        if (!dob) return null;
+                        const [day, month, year] = dob.split("/");
+                        return `${year}-${month}-${day}`;
+                    };
+
+                    // PAN
+                    if (
+                        documentType === "pan-card" &&
+                        extractedData.panNumber &&
+                        extractedData.name &&
+                        extractedData.dob
+                    ) {
+                        const cleanPAN = extractedData.panNumber.replace(/\s+/g, "").toUpperCase();
+                        const formattedDOB = formatDOB(extractedData.dob);
+
+                        idfyResponse = await idfyService.verifyPAN({
+                            pan: cleanPAN,
+                            name: extractedData.name,
+                            dob: formattedDOB
+                        });
+
+                        console.log("IDFY PAN RESPONSE:", idfyResponse);
+                    }
+
+                    // GST
+                    if (
+                        documentType === "gst-certificate" &&
+                        extractedData.registrationNumber
+                    ) {
+                        idfyResponse = await idfyService.verifyGST(
+                            extractedData.registrationNumber
+                        );
+
+                        console.log("IDFY GST RESPONSE:", idfyResponse);
+                    }
+
+                    // CIN
+                    if (
+                        documentType === "cin-certificate" &&
+                        extractedData.cin
+                    ) {
+                        idfyResponse = await idfyService.verifyCIN(
+                            extractedData.cin
+                        );
+
+                        console.log("IDFY CIN RESPONSE:", idfyResponse);
+                    }
+
+                    if (idfyResponse && idfyResponse.request_id) {
+                        console.log(" Stored requestId:", idfyResponse.request_id);
+
+                        verificationMeta = {
+                            provider: "idfy",
+                            requestId: idfyResponse.request_id,
+                            status: "in_progress",
+                            type: documentType,
+                            createdAt: new Date()
+                        };
+                        processIdfyResultAsync(
+                            userDocs._id,
+                            idfyResponse.request_id,
+                            documentType
+                        );
+                    } else {
+                        console.log(" IDFY request_id missing:", idfyResponse);
+                    }
+
+                } catch (err) {
+                    console.error(" IDFY error:", err.message);
+                    verificationStatus = "manual-pending-verification";
+                }
             }
 
             const {
@@ -461,7 +303,11 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             }
 
             // auto verification 
-            if (documentType === "aadhaar-card" && extractedData.aadhaarNumber) {
+            if (
+                documentType === "aadhaar-card" &&
+                extractedData.aadhaarNumber &&
+                verificationStatus !== "auto-verified"
+            ) {
                 verificationStatus = "pending";
             }
 
@@ -477,7 +323,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         extractedText,
         extractedData,
         verificationStatus,
-        hypervergeData
+        verificationMeta
     });
     await userDocs.save();
 
@@ -487,6 +333,70 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         uploadedAt: new Date(),
         s3Key: key  // Return S3 key for rollback tracking
     };
+};
+const processIdfyResultAsync = async (userDocId, requestId, documentType) => {
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    const interval = setInterval(async () => {
+        attempts++;
+
+        try {
+            const result = await idfyService.getTaskResult(requestId);
+            const task = result?.[0];
+
+            if (!task) return;
+
+            if (task.status === "completed") {
+                clearInterval(interval);
+
+                const source = task?.result?.source_output;
+
+                const userDoc = await Document.findById(userDocId);
+                if (!userDoc) return;
+
+                const doc = userDoc.documents.find(
+                    d => d.verificationMeta?.requestId === requestId
+                );
+
+                if (!doc) return;
+
+                let isVerified = false;
+
+                if (documentType === "pan-card") {
+                    isVerified = source?.status === "id_found";
+                }
+
+                if (documentType === "gst-certificate") {
+                    isVerified = source?.gstin_status === "Active";
+                }
+
+                if (documentType === "cin-certificate") {
+                    isVerified = source?.company_status === "Active";
+                }
+
+                doc.verificationStatus = isVerified
+                    ? "auto-verified"
+                    : "rejected";
+
+                doc.verificationMeta.status = "completed";
+                doc.verificationMeta.rawResponse = source;
+                doc.verificationMeta.verifiedAt = new Date();
+
+                await userDoc.save();
+
+                console.log(" IDFY verified (event-based)");
+            }
+
+            if (attempts >= maxAttempts) {
+                clearInterval(interval);
+                console.log(" Max attempts reached for IDFY");
+            }
+
+        } catch (err) {
+            console.error(" IDFY polling error:", err.message);
+        }
+    }, 10000); // every 10 sec
 };
 
 exports.getUserDocuments = async (user, options = {}) => {
@@ -521,7 +431,6 @@ exports.getUserDocuments = async (user, options = {}) => {
 
     const documentsWithUrls = await Promise.all(
         paginatedDocs.map(async (doc) => {
-
             const signedUrl = await generatePreSignedURL(doc.s3Key);
 
             return {
@@ -757,8 +666,8 @@ exports.deleteDocument = async (user, documentId) => {
     if (document.isDeleted) {
         throw new Error("Document already deleted");
     }
-
     await deleteFromS3(document.s3Key);
+
     // Soft delete
     document.isDeleted = true;
     document.updatedAt = new Date();
