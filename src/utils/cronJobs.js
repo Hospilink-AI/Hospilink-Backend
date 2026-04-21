@@ -9,25 +9,25 @@ class CronJobs {
         const minutes = now.getMinutes();
         const seconds = now.getSeconds();
         const milliseconds = now.getMilliseconds();
-        
+
         // Calculate next scheduled minute (0, 30 for 30-min interval; 0, 15, 30, 45 for 15-min, etc.)
         const nextScheduledMinute = Math.ceil(minutes / intervalMinutes) * intervalMinutes;
-        
+
         // Calculate time until next scheduled minute
         let minutesUntilNext = (nextScheduledMinute - minutes) % 60;
-        
+
         // If we're exactly on the scheduled minute, wait for the full interval
         if (minutesUntilNext === 0 && seconds === 0 && milliseconds < 100) {
             minutesUntilNext = intervalMinutes;
         }
-        
+
         const msUntilNext = (minutesUntilNext * 60 * 1000) - (seconds * 1000) - milliseconds;
-        
+
         // Ensure we never return a negative or very small value
         return msUntilNext > 1000 ? msUntilNext : intervalMinutes * 60 * 1000;
     }
 
-    
+
     // schedule a job to run at specific intervals on the clock
     static scheduleJob(jobFunction, intervalMinutes, jobName) {
         const runJob = async () => {
@@ -41,11 +41,11 @@ class CronJobs {
         // Calculate time until next scheduled run
         const msUntilNext = this.getMillisecondsUntilNext(intervalMinutes);
         const nextRunTime = new Date(Date.now() + msUntilNext);
-        
+
         // Schedule first run at next scheduled time
         setTimeout(() => {
             runJob(); // Run immediately at scheduled time
-            
+
             // Then run at regular intervals
             setInterval(runJob, intervalMinutes * 60 * 1000);
         }, msUntilNext);
@@ -60,10 +60,10 @@ class CronJobs {
                 const reminders = await DutyService.sendNavigationReminders();
                 const unassigned15 = await DutyService.checkUnassigned15MinDuties();
                 const unfilledCritical = await DutyService.checkUnfilledCriticalDuties();
-                
+
                 if (completed > 0) {
                     console.log(`Auto-completed ${completed} duties at ${new Date().toLocaleString()}`);
-                    
+
                     // Log auto-complete activity
                     activityLogEmitter.emitSystemActivity(
                         ACTIVITY_ACTIONS.DUTY_AUTO_COMPLETED,
@@ -72,7 +72,7 @@ class CronJobs {
                 }
                 if (expired > 0) {
                     console.log(`Auto-expired ${expired} duties at ${new Date().toLocaleString()}`);
-                    
+
                     // Log duty expiration activity
                     activityLogEmitter.emitSystemActivity(
                         ACTIVITY_ACTIONS.DUTY_EXPIRED,
@@ -92,7 +92,7 @@ class CronJobs {
             1,
             'Auto-complete job'
         );
-    
+
 
         // Mark incomplete duties job - run every 30 minutes on the clock (:00 and :30)
         this.scheduleJob(
@@ -100,7 +100,7 @@ class CronJobs {
                 const markedIncomplete = await DutyService.markIncompleteDuties();
                 if (markedIncomplete > 0) {
                     console.log(`Marked ${markedIncomplete} duties incomplete at ${new Date().toLocaleString()}`);
-                    
+
                     // Log mark incomplete activity
                     activityLogEmitter.emitSystemActivity(
                         ACTIVITY_ACTIONS.DUTY_MARKED_INCOMPLETE,
@@ -113,17 +113,18 @@ class CronJobs {
         );
 
         console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min)');
-        
+
         // Log cron job initialization
         activityLogEmitter.emitSystemActivity(
             ACTIVITY_ACTIONS.CRON_JOB_EXECUTED,
-            { 
+            {
                 jobName: 'Cron Jobs Initialization',
                 jobs: ['Auto-complete', 'Mark incomplete'],
                 timestamp: new Date().toISOString()
             }
         ).catch(err => console.error('Error logging cron initialization:', err));
     }
+
 }
 
 module.exports = CronJobs;
