@@ -18,6 +18,8 @@ const {
     generateDutyReceiptPDF
 } = require('../utils/pdf.puppeteer');
 const DashboardService = require('./dashboard.service');
+const redisClient = require('../config/redis');
+const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
 
 class DutyService {
     async createDuty(dutyData, userId) {
@@ -1639,6 +1641,313 @@ class DutyService {
         }
 
         return notified;
+    }
+
+
+
+
+    // Get active duties for hospital with filtering and real-time tracking
+    async getHospitalActiveDuties(hospitalId, filters = {}) {
+        try {
+            const { role, status, page = 1, limit = 10 } = filters;
+            
+            // Build base query for hospital's active duties
+            let query = {
+                hospital: hospitalId, // Query directly by hospital ID
+                status: { $in: ['assigned', 'enroute', 'in-progress'] }
+            };
+
+
+            // Add role filter if specified
+            if (role) {
+                const allowedRoles = [
+                    'rmo', 'dmo', 'general_physician', 'intensivist', 'emergency_doctor',
+                    'anesthetist', 'pediatrician', 'gynecologist', 'orthopedic_surgeon',
+                    'general_surgeon', 'radiologist', 'pathologist', 'staff_nurse',
+                    'icu_nurse', 'emergency_nurse', 'ot_nurse', 'dialysis_nurse', 'nicu_nurse',
+                    'lab_technician', 'radiology_technician', 'ot_technician', 'dialysis_technician',
+                    'cath_lab_technician', 'icu_technician', 'ward_boy', 'ayah', 'opd_attendant',
+                    'emergency_attendant', 'patient_care_taker', 'pharmacist', 'pharmacy_assistant',
+                    'biomedical_engineer', 'housekeeping_staff', 'security_guard', 'ambulance_driver',
+                    'receptionist', 'billing_executive', 'medical_records_staff', 'hr_accounts'
+                ];
+
+                if (!allowedRoles.includes(role)) {
+                    throw new Error(`Invalid role: ${role}`);
+                }
+                query.staffRole = role;
+            }
+
+            // Add status filter if specified
+            if (status) {
+                const allowedStatuses = ['assigned', 'enroute', 'in-progress'];
+                if (!allowedStatuses.includes(status)) {
+                    throw new Error(`Invalid status: ${status}`);
+                }
+                query.status = status;
+            }
+
+            // Get total count for pagination
+            const totalDuties = await Duty.countDocuments(query);
+
+            // Calculate pagination parameters
+            const { skip } = getPaginationParams(page, limit);
+
+            // Fetch duties with populated data
+            const duties = await Duty.find(query)
+                .populate({
+                    path: 'assignedTo',
+                    select: 'fullName user coordinates',
+                    populate: {
+                        path: 'user',
+                        select: 'name email'
+                    }
+                })
+                .populate('hospital', 'hospitalLegalName location coordinates')
+                .sort({ createdAt: -1 }) // Latest duties first
+                .skip(skip)
+                .limit(limit);
+
+            // Batch process real-time locations for better performance
+            const staffUserIds = duties
+                .filter(duty => duty.assignedTo && duty.assignedTo.user)
+                .map(duty => duty.assignedTo.user._id);
+
+            // Get all real-time locations in batch
+            const realtimeLocations = await getBatchStaffLocations(staffUserIds);
+
+            const formattedDuties = await Promise.all(
+                duties.map(async (duty) => {
+                    return await formatActiveDuty(duty, realtimeLocations);
+                })
+            );
+
+            return {
+                duties: formattedDuties,
+                pagination: {
+                    totalItems: totalDuties,
+                    totalPages: Math.ceil(totalDuties / limit),
+                    currentPage: page,
+                    itemsPerPage: limit,
+                    hasNextPage: page < Math.ceil(totalDuties / limit),
+                    hasPrevPage: page > 1,
+                    nextPage: page < Math.ceil(totalDuties / limit) ? page + 1 : null,
+                    prevPage: page > 1 ? page - 1 : null
+                },
+                filters: {
+                    role: role || 'all',
+                    status: status || 'all'
+                },
+                summary: {
+                    totalActiveDuties: totalDuties,
+                    assignedCount: await Duty.countDocuments({ ...query, status: 'assigned' }),
+                    enrouteCount: await Duty.countDocuments({ ...query, status: 'enroute' }),
+                    inProgressCount: await Duty.countDocuments({ ...query, status: 'in-progress' })
+                }
+            };
+        } catch (error) {
+            throw error;
+        }
+    }
+
+
+
+    // Get duty route map with polyline for hospital (hospital-specific)
+    async getHospitalDutyRouteMap(dutyId, hospitalId) {
+        try {
+            // Verify duty belongs to hospital
+            const duty = await Duty.findOne({ 
+                _id: dutyId, 
+                hospital: hospitalId 
+            })
+            .populate({
+                path: 'assignedTo',
+                select: 'fullName user coordinates phoneNumber skills averageRating totalExperience city area verificationStatus education profileSummary',
+                populate: {
+                    path: 'user',
+                    select: 'name email'
+                }
+            })
+            .populate('hospital', 'hospitalLegalName location currentAddress coordinates');
+
+            if (!duty) {
+                throw new Error('Duty not found or does not belong to your hospital');
+            }
+
+            // Verify duty is in active state
+            if (!['assigned', 'enroute', 'in-progress'].includes(duty.status)) {
+                throw new Error('Duty is not in active state');
+            }
+
+            if (!duty.assignedTo) {
+                throw new Error('Duty is not assigned to any staff');
+            }
+
+            // Use hospital-specific route formatting (not admin service)
+            return await this.formatDutyRouteMap(duty);
+        } catch (error) {
+            throw error;
+        }
+    }
+
+
+
+    // Format duty route map for hospital (hospital-specific view)
+    async formatDutyRouteMap(duty) {
+        try {
+            const staff = duty.assignedTo;
+            const hospital = duty.hospital;
+
+            // Get current staff location with fallback
+            let currentLocation = null;
+            let locationSource = 'unknown';
+
+            // Try real-time location first
+            if (staff && staff.user) {
+                const redis = await redisClient.getClientAsync();
+                
+                try {
+                    const key = `hospilink:staff_location:${staff.user._id}`;
+                    const data = await redis.get(key);
+                    
+                    if (data) {
+                        currentLocation = JSON.parse(data);
+                        locationSource = 'realtime';
+                    }
+                } catch (error) {
+                    console.error('Error getting real-time location:', error);
+                }
+            }
+
+            // Fallback to staff's registered coordinates
+            if (!currentLocation && staff && staff.coordinates) {
+                currentLocation = {
+                    latitude: staff.coordinates.coordinates.latitude,
+                    longitude: staff.coordinates.coordinates.longitude,
+                    timestamp: new Date(),
+                    accuracy: null,
+                    source: 'registered_address'
+                };
+                locationSource = 'registered_address';
+            }
+
+            if (!currentLocation) {
+                throw new Error('Unable to determine staff location');
+            }
+
+            // Get route information
+            let routeInfo = null;
+
+            try {
+                routeInfo = await geocodingService.getDirections(
+                    currentLocation.latitude,
+                    currentLocation.longitude,
+                    hospital.coordinates.coordinates.latitude,
+                    hospital.coordinates.coordinates.longitude
+                );
+            } catch (routeError) {
+                console.error('Error getting route directions:', routeError);
+                // Fallback to direct distance calculation
+                const distance = geocodingService.calculateStraightLineDistance(
+                    currentLocation.latitude,
+                    currentLocation.longitude,
+                    hospital.coordinates.coordinates.latitude,
+                    hospital.coordinates.coordinates.longitude
+                );
+                
+                routeInfo = {
+                    overviewPolyline: null,
+                    stepPolylines: [],
+                    distance: distance,
+                    duration: null,
+                    distanceText: `${distance.toFixed(1)} km`,
+                    durationText: null,
+                    steps: [],
+                    source: 'direct_calculation'
+                };
+            }
+
+            // Return hospital-specific route map
+            return {
+                staff: {
+                    name: staff.fullName,
+                    email: staff.user?.email || null,
+                    mobileNumber: staff.phoneNumber,
+                    skills: staff.skills || [],
+                    avgRating: staff.averageRating || 0,
+                    address: `${staff.area}, ${staff.city}`,
+                    location: {
+                        latitude: currentLocation.latitude,
+                        longitude: currentLocation.longitude,
+                        lastUpdated: currentLocation.timestamp,
+                        accuracy: currentLocation.accuracy || null,
+                        source: locationSource
+                    },
+                    totalExperience: staff.totalExperience || 0,
+                    verificationStatus: staff.verificationStatus,
+                    education: staff.education || [],
+                    profileSummary: staff.profileSummary || null
+                },
+                duty: {
+                    dutyId: duty._id,
+                    dutyRole: duty.staffRole,
+                    formattedRole: duty.formattedRole,
+                    hospitalName: hospital.hospitalLegalName,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    date: duty.date,
+                    endDate: duty.endDate,
+                    description: duty.description || null,
+                    totalPayment: duty.totalPayment || 0,
+                    offeredRate: duty.offeredRate || 0,
+                    status: duty.status,
+                    urgency: duty.urgency,
+                    statusHistory: duty.statusHistory || [],
+                    assignedAt: duty.assignedAt,
+                    enrouteAt: duty.enrouteAt,
+                    startedAt: duty.startedAt,
+                    completedAt: duty.completedAt
+                },
+                hospital: {
+                    id: hospital._id,
+                    name: hospital.hospitalLegalName,
+                    address: hospital.currentAddress,
+                    location: hospital.location,
+                    coordinates: {
+                        latitude: hospital.coordinates.coordinates.latitude,
+                        longitude: hospital.coordinates.coordinates.longitude
+                    }
+                },
+                route: {
+                    polyline: routeInfo.overviewPolyline,
+                    stepPolylines: routeInfo.stepPolylines || [],
+                    distance: routeInfo.distance,
+                    distanceText: routeInfo.distanceText,
+                    duration: routeInfo.duration,
+                    durationText: routeInfo.durationText,
+                    steps: routeInfo.steps || [],
+                    source: routeInfo.source
+                },
+                tracking: {
+                    isRealTime: duty.status === 'enroute' || duty.status === 'in-progress',
+                    updateInterval: 2000, // 2 seconds for real-time tracking
+                    lastUpdate: currentLocation.timestamp,
+                    estimatedArrival: routeInfo.duration ? 
+                        new Date(Date.now() + routeInfo.duration * 60 * 1000) : null,
+                    accuracy: currentLocation.accuracy || null
+                },
+                metadata: {
+                    generatedAt: new Date(),
+                    mapType: 'hospital_route_tracking',
+                    source: 'google_maps_api',
+                    version: 'v2.0',
+                    cacheExpiry: 30 // seconds
+                }
+            };
+        } catch (error) {
+            console.error('Error in formatDutyRouteMap:', error);
+            throw error;
+        }
     }
 }
 

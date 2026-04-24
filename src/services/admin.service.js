@@ -11,6 +11,7 @@ const { getPaginationParams, getPaginationMeta } = require('../utils/pagination'
 const geocodingService = require('./geocoding.service');
 const locationTrackingService = require('./locationTracking.service');
 const redisClient = require('../config/redis');
+const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
 
 
 class AdminService {
@@ -1242,12 +1243,11 @@ class AdminService {
                 .map(duty => duty.assignedTo.user._id);
 
             // Get all real-time locations in batch
-            const realtimeLocations = await this.getBatchStaffLocations(staffUserIds);
+            const realtimeLocations = await getBatchStaffLocations(staffUserIds);
 
             const formattedDuties = await Promise.all(
                 duties.map(async (duty) => {
-                    const formattedDuty = await this.formatActiveDuty(duty, realtimeLocations);
-                    return formattedDuty;
+                    return await formatActiveDuty(duty, realtimeLocations);
                 })
             );
 
@@ -1271,48 +1271,6 @@ class AdminService {
         }
     }
 
-
-
-    // Get multiple staff locations in batch for performance
-    async getBatchStaffLocations(staffUserIds) {
-        try {
-            console.log('🔍 DEBUG: Fetching batch locations for User IDs:', staffUserIds);
-            const redis = await redisClient.getClientAsync();
-            
-            const locationPromises = staffUserIds.map(async (userId) => {
-                try {
-                    const key = `hospilink:staff_location:${userId}`;
-                    console.log('🔍 DEBUG: Checking Redis key:', key);
-                    const data = await redis.get(key);
-                    console.log('🔍 DEBUG: Found data for user', userId, ':', data ? 'YES' : 'NO');
-                    return {
-                        userId,
-                        location: data ? JSON.parse(data) : null
-                    };
-                } catch (error) {
-                    console.error(`Error getting location for user ${userId}:`, error);
-                    return { userId, location: null };
-                }
-            });
-            
-            const results = await Promise.all(locationPromises);
-            console.log('🔍 DEBUG: Batch location results:', results);
-            
-            // Convert to map for easy lookup
-            const locationMap = {};
-            results.forEach(result => {
-                if (result.location) {
-                    locationMap[result.userId] = result.location;
-                }
-            });
-            
-            console.log('🔍 DEBUG: Final locationMap keys:', Object.keys(locationMap));
-            return locationMap;
-        } catch (error) {
-            console.error('Error in batch location retrieval:', error);
-            return {};
-        }
-    }
 
 
     // Build location filter for city and sub-regions
@@ -1343,102 +1301,6 @@ class AdminService {
             return null;
         }
     }
-
-    // Format individual active duty with enhanced information
-    async formatActiveDuty(duty, realtimeLocations = {}) {
-        try {
-            const staff = duty.assignedTo;
-            const hospital = duty.hospital;
-            
-            // Determine status
-            let statusInfo = {
-                status: duty.status
-            };
-
-            // Calculate distance and duration from staff's REAL-TIME location to hospital
-            let distanceToHospital = null;
-
-            if (staff && hospital.coordinates) {
-                try {
-                    let staffLat, staffLng, locationSource = 'profile';
-                    
-                    // Check real-time location first
-                    const currentLocation = realtimeLocations[staff.user._id];
-                    
-                    if (currentLocation && currentLocation.latitude && currentLocation.longitude) {
-                        // Use real-time location if available
-                        staffLat = currentLocation.latitude;
-                        staffLng = currentLocation.longitude;
-                        locationSource = 'realtime';
-                    } else if (staff.coordinates && staff.coordinates.coordinates) {
-                        // Fallback to profile location
-                        staffLat = staff.coordinates.coordinates.latitude;
-                        staffLng = staff.coordinates.coordinates.longitude;
-                        locationSource = 'profile';
-                    } else {
-                        // No location available
-                        distanceToHospital = null;
-                    }
-                    
-                    if (staffLat && staffLng) {
-                        // const distanceResult = await geocodingService.calculateDistanceAndETA(
-                        const distanceResult = await geocodingService.getCachedDistance(
-                            staffLat,
-                            staffLng,
-                            hospital.coordinates.coordinates.latitude,
-                            hospital.coordinates.coordinates.longitude
-                        );
-
-                        distanceToHospital = {
-                            distance: distanceResult.distance,
-                            distanceText: distanceResult.distanceText,
-                            estimatedTime: distanceResult.duration,
-                            estimatedTimeText: distanceResult.durationText,
-                            source: locationSource // Track data source
-                        };
-                    }
-                } catch (distanceError) {
-                    console.error('Error calculating distance:', distanceError);
-                }
-            }
-
-            return {
-                dutyId: duty._id,
-                role: duty.staffRole,
-                formattedRole: duty.formattedRole,
-                hospital: {
-                    id: hospital._id,
-                    name: hospital.hospitalLegalName,
-                    location: hospital.location,
-                    coordinates: hospital.coordinates
-                },
-                staff: staff ? {
-                    id: staff._id,
-                    name: staff.fullName,
-                    userName: staff.user?.name || staff.fullName,
-                    coordinates: staff.coordinates
-                } : null,
-                timing: {
-                    date: duty.date,
-                    startTime: duty.startTime,
-                    endTime: duty.endTime,
-                    urgency: duty.urgency,
-                    assignedAt: duty.assignedAt,
-                    enrouteAt: duty.enrouteAt,
-                    startedAt: duty.startedAt
-                },
-                status: statusInfo,
-                distance: distanceToHospital,
-                description: duty.description,
-                offeredRate: duty.offeredRate,
-                totalPayment: duty.totalPayment
-            };
-        } catch (error) {
-            console.error('Error formatting duty:', error);
-            throw error;
-        }
-    }
-
 
 
 
