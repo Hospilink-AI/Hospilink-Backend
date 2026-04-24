@@ -11,7 +11,9 @@ const {
     validateDutyEdit,
     validatePagination,
     validateObjectId,
-    validateStatementQuery
+    validateStatementQuery,
+    validateHospitalActiveDutiesQuery,
+    validateHospitalDutyRouteMap
 } = require('../middleware/validation.middleware');
 
 // Apply protection to all duty routes
@@ -69,6 +71,12 @@ router.get(
     dutyController.getStatement
 );
 
+
+// Hospital active duties and route map endpoints
+router.get('/duties/active-duties', authorize('hospital'), validateHospitalActiveDutiesQuery, dutyController.getHospitalActiveDuties);
+ 
+router.get('/duties/duty-route-map/:dutyId', authorize('hospital'), validateHospitalDutyRouteMap, dutyController.getHospitalDutyRouteMap);
+ 
 router.get('/duties/:id', validateObjectId('id'), dutyController.getDutyDetail);
 
 router.post('/duties/:id/route', authorize('staff'), dutyController.getDutyRoute);

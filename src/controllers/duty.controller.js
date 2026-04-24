@@ -872,3 +872,95 @@ exports.getStatement = asyncHandler(async (req, res) => {
         endDate
     }, res);
 });
+
+
+
+
+// GET /api/duties/active-duties - Get active duties for hospital
+exports.getHospitalActiveDuties = asyncHandler(async (req, res) => {
+    // Use validated query parameters from middleware
+    const { role, status, page, limit } = req.validatedQuery;
+
+    try {
+        const hospital = await Hospital.findOne({ user: req.user.id });
+        if (!hospital) {
+            return res.status(404).json({
+                success: false,
+                message: 'Hospital profile not found'
+            });
+        }
+        
+        const result = await DutyService.getHospitalActiveDuties(
+            hospital._id, 
+            {
+                role,
+                status,
+                page,
+                limit
+            }
+        );
+
+        res.status(200).json({
+            success: true,
+            data: result.duties,
+            pagination: result.pagination,
+            filters: result.filters,
+            summary: result.summary
+        });
+    } catch (error) {
+        res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+
+
+// GET /api/duties/duty-route-map/:dutyId - Get duty route map for hospital
+exports.getHospitalDutyRouteMap = asyncHandler(async (req, res) => {
+    const { dutyId } = req.validatedParams;
+    const hospital = await Hospital.findOne({ user: req.user.id });
+    if (!hospital) {
+        return res.status(404).json({
+            success: false,
+            message: 'Hospital profile not found'
+        });
+    }
+    
+    try {
+        // Add request tracking for analytics
+        const startTime = Date.now();
+        
+        const routeMap = await DutyService.getHospitalDutyRouteMap(dutyId, hospital._id);
+        
+        // Log performance metrics
+        const responseTime = Date.now() - startTime;
+        console.log(`Hospital duty route map generated in ${responseTime}ms for duty: ${dutyId}`);
+        
+        // Enhanced response with metadata
+        res.status(200).json({
+            success: true,
+            data: routeMap,
+            meta: {
+                responseTime: `${responseTime}ms`,
+                timestamp: new Date(),
+                apiVersion: 'v2.0'
+            }
+        });
+    } catch (error) {
+        console.error(`Error in getHospitalDutyRouteMap for duty ${dutyId}:`, error);
+        
+        // Enhanced error response
+        res.status(error.message.includes('not found') ? 404 : 400).json({
+            success: false,
+            message: error.message,
+            code: error.code || 'DUTY_ROUTE_MAP_ERROR',
+            meta: {
+                dutyId,
+                timestamp: new Date()
+            }
+        });
+    }
+});
+

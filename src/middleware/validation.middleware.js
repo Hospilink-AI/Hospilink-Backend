@@ -1335,6 +1335,113 @@ const validateDashboardLocationUpdate = (req, res, next) => {
 
 
 
+
+// Validate active duties query parameters for hospital
+const validateHospitalActiveDutiesQuery = (req, res, next) => {
+    // Check for request body content - GET requests should not have body
+    if (req.body && Object.keys(req.body).length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'GET request should not contain request body. Use query parameters only.'
+        });
+    }
+
+    // Validate allowed query parameters only
+    const allowedParams = ['role', 'status', 'page', 'limit'];
+    const receivedParams = Object.keys(req.query);
+
+    // Check for unexpected parameters
+    const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
+    if (unexpectedParams.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
+        });
+    }
+
+    const { role, status, page = 1, limit = 10 } = req.query;
+
+    // Validate role parameter 
+    if (role && typeof role !== 'string') {
+        return res.status(400).json({
+            success: false,
+            message: 'Role parameter must be a string'
+        });
+    }
+
+    // Validate status parameter 
+    const allowedStatuses = ['assigned', 'enroute', 'in-progress'];
+    if (status && !allowedStatuses.includes(status)) {
+        return res.status(400).json({
+            success: false,
+            message: `Status parameter must be one of: ${allowedStatuses.join(', ')}`
+        });
+    }
+
+    // Validate page parameter
+    const pageNum = parseInt(page);
+    if (isNaN(pageNum) || pageNum < 1) {
+        return res.status(400).json({
+            success: false,
+            message: 'Page parameter must be a positive integer'
+        });
+    }
+
+    // Validate limit parameter
+    const limitNum = parseInt(limit);
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+        return res.status(400).json({
+            success: false,
+            message: 'Limit parameter must be a positive integer between 1 and 100'
+        });
+    }
+
+    // Add validated values to request object
+    req.validatedQuery = {
+        role: role || null,
+        status: status || null,
+        page: pageNum,
+        limit: limitNum
+    };
+
+    next();
+};
+
+
+
+
+// Validate duty route map parameters for hospital
+const validateHospitalDutyRouteMap = (req, res, next) => {
+    // Check for request body content - GET requests should not have body
+    if (req.body && Object.keys(req.body).length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'GET request should not contain request body. Use path parameters only.'
+        });
+    }
+
+    const { dutyId } = req.params;
+
+    // Validate dutyId format
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(dutyId)) {
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid duty ID format'
+        });
+    }
+
+    // Add validated values to request object
+    req.validatedParams = {
+        dutyId
+    };
+
+    next();
+};
+
+
+
+
 module.exports = {
     validateSignup,
     validateOTP,
@@ -1367,5 +1474,7 @@ module.exports = {
     validateRequiredStatusQuery,
     validateDocumentIdParam,
     validateDashboardLocationPermission,
-    validateDashboardLocationUpdate
+    validateDashboardLocationUpdate,
+    validateHospitalActiveDutiesQuery,
+    validateHospitalDutyRouteMap
 };

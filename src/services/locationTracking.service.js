@@ -210,7 +210,7 @@ class LocationTrackingService {
             locationData.status = 'arrived';
             locationData.arrivalTime = Date.now();
 
-            const key = `staff_location:${staffId}`;
+            const key = `hospilink:staff_location:${staffId}`;
             await redis.setex(key, this.LOCATION_TTL, JSON.stringify(locationData));
 
             // Get staff details
