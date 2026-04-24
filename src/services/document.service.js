@@ -137,6 +137,38 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 extractedData = parserMap[documentType](extractedText);
             }
             console.log("EXTRACTED DATA:", extractedData);
+
+            // Hospital Certificate Verification 
+            if (
+                documentType === "rohini-certificate" ||
+                documentType === "cghs-certificate" ||
+                documentType === "nabh-certificate"
+            ) {
+                try {
+                    const hospitalVerificationService = require("./hospitalVerification.service");
+
+                    const result = await hospitalVerificationService.verifyHospital({
+                        certificateNumber: extractedData.rohiniId || extractedData.certificateNumber,
+                        hospitalName: extractedData.hospitalName,
+                        city: extractedData.location || extractedData.city
+                    });
+
+                    console.log("HOSPITAL VERIFICATION RESULT:", result);
+
+                    verificationStatus = result.status;
+
+                    verificationMeta = {
+                        provider: result.source,
+                        status: result.status,
+                        verifiedAt: new Date()
+                    };
+
+                } catch (err) {
+                    console.error("Hospital verification error:", err);
+                    verificationStatus = "manual-pending-verification";
+                }
+            }
+
             // IDFY
             if (
                 documentType === "pan-card" ||
@@ -243,7 +275,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 console.log("QR TYPE:", qrType);
 
                 // URL QR
-                if (qrType === "url") {
+                if (verificationStatus !== "auto-verified" && qrType === "url") {
 
                     const html = await fetchQRUrlData(qrRaw);
 
@@ -267,7 +299,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     }
                 }
                 // BASE64 QR
-                else if (qrType === "base64") {
+                else if (verificationStatus !== "auto-verified" && qrType === "base64") {
 
                     const decoded = decodeBase64QR(qrRaw);
                     console.log("DECODED QR:", decoded);
@@ -288,15 +320,14 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             verificationStatus = "manual-pending-verification";
                         }
                         extractedData.registrationNumber = ocrNumber;
-                    } else {
+                    } else if (verificationStatus !== "auto-verified") {
                         verificationStatus = "manual-pending-verification";
                     }
                 }
-                // NO QR
-                else {
+                // NO QR → DO NOT OVERRIDE IF ALREADY VERIFIED
+                else if (verificationStatus !== "auto-verified") {
                     verificationStatus = "manual-pending-verification";
                 }
-
             } catch (err) {
                 console.error("QR verification error:", err);
                 verificationStatus = "manual-pending-verification";
