@@ -351,6 +351,29 @@ dutySchema.methods.canEditDuty = function () {
 };
 
 
+// Pricing-only edit allowed for emergency duties until 1 min before start
+dutySchema.methods.canEditPricing = function () {
+    if (this.urgency !== 'emergency') {
+        return { allowed: false, reason: 'Pricing-only edit is only available for Emergency duties' };
+    }
+
+    const now = getCurrentIST();
+    const dutyDate = new Date(this.date);
+    const [hours, minutes] = this.startTime.split(':');
+    const istDutyDate = toIST(dutyDate);
+    const dutyStartTime = new Date(istDutyDate);
+    dutyStartTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+
+    // Allow until 1 minute before start
+    const pricingDeadline = new Date(dutyStartTime.getTime() - 60 * 1000);
+    if (now >= pricingDeadline) {
+        return { allowed: false, reason: 'Pricing can no longer be edited within 1 minute of duty start time' };
+    }
+
+    return { allowed: true };
+};
+
+
 // Pre-save hook for automatic total payment calculation
 dutySchema.pre('save', function (next) {
     try {

@@ -774,6 +774,60 @@ class EmailService {
             return false;
         }
     }
+
+    async sendEmergencyAdminAlertEmail(adminEmail, adminName, duty, hospital, reason) {
+        try {
+            const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+            const isEscalated = reason === 'escalated';
+            const subject = isEscalated
+                ? `🚨 CRITICAL ESCALATION - Unassigned Duty Starting Soon`
+                : `🚨 EMERGENCY DUTY CREATED - Immediate Action Required`;
+
+            const headerColor = '#c0392b';
+            const badge = isEscalated ? 'AUTO-ESCALATED TO CRITICAL' : 'EMERGENCY DUTY';
+            const reasonText = isEscalated
+                ? 'An unassigned duty has been automatically escalated to CRITICAL because it starts within 1 hour and has no assigned staff.'
+                : 'A new Emergency duty has been created and requires immediate attention.';
+
+            const mailOptions = {
+                from: `HospiLink Alerts <${process.env.EMAIL_FROM}>`,
+                to: alertEmail,
+                subject,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 2px solid #c0392b; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: ${headerColor}; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">🚨 ${badge}</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p>Hello <strong>${adminName}</strong>,</p>
+                            <p>${reasonText}</p>
+                            <div style="background-color: #fdf2f2; border-left: 4px solid #c0392b; border-radius: 4px; padding: 15px; margin: 20px 0;">
+                                <h3 style="margin-top: 0; color: #c0392b;">Duty Details</h3>
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <tr><td style="padding: 6px 0; color: #7f8c8d;">Hospital:</td><td style="padding: 6px 0; font-weight: bold;">${hospital.hospitalLegalName || hospital.name || 'N/A'}</td></tr>
+                                    <tr><td style="padding: 6px 0; color: #7f8c8d;">Role Required:</td><td style="padding: 6px 0;">${duty.staffRole}</td></tr>
+                                    <tr><td style="padding: 6px 0; color: #7f8c8d;">Date:</td><td style="padding: 6px 0;">${new Date(duty.date).toLocaleDateString('en-IN')}</td></tr>
+                                    <tr><td style="padding: 6px 0; color: #7f8c8d;">Time:</td><td style="padding: 6px 0;">${duty.startTime} - ${duty.endTime}</td></tr>
+                                    <tr><td style="padding: 6px 0; color: #7f8c8d;">Status:</td><td style="padding: 6px 0;">${duty.status}</td></tr>
+                                    <tr><td style="padding: 6px 0; color: #7f8c8d;">Urgency:</td><td style="padding: 6px 0; color: #c0392b; font-weight: bold; text-transform: uppercase;">${duty.urgency}</td></tr>
+                                </table>
+                            </div>
+                            <p style="color: #c0392b; font-weight: bold;">Please log in to the admin panel immediately to take action.</p>
+                            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                        </div>
+                    </div>
+                `
+            };
+
+            await this.transporter.sendMail(mailOptions);
+            logger.info(`Emergency admin alert email sent to ${adminEmail}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending emergency admin alert email: ${error.message}`);
+            return false;
+        }
+    }
 }
 
 module.exports = new EmailService();

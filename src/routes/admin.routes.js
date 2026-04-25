@@ -67,6 +67,8 @@ router.get('/nearby-staff', validateNearbyStaffQuery, adminController.getNearbyA
 
 router.get('/active-duties', validateActiveDutiesQuery, adminController.getActiveDuties);
 
+router.get('/emergency-dashboard', adminController.getEmergencyDashboard);
+
 router.get('/duty-route-map/:dutyId', validateDutyRouteMap, adminController.getDutyRouteMap);
 
 // Overnight duties and duty history
