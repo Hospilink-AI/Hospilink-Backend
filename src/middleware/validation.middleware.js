@@ -596,7 +596,7 @@ const validateNearbyStaff = (req, res, next) => {
 
 // Validation for duty creation to prevent past/invalid times
 const validateDutyCreation = (req, res, next) => {
-    const { date, start_time } = req.body;
+    const { date, start_time, urgency } = req.body;
     const errors = [];
     
     if (date && start_time) {
@@ -618,6 +618,14 @@ const validateDutyCreation = (req, res, next) => {
         const istDutyDate = toIST(dutyDate);
         const dutyStartTime = new Date(istDutyDate);
         dutyStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
+
+        // Rule: Emergency duties can only be created if start time is within 1 hour
+        if (urgency === 'emergency') {
+            const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+            if (dutyStartTime > oneHourFromNow) {
+                errors.push('Emergency duties can only be created for shifts starting within the next 1 hour. Please use a different urgency level for duties starting later.');
+            }
+        }
         
         // Add 15 minute buffer to account for creation and assignment time
         const bufferTime = new Date(dutyStartTime.getTime() - 15 * 60 * 1000);

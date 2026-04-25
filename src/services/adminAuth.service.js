@@ -164,15 +164,16 @@ class AdminAuthService {
                 });
                 const locationString = `${location.city}, ${location.region}, ${location.country}`;
                 
-                await EmailService.sendAdminLoginAlertEmail(
+                // Send alert email on EVERY login - non-blocking
+                EmailService.sendAdminLoginAlertEmail(
                     admin.name,
                     admin.email,
                     deviceInfo.deviceName,
                     locationString,
                     loginTime
-                );
-
-                logger.info(`Admin login alert sent for ${admin.email}`);
+                ).then(sent => {
+                    if (sent) logger.info(`Admin login alert sent to ${process.env.ADMIN_LOGIN_ALERT_EMAIL} for ${admin.email}`);
+                }).catch(err => logger.error(`Admin login alert email failed: ${err.message}`));
             }
 
             // Generate JWT token

@@ -1065,6 +1065,60 @@ class NotificationEmitter {
             console.error('Error emitting duty unfilled critical notification:', error);
         }
     }
+
+    /**
+     * Emit emergency/critical alert to all admin users
+     * @param {Object} duty - Duty object
+     * @param {Object} hospital - Hospital object
+     * @param {string[]} adminUserIds - Array of admin user IDs
+     * @param {string} reason - 'emergency_created' | 'escalated'
+     */
+    async emitEmergencyAdminAlert(duty, hospital, adminUserIds, reason) {
+        try {
+            if (!adminUserIds || adminUserIds.length === 0) return;
+
+            const hospitalName = hospital.hospitalLegalName || hospital.name || 'Hospital';
+            const isEscalated = reason === 'escalated';
+
+            const message = isEscalated
+                ? `CRITICAL ESCALATION: Unassigned ${duty.staffRole} duty at ${hospitalName} starts within 1 hour. Immediate action required.`
+                : `EMERGENCY DUTY: ${duty.staffRole} required at ${hospitalName} on ${new Date(duty.date).toLocaleDateString('en-IN')} at ${duty.startTime}. Immediate attention needed.`;
+
+            const payload = {
+                type: 'EMERGENCY_ADMIN_ALERT',
+                alertReason: reason,
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    urgency: duty.urgency,
+                    status: duty.status
+                },
+                hospital: {
+                    id: hospital._id?.toString(),
+                    name: hospitalName
+                },
+                message,
+                timestamp: new Date().toISOString()
+            };
+
+            for (const adminId of adminUserIds) {
+                try {
+                    const { unreadCount } = await notificationService.createNotificationWithCount(adminId, 'EMERGENCY_ADMIN_ALERT', payload);
+                    websocketManager.sendUnreadCount(adminId, unreadCount);
+                    websocketManager.emitToUser(adminId, 'notification', payload);
+                } catch (err) {
+                    console.error(`Error sending emergency alert to admin ${adminId}:`, err);
+                }
+            }
+
+            console.log(`Emergency admin alert (${reason}) sent to ${adminUserIds.length} admin(s) for duty ${duty._id}`);
+        } catch (error) {
+            console.error('Error emitting emergency admin alert:', error);
+        }
+    }
 }
 
 module.exports = new NotificationEmitter();

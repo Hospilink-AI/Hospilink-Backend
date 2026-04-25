@@ -81,6 +81,32 @@ exports.createDuty = asyncHandler(async (req, res) => {
         const isEmergency = result.duty.urgency === 'emergency';
         activityLogEmitter.logDutyCreated(result.duty, hospital, req, isEmergency)
             .catch(err => logger.error('Error logging duty creation:', err));
+
+        // Notify all admins if this is an emergency duty
+        if (isEmergency) {
+            const User = require('../models/User');
+            const notificationEmitterModule = require('../services/notificationEmitter');
+            const EmailService = require('../services/email.service');
+            const { ACTIVITY_ACTIONS: AA } = require('../utils/activityLog.constants');
+
+            User.find({ role: 'admin' }).select('_id').then(async (admins) => {
+                if (!admins.length) return;
+                const adminIds = admins.map(a => a._id.toString());
+                await notificationEmitterModule.emitEmergencyAdminAlert(result.duty, hospital, adminIds, 'emergency_created');
+
+                // Email only to the configured alert address
+                const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+                if (alertEmail) {
+                    EmailService.sendEmergencyAdminAlertEmail(alertEmail, 'Admin', result.duty, hospital, 'emergency_created')
+                        .catch(err => logger.error(`Error sending emergency alert email: ${err.message}`));
+                }
+
+                activityLogEmitter.emitSystemActivity(
+                    AA.EMERGENCY_DUTY_ADMIN_NOTIFIED,
+                    { dutyId: result.duty._id?.toString(), reason: 'emergency_created', adminCount: admins.length }
+                ).catch(err => logger.error('Error logging emergency admin notification:', err));
+            }).catch(err => logger.error('Error fetching admins for emergency notification:', err));
+        }
     } catch (error) {
         logger.error('Error emitting duty created notification: ' + error.message);
         // Don't fail the request if notification fails
