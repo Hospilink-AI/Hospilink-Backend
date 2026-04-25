@@ -91,3 +91,31 @@ exports.getTaskResult = async (requestId) => {
         return null;
     }
 };
+exports.verifyAadhaarDigilocker = async (referenceId) => {
+    try {
+        const response = await axios.post(
+            `${IDFY_BASE_URL}/tasks/async/verify_with_source/ind_digilocker_fetch_documents`,
+            {
+                task_id: crypto.randomUUID(),
+                group_id: crypto.randomUUID(),
+                data: {
+                    reference_id: referenceId,
+                    key_id: process.env.IDFY_KEY_ID,
+                    ou_id: process.env.IDFY_OU_ID,
+                    secret: process.env.IDFY_SECRET,
+                    callback_url: `${process.env.BASE_URL}/api/webhook/idfy-aadhaar`,
+                    doc_type: "ADHAR",
+                    file_format: "xml",
+                    extra_fields: {}
+                }
+            },
+            { headers }
+        );
+
+        return response.data;
+
+    } catch (err) {
+        console.error("Aadhaar API Error:", err.response?.data || err.message);
+        return null;
+    }
+};

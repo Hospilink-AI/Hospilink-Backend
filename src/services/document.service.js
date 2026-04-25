@@ -253,6 +253,36 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     verificationStatus = "manual-pending-verification";
                 }
             }
+            // Aadhaar Digilocker Verification
+            if (documentType === "aadhaar-card") {
+
+                verificationStatus = "pending";
+
+                try {
+                    const referenceId = crypto.randomUUID(); // ✅ ADD THIS
+
+                    const idfyResponse = await idfyService.verifyAadhaarDigilocker(referenceId); // ✅ PASS IT
+
+                    if (idfyResponse && idfyResponse.request_id) {
+
+                        console.log("AADHAAR REQUEST ID:", idfyResponse.request_id);
+                        console.log("REFERENCE ID:", referenceId);
+
+                        verificationMeta = {
+                            provider: "idfy-digilocker",
+                            requestId: idfyResponse.request_id,
+                            referenceId: referenceId, // ✅ NOW CORRECT
+                            status: "initiated",
+                            type: "aadhaar-card",
+                            createdAt: new Date()
+                        };
+
+                    }
+
+                } catch (err) {
+                    console.error("Aadhaar verification error:", err.message);
+                }
+            }
 
             const {
                 extractQRFromBuffer,
@@ -325,7 +355,10 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     }
                 }
                 // NO QR → DO NOT OVERRIDE IF ALREADY VERIFIED
-                else if (verificationStatus !== "auto-verified") {
+                else if (
+                    verificationStatus !== "auto-verified" &&
+                    documentType !== "aadhaar-card"
+                ) {
                     verificationStatus = "manual-pending-verification";
                 }
             } catch (err) {
@@ -337,7 +370,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             if (
                 documentType === "aadhaar-card" &&
                 extractedData.aadhaarNumber &&
-                verificationStatus !== "auto-verified"
+                !verificationMeta // only before Digilocker starts
             ) {
                 verificationStatus = "pending";
             }
@@ -358,11 +391,20 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
     });
     await userDocs.save();
 
+    let redirectUrl = null;
+
+    if (verificationMeta?.requestId && documentType === "aadhaar-card") {
+        const result = await idfyService.getTaskResult(verificationMeta.requestId);
+
+        redirectUrl = result?.[0]?.result?.source_output?.redirect_url || null;
+    }
+
     return {
         documentType,
         verificationStatus,
         uploadedAt: new Date(),
-        s3Key: key  // Return S3 key for rollback tracking
+        s3Key: key,
+        redirectUrl
     };
 };
 const processIdfyResultAsync = async (userDocId, requestId, documentType) => {

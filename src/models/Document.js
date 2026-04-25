@@ -114,6 +114,7 @@ const documentSchema = new Schema(
                     provider: String,
                     rawResponse: Schema.Types.Mixed,
                     requestId: String,
+                    referenceId: String,
                     status: String,
                     verifiedAt: Date
                 }
