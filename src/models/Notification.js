@@ -13,7 +13,7 @@ const notificationSchema = new mongoose.Schema({
             'STAFF_ON_SITE', 'DUTY_IN_PROGRESS', 'DUTY_CANCELLED_BY_HOSPITAL', 'DUTY_CANCELLED_BY_STAFF', 
             'DUTY_EDITED', 'DUTY_COMPLETED', 'REVIEW_RECEIVED', 'DOCUMENT_VERIFIED', 'DOCUMENT_REJECTED', 
             'NEW_HOSPITAL_REGISTRATION', 'NEW_STAFF_REGISTRATION',
-            'DUTY_UNASSIGNED_15MIN', 'DUTY_UNFILLED_CRITICAL'],
+            'DUTY_UNASSIGNED_15MIN', 'DUTY_UNFILLED_CRITICAL', 'EMERGENCY_ADMIN_ALERT'],
         required: [true, 'Notification type is required']
     },
     payload: {

@@ -1,6 +1,39 @@
 const DutyService = require('../services/duty.service');
 const activityLogEmitter = require('../services/activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('./activityLog.constants');
+const User = require('../models/User');
+const notificationEmitter = require('../services/notificationEmitter');
+const EmailService = require('../services/email.service');
+
+/**
+ * Notify all admin users about an emergency/escalated duty via push + email.
+ */
+async function notifyAdminsForEmergency(duty, hospital, reason) {
+    try {
+        const admins = await User.find({ role: 'admin' }).select('_id name email');
+        if (!admins.length) return;
+
+        const adminIds = admins.map(a => a._id.toString());
+
+        // Push notification to all admins
+        await notificationEmitter.emitEmergencyAdminAlert(duty, hospital, adminIds, reason);
+
+        // Email only to the configured alert address
+        const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+        if (alertEmail) {
+            EmailService.sendEmergencyAdminAlertEmail(alertEmail, 'Admin', duty, hospital, reason)
+                .catch(err => console.error(`Error sending emergency alert email:`, err));
+        }
+
+        // Activity log
+        activityLogEmitter.emitSystemActivity(
+            ACTIVITY_ACTIONS.EMERGENCY_DUTY_ADMIN_NOTIFIED,
+            { dutyId: duty._id?.toString(), reason, adminCount: admins.length, timestamp: new Date().toISOString() }
+        ).catch(err => console.error('Error logging emergency admin notification:', err));
+    } catch (err) {
+        console.error('Error in notifyAdminsForEmergency:', err);
+    }
+}
 
 class CronJobs {
     // calculate milliseconds until next scheduled time
@@ -57,9 +90,25 @@ class CronJobs {
             async () => {
                 const completed = await DutyService.autoCompleteDuties();
                 const expired = await DutyService.expireUnacceptedDuties();
-                const reminders = await DutyService.sendNavigationReminders();
-                const unassigned15 = await DutyService.checkUnassigned15MinDuties();
-                const unfilledCritical = await DutyService.checkUnfilledCriticalDuties();
+                const reminders = DutyService.sendNavigationReminders ? await DutyService.sendNavigationReminders() : 0;
+                const unassigned15 = DutyService.checkUnassigned15MinDuties ? await DutyService.checkUnassigned15MinDuties() : 0;
+                const unfilledCritical = DutyService.checkUnfilledCriticalDuties ? await DutyService.checkUnfilledCriticalDuties() : 0;
+
+                // Auto-escalate unassigned duties starting within 1 hour
+                const { count: escalated, duties: escalatedDuties } = await DutyService.autoEscalateUnassignedDuties();
+                if (escalated > 0) {
+                    console.log(`Auto-escalated ${escalated} duties to CRITICAL at ${new Date().toLocaleString()}`);
+                    activityLogEmitter.emitSystemActivity(
+                        ACTIVITY_ACTIONS.DUTY_ESCALATED_TO_CRITICAL,
+                        { dutiesEscalated: escalated, timestamp: new Date().toISOString() }
+                    ).catch(err => console.error('Error logging escalation:', err));
+
+                    // Notify admins for each escalated duty
+                    for (const duty of escalatedDuties) {
+                        notifyAdminsForEmergency(duty, duty.hospital, 'escalated')
+                            .catch(err => console.error('Error notifying admins for escalated duty:', err));
+                    }
+                }
 
                 if (completed > 0) {
                     console.log(`Auto-completed ${completed} duties at ${new Date().toLocaleString()}`);
@@ -114,15 +163,17 @@ class CronJobs {
 
         console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min)');
 
-        // Log cron job initialization
-        activityLogEmitter.emitSystemActivity(
-            ACTIVITY_ACTIONS.CRON_JOB_EXECUTED,
-            {
-                jobName: 'Cron Jobs Initialization',
-                jobs: ['Auto-complete', 'Mark incomplete'],
-                timestamp: new Date().toISOString()
-            }
-        ).catch(err => console.error('Error logging cron initialization:', err));
+        // Log cron job initialization after a short delay to ensure DB/Redis are ready
+        setTimeout(() => {
+            activityLogEmitter.emitSystemActivity(
+                ACTIVITY_ACTIONS.CRON_JOB_EXECUTED,
+                {
+                    jobName: 'Cron Jobs Initialization',
+                    jobs: ['Auto-complete', 'Mark incomplete'],
+                    timestamp: new Date().toISOString()
+                }
+            ).catch(err => console.error('Error logging cron initialization:', err));
+        }, 3000);
     }
 
 }

@@ -140,6 +140,22 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
         const hospitalUserId = hospital.user._id.toString();
 
         await notificationEmitter.emitDutyCreated(result.duty, hospital, staffUserIds, hospitalUserId);
+
+        // Notify all admins if this is an emergency duty
+        if (urgency === 'emergency') {
+            const admins = await require('../models/User').find({ role: 'admin' }).select('_id');
+            if (admins.length) {
+                const adminIds = admins.map(a => a._id.toString());
+                await notificationEmitter.emitEmergencyAdminAlert(result.duty, hospital, adminIds, 'emergency_created');
+
+                const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+                if (alertEmail) {
+                    require('../services/email.service').sendEmergencyAdminAlertEmail(
+                        alertEmail, 'Admin', result.duty, hospital, 'emergency_created'
+                    ).catch(err => logger.error(`Error sending emergency alert email: ${err.message}`));
+                }
+            }
+        }
     } catch (err) {
         logger.error('Admin createDuty: notification error - ' + err.message);
     }
@@ -474,4 +490,18 @@ exports.getDutyHistory = asyncHandler(async (req, res) => {
             message: error.message
         });
     }
+});
+
+// GET /api/admin/emergency-dashboard - Consolidated Critical + High priority duties list
+exports.getEmergencyDashboard = asyncHandler(async (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+
+    const result = await DutyService.getEmergencyDashboard({ page, limit });
+
+    res.status(200).json({
+        success: true,
+        data: result.duties,
+        pagination: result.pagination
+    });
 });

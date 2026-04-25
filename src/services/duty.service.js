@@ -877,9 +877,29 @@ class DutyService {
             throw new Error('You can only edit your own duties');
         }
 
-        // Check if duty can be edited (30-minute rule)
+        const isEmergencyOrCritical = duty.urgency === 'emergency';
+        const isPricingOnlyUpdate = updateData.offeredRate !== undefined &&
+            Object.keys(updateData).every(k => k === 'offeredRate');
+
+        // For emergency duties: allow pricing-only edit until 1 min before start
+        if (isEmergencyOrCritical && isPricingOnlyUpdate) {
+            const pricingValidation = duty.canEditPricing();
+            if (!pricingValidation.allowed) {
+                throw new Error(pricingValidation.reason);
+            }
+            duty.offeredRate = updateData.offeredRate;
+            await duty.save();
+            await duty.populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } });
+            return duty;
+        }
+
+        // Standard edit: check 30-minute rule
         const editValidation = duty.canEditDuty();
         if (!editValidation.allowed) {
+            // For emergency, give a more specific error
+            if (isEmergencyOrCritical) {
+                throw new Error('Emergency duties can only have their pricing edited. Use offeredRate only.');
+            }
             throw new Error(editValidation.reason);
         }
 
@@ -1948,6 +1968,121 @@ class DutyService {
             console.error('Error in formatDutyRouteMap:', error);
             throw error;
         }
+    }
+
+    /**
+     * Auto-escalate: flag unassigned duties starting within 1 hour for admin attention.
+     * Does NOT mutate urgency — uses unfilledCriticalNotified as the escalation flag.
+     * Returns count and duty objects so the cron can notify admins.
+     */
+    async autoEscalateUnassignedDuties() {
+        const istNow = getCurrentIST();
+        const oneHourLater = new Date(istNow.getTime() + 60 * 60 * 1000);
+
+        // Find available (unassigned) duties not yet flagged for escalation
+        const candidates = await Duty.find({
+            status: 'available',
+            assignedTo: null,
+            unfilledCriticalNotified: false
+        }).populate('hospital', 'hospitalLegalName name user');
+
+        const toEscalate = [];
+
+        for (const duty of candidates) {
+            const [h, m] = duty.startTime.split(':').map(Number);
+            const istDutyDate = toIST(new Date(duty.date));
+            const dutyStart = new Date(istDutyDate);
+            dutyStart.setHours(h, m, 0, 0);
+
+            if (dutyStart > istNow && dutyStart <= oneHourLater) {
+                toEscalate.push(duty);
+            }
+        }
+
+        if (toEscalate.length === 0) return { count: 0, duties: [] };
+
+        const ids = toEscalate.map(d => d._id);
+        // Only mark as notified — urgency stays untouched
+        await Duty.updateMany(
+            { _id: { $in: ids } },
+            { $set: { unfilledCriticalNotified: true } }
+        );
+
+        return { count: toEscalate.length, duties: toEscalate };
+    }
+
+    /**
+     * Get consolidated emergency dashboard list.
+     * Includes: urgency emergency/high + any unassigned duty flagged as escalated.
+     */
+    async getEmergencyDashboard({ page = 1, limit = 20 } = {}) {
+        const { skip } = getPaginationParams(page, limit);
+
+        const query = {
+            status: { $in: ['available', 'assigned', 'enroute', 'in-progress'] },
+            $or: [
+                { urgency: { $in: ['emergency', 'high'] } },
+                { unfilledCriticalNotified: true }   // auto-escalated unassigned duties
+            ]
+        };
+
+        const [duties, total] = await Promise.all([
+            Duty.find(query)
+                .populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } })
+                .populate({ path: 'assignedTo', populate: { path: 'user', select: 'name email' } })
+                .sort({ urgency: -1, date: 1, startTime: 1 })
+                .skip(skip)
+                .limit(limit),
+            Duty.countDocuments(query)
+        ]);
+
+        const istNow = getCurrentIST();
+
+        const formatted = duties.map(duty => {
+            const [h, m] = duty.startTime.split(':').map(Number);
+            const istDutyDate = toIST(new Date(duty.date));
+            const dutyStart = new Date(istDutyDate);
+            dutyStart.setHours(h, m, 0, 0);
+
+            const minutesUntilStart = Math.round((dutyStart - istNow) / 60000);
+            let etaLabel;
+            if (minutesUntilStart <= 0) {
+                etaLabel = 'Immediate';
+            } else if (minutesUntilStart < 60) {
+                etaLabel = `${minutesUntilStart} min`;
+            } else {
+                const hrs = Math.floor(minutesUntilStart / 60);
+                const mins = minutesUntilStart % 60;
+                etaLabel = mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
+            }
+
+            return {
+                id: duty._id,
+                hospital: {
+                    id: duty.hospital?._id,
+                    name: duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'N/A',
+                    address: duty.hospital?.currentAddress
+                },
+                staffRole: duty.staffRole,
+                date: duty.date,
+                startTime: duty.startTime,
+                endTime: duty.endTime,
+                urgency: duty.urgency,
+                status: duty.status,
+                assignedTo: duty.assignedTo ? {
+                    id: duty.assignedTo._id,
+                    name: duty.assignedTo.user?.name
+                } : null,
+                eta: etaLabel,
+                minutesUntilStart,
+                offeredRate: duty.offeredRate
+            };
+        });
+
+        return {
+            duties: formatted,
+            pagination: getPaginationMeta(total, page, limit)
+        };
     }
 }
 

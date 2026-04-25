@@ -12,6 +12,7 @@ const connectDB = require('./src/config/database');
 const { initializeSocket } = require('./src/socket/index');
 const websocketManager = require('./src/services/websocketManager');
 const logger = require('./src/utils/logger');
+const CronJobs = require('./src/utils/cronJobs');
 
 const PORT = process.env.WEBSOCKET_PORT || process.env.PORT || 3001;
 
@@ -72,6 +73,10 @@ async function startWebSocketServer() {
         // Initialize Location Tracking Handler
         require('./src/socket/locationTracking.handler');
         logger.info('Location tracking initialized');
+
+        // Start cron jobs
+        CronJobs.startAllJobs();
+        logger.info('Cron jobs started');
 
         // Start server
         server.listen(PORT, '0.0.0.0', () => {
