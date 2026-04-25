@@ -123,6 +123,7 @@ app.use("/api/reviews", reviewRoutes);
 
 // Document Management Routes
 app.use("/api/documents", documentRoutes);
+app.use("/api/webhook", require("./routes/webhook.route"));
 
 // Agent - AI Job Finder routes (mounted BEFORE general /api route to avoid auth conflicts)
 const agentApp = require("../agent/api").app;
