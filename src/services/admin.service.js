@@ -1035,7 +1035,6 @@ class AdminService {
         const roleMatch = {};
         if (userRole) roleMatch.userRole = userRole;
 
-        const sortField = `documents.${sortBy}`;
         const sortDir = sortOrder === 'asc' ? 1 : -1;
 
         // Unwind documents, filter, lookup user name, paginate
@@ -1052,7 +1051,22 @@ class AdminService {
                 }
             },
             { $unwind: { path: '$userInfo', preserveNullAndEmptyArrays: true } },
-            { $sort: { [sortField]: sortDir } },
+            {
+                // Add a numeric priority field: pending/manual-pending = 0, everything else = 1
+                $addFields: {
+                    _statusPriority: {
+                        $cond: {
+                            if: {
+                                $in: ['$documents.verificationStatus', ['pending', 'manual-pending-verification']]
+                            },
+                            then: 0,
+                            else: 1
+                        }
+                    }
+                }
+            },
+            // Sort: pending first (0 before 1), then by uploadedAt descending within each group
+            { $sort: { _statusPriority: 1, 'documents.uploadedAt': sortDir } },
             {
                 $facet: {
                     data: [
