@@ -87,7 +87,7 @@ class DeviceInfoService {
                 // Try to get external IP for better location detection
                 try {
                     const externalIPResponse = await axios.get('https://api.ipify.org?format=json', {
-                        timeout: 3000
+                        timeout: 1500
                     });
                     
                     if (externalIPResponse.data.ip) {
@@ -112,7 +112,7 @@ class DeviceInfoService {
 
             // Use free IP geolocation API (ip-api.com)
             const response = await axios.get(`http://ip-api.com/json/${ip}`, {
-                timeout: 5000
+                timeout: 2000
             });
 
             if (response.data && response.data.status === 'success') {
@@ -129,7 +129,7 @@ class DeviceInfoService {
             // Try alternative API as fallback
             logger.warn(`ip-api.com failed for IP ${ip}, trying alternative...`);
             const altResponse = await axios.get(`https://ipinfo.io/${ip}/json`, {
-                timeout: 5000
+                timeout: 2000
             });
 
             if (altResponse.data) {
