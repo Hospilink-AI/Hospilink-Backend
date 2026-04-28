@@ -33,15 +33,15 @@ class DutyService {
         const now = getCurrentIST();
         const dutyDate = new Date(dutyData.date);
         const [startHours, startMinutes] = dutyData.startTime.split(':');
-        
+
         // Convert duty date to IST and set time
         const istDutyDate = toIST(dutyDate);
         const dutyStartTime = new Date(istDutyDate);
         dutyStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
-        
+
         // Add 15 minute buffer
         const bufferTime = new Date(dutyStartTime.getTime() - 15 * 60 * 1000);
-        
+
         if (bufferTime <= now) {
             throw new Error('Duty start time must be at least 15 minutes in the future. Cannot create duties for past or immediate times.');
         }
@@ -501,7 +501,7 @@ class DutyService {
                 $lt: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() + 1)
             }
         }).populate('hospital', 'hospitalLegalName currentAddress location user')
-          .populate('assignedTo');
+            .populate('assignedTo');
 
         // Prepare bulk operations
         const bulkOps = [];
@@ -541,7 +541,7 @@ class DutyService {
                         }
                     }
                 });
-                
+
                 // Store duty info for notification
                 dutiesForNotification.push(duty);
             }
@@ -552,21 +552,21 @@ class DutyService {
         if (bulkOps.length > 0) {
             const result = await Duty.bulkWrite(bulkOps);
             completedCount = result.modifiedCount;
-            
+
             // Send notifications for auto-completed duties
             if (completedCount > 0 && dutiesForNotification.length > 0) {
                 const notificationEmitter = require('./notificationEmitter');
                 const MedicalStaff = require('../models/MedicalStaff');
-                
+
                 for (const duty of dutiesForNotification) {
                     try {
                         // Get staff details
                         const staff = await MedicalStaff.findById(duty.assignedTo._id || duty.assignedTo)
                             .populate('user', 'name');
-                        
+
                         if (staff && duty.hospital && duty.hospital.user) {
                             const hospitalUserId = duty.hospital.user._id?.toString() || duty.hospital.user.toString();
-                            
+
                             // Emit duty completed notification to hospital
                             await notificationEmitter.emitDutyCompleted(duty, staff, hospitalUserId);
                             console.log(`Auto-complete notification sent for duty ${duty._id}`);
@@ -660,13 +660,13 @@ class DutyService {
                 $lt: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() + 1)
             }
         }).populate('hospital', 'hospitalLegalName')
-        .populate({
-            path: 'assignedTo',
-            populate: {
-                path: 'user',
-                select: 'name email'
-            }
-        });
+            .populate({
+                path: 'assignedTo',
+                populate: {
+                    path: 'user',
+                    select: 'name email'
+                }
+            });
 
         const bulkOps = [];
         const incompleteDuties = [];
@@ -688,7 +688,7 @@ class DutyService {
 
                 const staffName = duty.assignedTo?.user?.name || 'Unknown Staff';
                 const hospitalName = duty.hospital?.hospitalLegalName || 'Unknown Hospital';
-                
+
                 console.log(`Marking duty INCOMPLETE: ${hospitalName} - ${duty.staffRole} - ${staffName} (${minutesOverdue}min overdue)`);
 
                 incompleteDuties.push({
@@ -749,13 +749,13 @@ class DutyService {
         const duties = await Duty.find({
             status: 'assigned' // Only remind if they haven't started their journey yet
         }).populate('hospital', 'hospitalLegalName user')
-          .populate({
-              path: 'assignedTo',
-              populate: {
-                  path: 'user',
-                  select: 'name email _id'
-              }
-          });
+            .populate({
+                path: 'assignedTo',
+                populate: {
+                    path: 'user',
+                    select: 'name email _id'
+                }
+            });
 
         const remindersToSend = [];
 
@@ -791,7 +791,7 @@ class DutyService {
         // Send notifications
         if (remindersToSend.length > 0) {
             const notificationEmitter = require('./notificationEmitter');
-            
+
             for (const reminder of remindersToSend) {
                 try {
                     await notificationEmitter.emitNavigateToDuty(
@@ -799,7 +799,7 @@ class DutyService {
                         reminder.staff,
                         reminder.staffUserId
                     );
-                    
+
                     const hospitalName = reminder.duty.hospital?.hospitalLegalName || 'Hospital';
                     const staffName = reminder.staff.user?.name || 'Staff';
                     console.log(`Navigation reminder sent: ${staffName} for duty at ${hospitalName} (starts in ${reminder.minutesUntilStart} min)`);
@@ -1120,15 +1120,15 @@ class DutyService {
         try {
             // Get staff location using new dashboard service
             const locationInfo = await DashboardService.getStaffLocationForDuties(staffId);
-            
+
             const staffLat = locationInfo.location.latitude;
             const staffLng = locationInfo.location.longitude;
             const locationSource = locationInfo.source;
-            
-            console.log(`Using ${locationSource} location for staff ${staffId}:`, { 
-                lat: staffLat, 
+
+            console.log(`Using ${locationSource} location for staff ${staffId}:`, {
+                lat: staffLat,
                 lng: staffLng,
-                permissionGranted: locationInfo.permissionGranted 
+                permissionGranted: locationInfo.permissionGranted
             });
 
             // Get staff information for role filtering
@@ -1269,8 +1269,8 @@ class DutyService {
                 throw new Error('Staff location is required to get route information. Please enable location in your dashboard or update your profile location.');
             }
 
-            const staffLat = currentLocation.latitude;  
-            const staffLng = currentLocation.longitude; 
+            const staffLat = currentLocation.latitude;
+            const staffLng = currentLocation.longitude;
 
             // Check for named coordinates structure
             if (!duty.hospital.coordinates ||
@@ -1647,7 +1647,7 @@ class DutyService {
     async getHospitalActiveDuties(hospitalId, filters = {}) {
         try {
             const { role, status, page = 1, limit = 10 } = filters;
-            
+
             // Build base query for hospital's active duties
             let query = {
                 hospital: hospitalId, // Query directly by hospital ID
@@ -1753,19 +1753,19 @@ class DutyService {
     async getHospitalDutyRouteMap(dutyId, hospitalId) {
         try {
             // Verify duty belongs to hospital
-            const duty = await Duty.findOne({ 
-                _id: dutyId, 
-                hospital: hospitalId 
+            const duty = await Duty.findOne({
+                _id: dutyId,
+                hospital: hospitalId
             })
-            .populate({
-                path: 'assignedTo',
-                select: 'fullName user coordinates phoneNumber skills averageRating totalExperience city area verificationStatus education profileSummary',
-                populate: {
-                    path: 'user',
-                    select: 'name email'
-                }
-            })
-            .populate('hospital', 'hospitalLegalName location currentAddress coordinates');
+                .populate({
+                    path: 'assignedTo',
+                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience city area verificationStatus education profileSummary',
+                    populate: {
+                        path: 'user',
+                        select: 'name email'
+                    }
+                })
+                .populate('hospital', 'hospitalLegalName location currentAddress coordinates');
 
             if (!duty) {
                 throw new Error('Duty not found or does not belong to your hospital');
@@ -1802,11 +1802,11 @@ class DutyService {
             // Try real-time location first
             if (staff && staff.user) {
                 const redis = await redisClient.getClientAsync();
-                
+
                 try {
                     const key = `hospilink:staff_location:${staff.user._id}`;
                     const data = await redis.get(key);
-                    
+
                     if (data) {
                         currentLocation = JSON.parse(data);
                         locationSource = 'realtime';
@@ -1851,7 +1851,7 @@ class DutyService {
                     hospital.coordinates.coordinates.latitude,
                     hospital.coordinates.coordinates.longitude
                 );
-                
+
                 routeInfo = {
                     overviewPolyline: null,
                     stepPolylines: [],
@@ -1929,7 +1929,7 @@ class DutyService {
                     isRealTime: duty.status === 'enroute' || duty.status === 'in-progress',
                     updateInterval: 2000, // 2 seconds for real-time tracking
                     lastUpdate: currentLocation.timestamp,
-                    estimatedArrival: routeInfo.duration ? 
+                    estimatedArrival: routeInfo.duration ?
                         new Date(Date.now() + routeInfo.duration * 60 * 1000) : null,
                     accuracy: currentLocation.accuracy || null
                 },
@@ -2060,6 +2060,97 @@ class DutyService {
             duties: formatted,
             pagination: getPaginationMeta(total, page, limit)
         };
+    }
+    async assignDutyByAdmin({ hospitalId, dutyId, staffId, adminId }) {
+
+        // 1. Hospital validation
+        const hospital = await Hospital.findById(hospitalId);
+        if (!hospital) {
+            throw new Error('Hospital not found');
+        }
+
+        // 2. Duty validation
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new Error('Duty not found');
+        }
+
+        // 3. Check duty belongs to hospital
+        if (duty.hospital.toString() !== hospitalId) {
+            throw new Error('Duty does not belong to this hospital');
+        }
+
+        // 4. Only one staff can take duty
+        if (duty.status !== 'available') {
+            throw new Error('Duty is already assigned or not available');
+        }
+
+        // 5. Staff validation
+        const staff = await MedicalStaff.findById(staffId);
+        if (!staff) {
+            throw new Error('Medical staff not found');
+        }
+
+        // 6. Role match 
+        const normalizedStaffRole = normalizeRole(staff.jobRole);
+        const normalizedDutyRole = normalizeRole(duty.staffRole);
+
+        if (normalizedStaffRole !== normalizedDutyRole) {
+            throw new Error(`Role mismatch: duty requires ${duty.staffRole}`);
+        }
+
+        // 7. Time validation (same as hospital)
+        const now = getCurrentIST();
+        const dutyDate = new Date(duty.date);
+        const [startHours, startMinutes] = duty.startTime.split(':');
+
+        const istDutyDate = toIST(dutyDate);
+        const dutyStartTime = new Date(istDutyDate);
+        dutyStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
+
+        if (now >= dutyStartTime) {
+            throw new Error('Cannot assign duty after start time');
+        }
+
+        // 8. Overlap check 
+        const existingDuties = await Duty.find({
+            assignedTo: staff._id,
+            status: 'assigned',
+            $or: [
+                { date: duty.date },
+                ...(duty.isOvernightDuty && duty.endDate ? [{ date: duty.endDate }] : [])
+            ]
+        });
+
+        for (const existing of existingDuties) {
+            if (doDutiesOverlap(duty, existing)) {
+                throw new Error('Staff already has overlapping duty');
+            }
+        }
+
+        // 9. Assign duty
+        duty.status = 'assigned';
+        duty.assignedTo = staff._id;
+        duty.assignedAt = getCurrentIST();
+
+        duty.statusHistory.push({
+            status: 'assigned',
+            timestamp: getCurrentIST(),
+            changedBy: adminId,
+            reason: 'Assigned by admin'
+        });
+
+        await duty.save();
+
+        await duty.populate({
+            path: 'assignedTo',
+            populate: {
+                path: 'user',
+                select: 'name email'
+            }
+        });
+
+        return duty;
     }
 }
 
