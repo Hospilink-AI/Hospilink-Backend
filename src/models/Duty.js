@@ -79,7 +79,7 @@ const dutySchema = new mongoose.Schema({
         type: String,
         required: [true, 'Urgency level is required'],
         enum: {
-            values: ['low', 'medium', 'high', 'emergency'],
+            values: ['low', 'medium', 'high','emergency'],
             message: 'Urgency must be one of: low, medium, high, emergency'
         },
         default: 'medium'

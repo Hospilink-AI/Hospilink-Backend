@@ -56,7 +56,7 @@ class ProfileController {
                 ACTIVITY_ACTIONS.PROFILE_CREATED,
                 req.user,
                 actor,
-                { hospitalName: result.profile.hospitalLegalName, location: result.profile.location },
+                { hospitalName: result.profile.hospitalLegalName, city: result.profile.city, state: result.profile.state },
                 req
             ).catch(err => console.error('Error logging profile creation:', err));
         }

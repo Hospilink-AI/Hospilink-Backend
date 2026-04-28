@@ -112,6 +112,19 @@ class ProfileService {
                 throw new Error('User must have hospital role to create hospital profile');
             }
 
+            // Email must match signup email
+            if (profileData.email && profileData.email !== user.email) {
+                throw new Error('Email must match the email used during signup');
+            }
+
+            // Hospital name must match signup name
+            if (profileData.hospitalLegalName && profileData.hospitalLegalName.trim() !== user.name.trim()) {
+                throw new Error(`Hospital name "${profileData.hospitalLegalName}" must match the name used during signup "${user.name}"`);
+            }
+
+            // Use signup email for profile
+            profileData.email = user.email;
+
             // Check if profile already exists
             const existingProfile = await Hospital.findOne({ user: userId });
             if (existingProfile) {
@@ -122,11 +135,13 @@ class ProfileService {
             let geocodingAddress;
             let geocodingSource = 'google_maps_api';
 
-            // Build comprehensive address for geocoding using all three fields
+            // Build comprehensive address for geocoding using new fields
             const addressParts = [
                 profileData.hospitalLegalName,
                 profileData.currentAddress,
-                profileData.location
+                profileData.city,
+                profileData.state,
+                profileData.pincode
             ].filter(part => part && part.trim() !== '');
 
             geocodingAddress = addressParts.join(', ');
@@ -146,9 +161,9 @@ class ProfileService {
             } catch (error) {
                 console.error('Hospital geocoding failed:', error.message);
 
-                // Try with simplified address (hospital name + location)
+                // Try with simplified address (hospital name + city + state)
                 try {
-                    const simplifiedAddress = `${profileData.hospitalLegalName}, ${profileData.location}`;
+                    const simplifiedAddress = `${profileData.hospitalLegalName}, ${profileData.city}, ${profileData.state}`;
                     console.log('Retrying with simplified address:', simplifiedAddress);
 
                     const geocoded = await geocodingService.geocodeAddress(simplifiedAddress);
@@ -166,7 +181,7 @@ class ProfileService {
 
                     // Final fallback - just hospital name + city
                     try {
-                        const fallbackAddress = `${profileData.hospitalLegalName}, ${profileData.location || 'India'}`;
+                        const fallbackAddress = `${profileData.hospitalLegalName}, ${profileData.city || 'India'}, ${profileData.state || 'India'}`;
                         console.log('Final fallback with:', fallbackAddress);
 
                         const geocoded = await geocodingService.geocodeAddress(fallbackAddress);
@@ -190,11 +205,15 @@ class ProfileService {
             const hospitalProfile = new Hospital({
                 user: userId,
                 hospitalLegalName: profileData.hospitalLegalName,
+                email: profileData.email, 
                 currentAddress: profileData.currentAddress,
-                location: profileData.location,
+                city: profileData.city,
+                state: profileData.state,
+                pincode: profileData.pincode,
+                phoneNumber: profileData.phoneNumber,
                 servicesAvailable: profileData.servicesAvailable,
                 staffCount: profileData.staffCount,
-                coordinates: coordinates // Store coordinates with named properties
+                coordinates: coordinates
             });
 
             await hospitalProfile.save();
@@ -327,9 +346,13 @@ class ProfileService {
                     profile = {
                         id: raw._id,
                         hospitalLegalName: raw.hospitalLegalName,
+                        email: user.email, // Get from user collection (already fetched above)
                         profilePicture: profilePictureUrl,
                         currentAddress: raw.currentAddress,
-                        location: raw.location,
+                        city: raw.city,
+                        state: raw.state,
+                        pincode: raw.pincode,
+                        phoneNumber: raw.phoneNumber,
                         servicesAvailable: raw.servicesAvailable,
                         isProfileComplete: raw.isProfileComplete,
                         staffCount: raw.staffCount,
@@ -486,11 +509,35 @@ class ProfileService {
 
                 let finalUpdateData = { ...updateData };
 
-                // Handle location changes with caching
-                const locationChanged = updateData.location && updateData.location !== currentProfile.location;
+                // Prevent email changes (read-only after creation)
+                if (updateData.email && updateData.email !== user.email) {
+                    throw new Error('Email cannot be changed after profile creation');
+                }
 
-                if (locationChanged) {
-                    const locationToGeocode = updateData.location || currentProfile.location;
+                // Prevent phone number changes (read-only after creation)
+                if (updateData.phoneNumber && updateData.phoneNumber !== currentProfile.phoneNumber) {
+                    throw new Error('Phone number cannot be changed after profile creation');
+                }
+
+                // Remove read-only fields from update data
+                delete finalUpdateData.email;
+                delete finalUpdateData.phoneNumber;
+
+                // Handle location changes with caching
+                const cityChanged = updateData.city && updateData.city !== currentProfile.city;
+                const stateChanged = updateData.state && updateData.state !== currentProfile.state;
+                const pincodeChanged = updateData.pincode && updateData.pincode !== currentProfile.pincode;
+
+                if (cityChanged || stateChanged || pincodeChanged) {
+                    const addressParts = [
+                        updateData.hospitalLegalName || currentProfile.hospitalLegalName,
+                        updateData.currentAddress || currentProfile.currentAddress,
+                        updateData.city || currentProfile.city,
+                        updateData.state || currentProfile.state,
+                        updateData.pincode || currentProfile.pincode
+                    ].filter(part => part && part.trim() !== '');
+                    
+                    const locationToGeocode = addressParts.join(', ');
 
                     if (locationToGeocode) {
                         // Try cache first
@@ -519,6 +566,11 @@ class ProfileService {
                         }
                     }
                 }
+
+                // Skip phone number update (read-only after creation)
+                // Remove email from update data (read-only)
+                delete finalUpdateData.phoneNumber;
+                delete finalUpdateData.email;
 
                 // Update hospital profile
                 updatedProfile = await Hospital.findOneAndUpdate(
@@ -563,6 +615,18 @@ class ProfileService {
 
             // Get fresh data for response
             const freshProfile = await this.getUserProfile(userId);
+
+            // Ensure email and phone are always included in response
+            if (freshProfile.profile && user.role === 'hospital') {
+                // Email comes from user collection (always available)
+                freshProfile.profile.email = user.email;
+                
+                // Phone comes from hospital profile (read-only)
+                const hospitalProfile = await Hospital.findOne({ user: userId }).lean();
+                if (hospitalProfile) {
+                    freshProfile.profile.phoneNumber = hospitalProfile.phoneNumber;
+                }
+            }
 
             return {
                 success: true,
@@ -829,9 +893,16 @@ class ProfileService {
                 throw new Error('Hospital profile not found');
             }
 
+            // Validate hospital has coordinates
+            if (!hospital.coordinates || !hospital.coordinates.coordinates || 
+                !hospital.coordinates.coordinates.latitude || 
+                !hospital.coordinates.coordinates.longitude) {
+                throw new Error('Hospital location coordinates not found. Please update your hospital profile with valid location information.');
+            }
+
             // Validate radius 
-            if (radiusKm < 5 || radiusKm > 100) {
-                throw new Error('Radius must be between 5km and 100km');
+            if (radiusKm < 1 || radiusKm > 100) {
+                throw new Error('Radius must be between 1km and 100km');
             }
 
             const hospitalLat = hospital.coordinates.coordinates.latitude;
@@ -898,6 +969,12 @@ class ProfileService {
                 success: true,
                 hospital: {
                     name: hospital.hospitalLegalName,
+                    address: {
+                        currentAddress: hospital.currentAddress,
+                        city: hospital.city,
+                        state: hospital.state,
+                        pincode: hospital.pincode
+                    },
                     location: {
                         latitude: hospitalLat,
                         longitude: hospitalLng

@@ -2,6 +2,7 @@ const validator = require('validator');
 const { body, validationResult } = require('express-validator');
 const { ValidationError } = require('./error.middleware');
 const { getCurrentIST, toIST } = require('../utils/helpers');
+const { INDIAN_STATES } = require('../utils/constants');
 
 
 const validateSignup = (req, res, next) => {
@@ -317,13 +318,20 @@ const validateMedicalStaffProfile = (req, res, next) => {
 
 
 const validateHospitalProfile = (req, res, next) => {
-    const { hospitalLegalName, currentAddress, servicesAvailable, location, staffCount } = req.body;
+    // Debug logging
+    console.log('Request body:', req.body);
+    console.log('Received fields:', Object.keys(req.body));
+    
+    const { hospitalLegalName, currentAddress, servicesAvailable, city, state, pincode, staffCount, phoneNumber, email } = req.body;
     const errors = [];
 
     // Check for unexpected fields
-    const allowedFields = ['hospitalLegalName', 'currentAddress', 'servicesAvailable', 'location', 'staffCount'];
+    const allowedFields = ['hospitalLegalName', 'currentAddress', 'servicesAvailable', 'city', 'state', 'pincode', 'staffCount', 'phoneNumber', 'email'];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+    
+    console.log('Destructured hospitalLegalName:', hospitalLegalName);
+    console.log('Type of hospitalLegalName:', typeof hospitalLegalName);
 
     if (unexpectedFields.length > 0) {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
@@ -336,11 +344,37 @@ const validateHospitalProfile = (req, res, next) => {
         errors.push('Hospital legal name cannot exceed 200 characters');
     }
 
+    // Email validation (basic format only)
+    if (!email || !validator.isEmail(email)) {
+        errors.push('Valid email is required');
+    }
+
     // Current address validation
     if (!currentAddress || currentAddress.trim().length === 0) {
         errors.push('Current address is required');
     } else if (currentAddress.length > 300) {
         errors.push('Current address cannot exceed 300 characters');
+    }
+
+    // City validation
+    if (!city || city.trim().length === 0) {
+        errors.push('City is required');
+    } else if (city.length > 100) {
+        errors.push('City cannot exceed 100 characters');
+    }
+
+    // State validation
+    if (!state || state.trim().length === 0) {
+        errors.push('State is required');
+    } else if (!INDIAN_STATES.includes(state)) {
+        errors.push(`Invalid state. Must be one of: ${INDIAN_STATES.join(', ')}`);
+    }
+
+    // Pincode validation
+    if (!pincode || pincode.trim().length === 0) {
+        errors.push('Pincode is required');
+    } else if (!/^[1-9][0-9]{5}$/.test(pincode)) {
+        errors.push('Pincode must be a valid 6-digit Indian postal code');
     }
 
     // Services available validation
@@ -361,17 +395,15 @@ const validateHospitalProfile = (req, res, next) => {
         }
     }
 
-    // Location validation
-    if (!location || location.trim().length === 0) {
-        errors.push('Location is required');
-    } else if (location.length > 300) {
-        errors.push('Location cannot exceed 300 characters');
-    }
-
-    // Staff count validation
+    // Total staff count validation
     const validStaffCounts = ['2-10', '11-50', '51-100', '100+'];
     if (!staffCount || !validStaffCounts.includes(staffCount)) {
-        errors.push('Staff count must be one of: 2-10, 11-50, 51-100, 100+');
+        errors.push('Total staff count must be one of: 2-10, 11-50, 51-100, 100+');
+    }
+
+    // Phone number validation
+    if (!phoneNumber || !/^(\+91) [6-9]\d{9}$/.test(phoneNumber)) {
+        errors.push('Phone number must start with +91 followed by 10 digits');
     }
 
     if (errors.length > 0) {
@@ -517,13 +549,40 @@ const validateProfileUpdate = (req, res, next) => {
         }
         
     } else if (role === 'hospital') {
-        const { hospitalLegalName, currentAddress, servicesAvailable, location } = req.body;
+        const { hospitalLegalName, currentAddress, servicesAvailable, city, state, pincode, staffCount, phoneNumber, email } = req.body;
+        
+        // Prevent email and phone number changes
+        if (email && email !== req.user.email) {
+            errors.push('Email cannot be changed after profile creation');
+        }
+        
+        if (phoneNumber) {
+            errors.push('Phone number cannot be changed after profile creation');
+        }
         
         // Validate hospital-specific fields
         if (hospitalLegalName && hospitalLegalName.length > 200) {
             errors.push('Hospital name cannot exceed 200 characters');
         }
         
+        // City validation
+        if (city && city.length > 100) {
+            errors.push('City cannot exceed 100 characters');
+        }
+        
+        // State validation
+        if (state) {
+            if (!INDIAN_STATES.includes(state)) {
+                errors.push('Invalid state. Must be a valid Indian state');
+            }
+        }
+        
+        // Pincode validation
+        if (pincode && !/^[1-9][0-9]{5}$/.test(pincode)) {
+            errors.push('Pincode must be a valid 6-digit Indian postal code');
+        }
+
+        // services validation
         if (servicesAvailable && (!Array.isArray(servicesAvailable) || servicesAvailable.length === 0)) {
             errors.push('At least one service must be selected');
         }

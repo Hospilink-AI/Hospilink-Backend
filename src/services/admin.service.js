@@ -519,14 +519,14 @@ class AdminService {
         }
 
         const hospitals = await Hospital.find(match)
-            .select('_id hospitalLegalName location')
+            .select('_id hospitalLegalName currentAddress city state pincode')
             .sort({ hospitalLegalName: 1 })
             .lean();
 
         return hospitals.map(h => ({
             id: h._id,
             name: h.hospitalLegalName,
-            location: h.location
+            location: `${h.currentAddress}, ${h.city}, ${h.state}, ${h.pincode}`
         }));
     }
 
@@ -537,7 +537,7 @@ class AdminService {
         // Build match stage
         const match = {};
         if (status) match.verificationStatus = status;
-        if (city) match.location = { $regex: city.trim(), $options: 'i' };
+        if (city) match.city = { $regex: city.trim(), $options: 'i' };
         if (search) {
             const re = { $regex: search.trim(), $options: 'i' };
             match.$or = [{ hospitalLegalName: re }];
@@ -582,8 +582,10 @@ class AdminService {
                             $project: {
                                 _id: 1,
                                 hospitalLegalName: 1,
-                                location: 1,
                                 currentAddress: 1,
+                                city: 1,
+                                state: 1,
+                                pincode: 1,
                                 staffCount: 1,
                                 verificationStatus: '$verificationStatus',
                                 rejectionReason: '$rejectionReason',
@@ -621,6 +623,7 @@ class AdminService {
     // GET /api/admin/hospitals/:id — preview modal
     async getHospitalDetail(hospitalId) {
         const hospital = await Hospital.findById(hospitalId)
+            .select('hospitalLegalName currentAddress city state pincode staffCount servicesAvailable isProfileComplete verificationStatus coordinates createdAt')
             .populate('user', 'name email createdAt')
             .lean();
 
@@ -653,7 +656,9 @@ class AdminService {
             id: hospital._id,
             hospitalLegalName: hospital.hospitalLegalName,
             currentAddress: hospital.currentAddress,
-            location: hospital.location,
+            city: hospital.city,
+            state: hospital.state,
+            pincode: hospital.pincode,
             staffCount: hospital.staffCount,
             servicesAvailable: hospital.servicesAvailable,
             verificationStatus: hospital.verificationStatus,
@@ -1246,7 +1251,7 @@ class AdminService {
                         select: 'name email'
                     }
                 })
-                .populate('hospital', 'hospitalLegalName location coordinates')
+                .populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates')
                 .sort({ createdAt: -1 }) // Latest duties first
                 .skip(skip)
                 .limit(limit);
@@ -1340,7 +1345,7 @@ class AdminService {
                         select: 'name email'
                     }
                 })
-                .populate('hospital', 'hospitalLegalName location currentAddress coordinates')
+                .populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates')
                 .lean(); // Use lean for better performance
 
             if (!duty) {
@@ -1452,7 +1457,9 @@ class AdminService {
                     id: hospital._id,
                     name: hospital.hospitalLegalName,
                     address: hospital.currentAddress,
-                    location: hospital.location,
+                    city: hospital.city,
+                    state: hospital.state,
+                    pincode: hospital.pincode,
                     coordinates: {
                         latitude: hospital.coordinates.coordinates.latitude,
                         longitude: hospital.coordinates.coordinates.longitude
@@ -1662,7 +1669,7 @@ class AdminService {
                         select: 'name email'
                     }
                 })
-                .populate('hospital', 'hospitalLegalName location')
+                .populate('hospital', 'hospitalLegalName currentAddress city state pincode')
                 .sort({ completedAt: -1, date: -1 })
                 .skip(skip)
                 .limit(limit)
@@ -1690,7 +1697,12 @@ class AdminService {
                     formattedRole: duty.formattedRole,
                     department: duty.description || 'General',
                     hospitalName: hospital?.hospitalLegalName || 'Unknown',
-                    hospitalLocation: hospital?.location || 'Unknown',
+                    hospitalLocation: hospital?.currentAddress ? {
+                        currentAddress: hospital.currentAddress,
+                        city: hospital.city,
+                        state: hospital.state,
+                        pincode: hospital.pincode
+                    } : null,
                     shiftDuration: duration,
                     hoursCompleted: calculateDutyDuration(
                         duty.date,
