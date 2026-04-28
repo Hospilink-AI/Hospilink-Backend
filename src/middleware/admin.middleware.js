@@ -857,6 +857,56 @@ const validateDocumentsListQuery = (req, res, next) => {
 
     next();
 };
+// Validate admin assign duty request
+const validateAssignDuty = (req, res, next) => {
+    const { hospital_id, duty_id, staff_id } = req.body;
+
+    //  Body check
+    if (!req.body || Object.keys(req.body).length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Request body is required'
+        });
+    }
+
+    //  Required fields
+    if (!hospital_id || !duty_id || !staff_id) {
+        return res.status(400).json({
+            success: false,
+            message: 'hospital_id, duty_id and staff_id are required'
+        });
+    }
+
+    //  ObjectId validation
+    if (!mongoose.Types.ObjectId.isValid(hospital_id)) {
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid hospital_id format'
+        });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(duty_id)) {
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid duty_id format'
+        });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(staff_id)) {
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid staff_id format'
+        });
+    }
+
+    req.validatedBody = {
+        hospital_id,
+        duty_id,
+        staff_id
+    };
+
+    next();
+};
 
 
 module.exports = {
@@ -874,5 +924,6 @@ module.exports = {
     validateMedicalStaffListQuery,
     validateDocumentsListQuery,
     validateObjectId,
-    validateRejectionReason
+    validateRejectionReason,
+    validateAssignDuty
 };
