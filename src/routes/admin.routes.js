@@ -17,15 +17,16 @@ const {
     validateMedicalStaffListQuery,
     validateDocumentsListQuery,
     validateObjectId,
-    validateRejectionReason
+    validateRejectionReason,
+    validateAssignDuty
 } = require('../middleware/admin.middleware');
 
 const { validateDutyCreation } = require('../middleware/validation.middleware');
 
-const { 
-    authRateLimit, 
+const {
+    authRateLimit,
     otpRateLimit,
-    generalRateLimit 
+    generalRateLimit
 } = require('../middleware/rateLimit.middleware');
 
 
@@ -84,5 +85,7 @@ router.get('/documents/stats', adminController.getDocumentStats);
 router.get('/documents', validateDocumentsListQuery, adminController.getAllDocuments);
 router.put('/documents/:documentId/verify', validateObjectId('documentId'), adminController.verifyDocument);
 router.put('/documents/:documentId/reject', validateObjectId('documentId'), validateRejectionReason, adminController.rejectDocument);
+
+router.post('/assign-duty', validateAssignDuty, adminController.assignDutyToStaff);
 
 module.exports = router;

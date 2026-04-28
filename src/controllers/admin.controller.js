@@ -54,13 +54,13 @@ exports.adminResendOTP = asyncHandler(async (req, res) => {
 exports.adminLogout = asyncHandler(async (req, res) => {
     const token = req.headers.authorization?.split(' ')[1];
     const userId = req.user?.id || req.user?._id;
-    
+
     // Log logout before processing
     if (req.user) {
         activityLogEmitter.logUserLogout(req.user, req)
             .catch(err => console.error('Error logging logout:', err));
     }
-    
+
     const result = await AdminAuthService.logout(token, userId);
     res.status(200).json({
         success: true,
@@ -136,7 +136,7 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
         const staffUserIds = matchingStaff
             .filter(s => s.user && s.user._id)
             .map(s => s.user._id.toString());
-        
+
         const hospitalUserId = hospital.user._id.toString();
 
         await notificationEmitter.emitDutyCreated(result.duty, hospital, staffUserIds, hospitalUserId);
@@ -367,17 +367,17 @@ exports.getActiveDuties = asyncHandler(async (req, res) => {
 // GET /api/admin/duty-route-map/:dutyId - Get duty route map with polyline
 exports.getDutyRouteMap = asyncHandler(async (req, res) => {
     const { dutyId } = req.validatedParams;
-    
+
     try {
         // Add request tracking for analytics
         const startTime = Date.now();
-        
+
         const routeMap = await adminService.getDutyRouteMap(dutyId);
-        
+
         // Log performance metrics
         const responseTime = Date.now() - startTime;
         console.log(`Duty route map generated in ${responseTime}ms for duty: ${dutyId}`);
-        
+
         // Enhanced response with metadata
         res.status(200).json({
             success: true,
@@ -390,7 +390,7 @@ exports.getDutyRouteMap = asyncHandler(async (req, res) => {
         });
     } catch (error) {
         console.error(`Error in getDutyRouteMap for duty ${dutyId}:`, error);
-        
+
         // Enhanced error response
         res.status(error.message.includes('not found') ? 404 : 400).json({
             success: false,
@@ -449,7 +449,7 @@ exports.rejectHospital = asyncHandler(async (req, res) => {
 exports.getOvernightDuties = asyncHandler(async (req, res) => {
     try {
         const result = await adminService.getOvernightDuties();
-        
+
         res.status(200).json({
             success: true,
             data: result.duties,
@@ -467,7 +467,7 @@ exports.getOvernightDuties = asyncHandler(async (req, res) => {
 // GET /api/admin/duty-history - Get completed duty history with filters
 exports.getDutyHistory = asyncHandler(async (req, res) => {
     const { date, startDate, endDate, hospitalName, page, limit } = req.validatedQuery;
-    
+
     try {
         const result = await adminService.getDutyHistory({
             date,
@@ -477,7 +477,7 @@ exports.getDutyHistory = asyncHandler(async (req, res) => {
             page,
             limit
         });
-        
+
         res.status(200).json({
             success: true,
             data: result.duties,
@@ -503,5 +503,29 @@ exports.getEmergencyDashboard = asyncHandler(async (req, res) => {
         success: true,
         data: result.duties,
         pagination: result.pagination
+    });
+});
+// POST /api/admin/assign-duty
+exports.assignDutyToStaff = asyncHandler(async (req, res) => {
+    const { hospital_id, duty_id, staff_id } = req.body;
+
+    if (!hospital_id || !duty_id || !staff_id) {
+        return res.status(400).json({
+            success: false,
+            message: 'hospital_id, duty_id and staff_id are required'
+        });
+    }
+
+    const duty = await DutyService.assignDutyByAdmin({
+        hospitalId: hospital_id,
+        dutyId: duty_id,
+        staffId: staff_id,
+        adminId: req.user._id || req.user.id
+    });
+
+    res.status(200).json({
+        success: true,
+        message: 'Duty assigned successfully',
+        data: duty
     });
 });
