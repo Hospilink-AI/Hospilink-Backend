@@ -289,7 +289,8 @@ class AuthService {
         await cacheService.set(tokenKey, { userId: user._id.toString() }, 3600);
 
         const resetUrl = `${process.env.FRONTEND_URL}/auth/reset-password?token=${token}`;
-        await EmailService.sendPasswordResetEmail(user.email, user.name, resetUrl);
+        EmailService.sendPasswordResetEmail(user.email, user.name, resetUrl)
+            .catch(err => logger.error(`Failed to send password reset email: ${err.message}`));
 
         logger.info(`Password reset requested for: ${emailLower}`);
         return { message: 'If this email is registered, a reset link has been sent.' };

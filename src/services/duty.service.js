@@ -68,106 +68,83 @@ class DutyService {
 
 
 
-    async getDuties(query = {}) {
-        let dutyQuery = { ...query };
+    // Duty history for hospital — shaped for the Duty History UI table
+    async getDutyHistory({ hospitalUserId, date, startDate, endDate, status, staffRole, page = 1, limit = 10 }) {
+        const { skip } = getPaginationParams(page, limit);
 
-        // If filtering by hospital user ID, convert to hospital profile ID
-        if (query.hospital) {
-            const hospital = await Hospital.findOne({ user: query.hospital });
-            if (hospital) {
-                dutyQuery.hospital = hospital._id;
-            } else {
-                return [];
+        const hospital = await Hospital.findOne({ user: hospitalUserId });
+        if (!hospital) return { duties: [], pagination: getPaginationMeta(0, page, limit) };
+
+        const match = { hospital: hospital._id };
+
+        // Single date filter
+        if (date) {
+            const d = new Date(date);
+            const next = new Date(d);
+            next.setDate(next.getDate() + 1);
+            match.date = { $gte: d, $lt: next };
+        // Date range filter
+        } else if (startDate || endDate) {
+            match.date = {};
+            if (startDate) match.date.$gte = new Date(startDate);
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setDate(end.getDate() + 1);
+                match.date.$lt = end;
             }
         }
 
-        // Exclude expired duties for staff queries
-        if (query.staff) {
-            dutyQuery.status = {
-                $in: ['available', 'assigned', 'enroute', 'in-progress', 'completed', 'cancelled']
+        if (status) match.status = status;
+        if (staffRole) match.staffRole = staffRole;
+
+        const [duties, total] = await Promise.all([
+            Duty.find(match)
+                .populate({
+                    path: 'assignedTo',
+                    select: 'fullName averageRating totalRatings',
+                    populate: { path: 'user', select: 'name email' }
+                })
+                .select('staffRole startTime endTime date isOvernightDuty endDate status assignedTo totalPayment offeredRate')
+                .sort({ date: -1, startTime: -1 })
+                .skip(skip)
+                .limit(parseInt(limit)),
+            Duty.countDocuments(match)
+        ]);
+
+        const formatted = duties.map(duty => {
+            const staff = duty.assignedTo;
+            const hoursCompleted = calculateDutyDuration(
+                duty.date, duty.startTime, duty.endTime,
+                duty.isOvernightDuty, duty.endDate
+            );
+
+            // Format hours label e.g. "8 Hours" or "1.5 Hours"
+            const hoursLabel = hoursCompleted === 1
+                ? '1 Hour'
+                : `${Number.isInteger(hoursCompleted) ? hoursCompleted : hoursCompleted.toFixed(1)} Hours`;
+
+            return {
+                dutyId: duty._id,
+                staff: staff ? {
+                    name: staff.fullName || staff.user?.name || '—',
+                    email: staff.user?.email || '—',
+                    averageRating: staff.averageRating ?? 0,
+                    totalRatings: staff.totalRatings ?? 0
+                } : null,
+                staffRole: duty.staffRole,
+                shiftDuration: `${duty.startTime} - ${duty.endTime}`,
+                hoursCompleted: hoursLabel,
+                status: duty.status,
+                offeredRate: duty.offeredRate,
+                totalPayment: duty.totalPayment,
+                date: duty.date
             };
-        }
+        });
 
-        const duties = await Duty.find(dutyQuery)
-            .populate('hospital', 'hospitalLegalName currentAddress location')
-            .populate({
-                path: 'assignedTo',
-                populate: {
-                    path: 'user',
-                    select: 'name email role'
-                }
-            })
-            .populate({
-                path: 'assignedTo',
-                select: '_id',
-                populate: {
-                    path: 'user',
-                    select: '_id name'
-                }
-            })
-            .sort({ date: 1, startTime: 1 });
-
-        // If staff user, add distance calculations
-        if (query.staff) {
-            const staff = await MedicalStaff.findOne({ user: query.staff });
-
-            if (staff && staff.coordinates) {
-                const staffLat = staff.coordinates.latitude;
-                const staffLng = staff.coordinates.longitude;
-
-                // Calculate distance for each duty
-                const dutiesWithDistance = [];
-                const geocodingService = require('./geocoding.service');
-
-                for (const duty of duties) {
-                    if (!duty.hospital.location || !duty.hospital.location.coordinates) {
-                        dutiesWithDistance.push({
-                            ...duty.toObject(),
-                            distance: null,
-                            duration: null
-                        });
-                        continue;
-                    }
-
-                    const hospitalLat = duty.hospital.location.coordinates[1];
-                    const hospitalLng = duty.hospital.location.coordinates[0];
-
-                    try {
-                        const distanceInfo = await geocodingService.calculateDistanceAndETA(
-                            staffLat, staffLng, hospitalLat, hospitalLng
-                        );
-
-                        dutiesWithDistance.push({
-                            ...duty.toObject(),
-                            distance: distanceInfo.distance,
-                            duration: distanceInfo.duration,
-                            distanceText: distanceInfo.distanceText,
-                            durationText: distanceInfo.durationText
-                        });
-                    } catch (error) {
-                        console.error('Failed to calculate distance for duty:', error.message);
-                        dutiesWithDistance.push({
-                            ...duty.toObject(),
-                            distance: null,
-                            duration: null,
-                            distanceText: 'Distance unavailable',
-                            durationText: 'ETA unavailable'
-                        });
-                    }
-                }
-
-                // Sort by distance (closest first)
-                dutiesWithDistance.sort((a, b) => {
-                    if (a.distance === null) return 1;
-                    if (b.distance === null) return -1;
-                    return a.distance - b.distance;
-                });
-
-                return dutiesWithDistance;
-            }
-        }
-
-        return duties;
+        return {
+            duties: formatted,
+            pagination: getPaginationMeta(total, parseInt(page), parseInt(limit))
+        };
     }
 
 
