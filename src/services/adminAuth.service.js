@@ -55,8 +55,9 @@ class AdminAuthService {
                 }));
             });
 
-            // Send OTP email
-            await EmailService.sendAdminOTPEmail(admin.email, otp, admin.name);
+            // Send OTP email — non-blocking, don't await
+            EmailService.sendAdminOTPEmail(admin.email, otp, admin.name)
+                .catch(err => logger.error(`Failed to send admin OTP email: ${err.message}`));
 
             logger.info(`Admin signin OTP sent to: ${admin.email}`);
             
@@ -93,9 +94,8 @@ class AdminAuthService {
 
             // Additional check from Redis
             const redisKey = `admin_otp:${email}`;
-            const redisData = await redisClient.getClientAsync().then(redis => {
-                return redis.get(redisKey);
-            });
+            const redisClient2 = await redisClient.getClientAsync();
+            const redisData = await redisClient2.get(redisKey);
 
             if (redisData) {
                 const parsedData = JSON.parse(redisData);
@@ -104,84 +104,81 @@ class AdminAuthService {
                 }
             }
 
-            // Clear OTP from both database and Redis
-            await admin.clearOTP();
-            await redisClient.getClientAsync().then(redis => {
-                return redis.del(redisKey);
-            });
+            // Clear OTP from both database and Redis in parallel
+            await Promise.all([
+                redisClient2.del(redisKey),
+                User.updateOne({ _id: admin._id }, { $unset: { otp: 1 } })
+            ]);
 
-            // Track device and send alert on EVERY login
-            if (req) {
-                const deviceInfo = deviceInfoService.extractDeviceInfo(req);
-                
-                // Debug logging
-                logger.info(`Admin login attempt - IP: ${deviceInfo.ip}, User-Agent: ${deviceInfo.userAgent}`);
-                logger.info(`Request headers: ${JSON.stringify(req.headers)}`);
-                
-                const location = await deviceInfoService.getLocationFromIP(deviceInfo.ip);
-                const deviceId = deviceInfoService.generateDeviceId(deviceInfo.ip, deviceInfo.userAgent);
-                
-                // More debug logging
-                logger.info(`Generated device ID: ${deviceId}, Location: ${JSON.stringify(location)}`);
-
-                // Update device information
-                if (!admin.loginDevices) {
-                    admin.loginDevices = [];
-                }
-
-                // Check if device exists
-                const existingDevice = admin.loginDevices?.find(d => d.deviceId === deviceId);
-
-                if (existingDevice) {
-                    // Update last login time for existing device
-                    existingDevice.lastLoginAt = new Date();
-                } else {
-                    // Add new device
-                    admin.loginDevices.push({
-                        deviceId,
-                        deviceName: deviceInfo.deviceName,
-                        ip: deviceInfo.ip,
-                        userAgent: deviceInfo.userAgent,
-                        location,
-                        lastLoginAt: new Date()
-                    });
-                }
-
-                // Keep only last 10 devices to prevent array bloat
-                if (admin.loginDevices.length > 10) {
-                    admin.loginDevices = admin.loginDevices
-                        .sort((a, b) => new Date(b.lastLoginAt) - new Date(a.lastLoginAt))
-                        .slice(0, 10);
-                }
-
-                await admin.save();
-
-                // Send alert email on EVERY login
-                const loginTime = new Date().toLocaleString('en-IN', {
-                    timeZone: 'Asia/Kolkata',
-                    dateStyle: 'medium',
-                    timeStyle: 'short'
-                });
-                const locationString = `${location.city}, ${location.region}, ${location.country}`;
-                
-                // Send alert email on EVERY login - non-blocking
-                EmailService.sendAdminLoginAlertEmail(
-                    admin.name,
-                    admin.email,
-                    deviceInfo.deviceName,
-                    locationString,
-                    loginTime
-                ).then(sent => {
-                    if (sent) logger.info(`Admin login alert sent to ${process.env.ADMIN_LOGIN_ALERT_EMAIL} for ${admin.email}`);
-                }).catch(err => logger.error(`Admin login alert email failed: ${err.message}`));
-            }
-
-            // Generate JWT token
+            // Generate JWT token immediately — don't block on device tracking
             const token = require('jsonwebtoken').sign(
                 { id: admin._id, role: admin.role },
                 process.env.JWT_SECRET,
                 { expiresIn: process.env.JWT_EXPIRES_IN || '1d' }
             );
+
+            // Device tracking + alert email — fully non-blocking
+            if (req) {
+                setImmediate(async () => {
+                    try {
+                        const deviceInfo = deviceInfoService.extractDeviceInfo(req);
+                        const [location] = await Promise.all([
+                            deviceInfoService.getLocationFromIP(deviceInfo.ip)
+                        ]);
+                        const deviceId = deviceInfoService.generateDeviceId(deviceInfo.ip, deviceInfo.userAgent);
+
+                        const existingDevice = admin.loginDevices?.find(d => d.deviceId === deviceId);
+                        let devicesUpdate;
+
+                        if (existingDevice) {
+                            devicesUpdate = {
+                                $set: { 'loginDevices.$[dev].lastLoginAt': new Date() }
+                            };
+                            await User.updateOne(
+                                { _id: admin._id },
+                                devicesUpdate,
+                                { arrayFilters: [{ 'dev.deviceId': deviceId }] }
+                            );
+                        } else {
+                            const newDevice = {
+                                deviceId,
+                                deviceName: deviceInfo.deviceName,
+                                ip: deviceInfo.ip,
+                                userAgent: deviceInfo.userAgent,
+                                location,
+                                lastLoginAt: new Date()
+                            };
+                            await User.updateOne(
+                                { _id: admin._id },
+                                {
+                                    $push: {
+                                        loginDevices: {
+                                            $each: [newDevice],
+                                            $sort: { lastLoginAt: -1 },
+                                            $slice: 10
+                                        }
+                                    }
+                                }
+                            );
+                        }
+
+                        const loginTime = new Date().toLocaleString('en-IN', {
+                            timeZone: 'Asia/Kolkata',
+                            dateStyle: 'medium',
+                            timeStyle: 'short'
+                        });
+                        const locationString = `${location.city}, ${location.region}, ${location.country}`;
+
+                        EmailService.sendAdminLoginAlertEmail(
+                            admin.name, admin.email, deviceInfo.deviceName, locationString, loginTime
+                        ).then(sent => {
+                            if (sent) logger.info(`Admin login alert sent to ${process.env.ADMIN_LOGIN_ALERT_EMAIL} for ${admin.email}`);
+                        }).catch(err => logger.error(`Admin login alert email failed: ${err.message}`));
+                    } catch (err) {
+                        logger.error(`Device tracking error: ${err.message}`);
+                    }
+                });
+            }
 
             logger.info(`Admin signed in successfully: ${admin.email}`);
             
