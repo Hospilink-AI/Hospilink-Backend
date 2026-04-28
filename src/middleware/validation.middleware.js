@@ -171,11 +171,11 @@ const validateForgotPassword = (req, res, next) => {
 
 
 const validateResetPassword = (req, res, next) => {
-    const { token, newPassword } = req.body;
+    const { token, newPassword, confirmPassword } = req.body;
     const errors = [];
 
     // Check for unexpected fields
-    const allowedFields = ['token', 'newPassword'];
+    const allowedFields = ['token', 'newPassword', 'confirmPassword'];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
 
@@ -197,6 +197,13 @@ const validateResetPassword = (req, res, next) => {
         errors.push('Password must be at least 6 characters long');
     } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(newPassword)) {
         errors.push('Password must contain at least one uppercase letter, one lowercase letter, and one number');
+    }
+
+    // Confirm password validation
+    if (!confirmPassword) {
+        errors.push('Confirm password is required');
+    } else if (newPassword && confirmPassword !== newPassword) {
+        errors.push('Passwords do not match');
     }
 
     if (errors.length > 0) {
