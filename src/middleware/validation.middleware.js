@@ -217,16 +217,19 @@ const validateResetPassword = (req, res, next) => {
 
 
 const validateMedicalStaffProfile = (req, res, next) => {
-    const { fullName, jobRole, city, area, phoneNumber} = req.body;
+    const { fullName, jobRole, currentAddress, city, state, pincode, phoneNumber, email, profileSummary, education, skills } = req.body;
     const errors = [];
 
     // Check for unexpected fields
     const allowedFields = [
         'fullName',
-        'jobRole',
+        'jobRole', 
+        'currentAddress',
         'city',
-        'area',
+        'state',
+        'pincode',
         'phoneNumber',
+        'email',
         'profileSummary',
         'education',
         'skills'
@@ -259,11 +262,30 @@ const validateMedicalStaffProfile = (req, res, next) => {
         errors.push('City cannot exceed 100 characters');
     }
 
-    // Area validation
-    if (!area || area.trim().length === 0) {
-        errors.push('Area is required');
-    } else if (area.length > 100) {
-        errors.push('Area cannot exceed 100 characters');
+    // Current address validation
+    if (!currentAddress || currentAddress.trim().length === 0) {
+        errors.push('Current address is required');
+    } else if (currentAddress.length > 300) {
+        errors.push('Current address cannot exceed 300 characters');
+    }
+
+    // State validation
+    if (!state || state.trim().length === 0) {
+        errors.push('State is required');
+    } else if (!INDIAN_STATES.includes(state)) {
+        errors.push(`Invalid state. Must be one of: ${INDIAN_STATES.join(', ')}`);
+    }
+
+    // Pincode validation
+    if (!pincode || pincode.trim().length === 0) {
+        errors.push('Pincode is required');
+    } else if (!/^[1-9][0-9]{5}$/.test(pincode)) {
+        errors.push('Pincode must be a valid 6-digit Indian postal code');
+    }
+
+    // Email validation
+    if (!email || !validator.isEmail(email)) {
+        errors.push('Valid email is required');
     }
 
     // Phone number validation
@@ -528,15 +550,37 @@ const validateProfileUpdate = (req, res, next) => {
     
     // Dynamic validation based on user role
     if (role === 'staff') {
-        const { fullName, jobRole, city, area, phoneNumber, coordinates } = req.body;
+        const { fullName, jobRole, currentAddress, city, state, pincode, coordinates } = req.body;
+        
+        // Prevent email changes (read-only after creation)
+        if (req.body.email && req.body.email !== req.user.email) {
+            errors.push('Email cannot be changed after profile creation');
+        }
+        
+        // Prevent phone number changes (read-only after creation)
+        if (req.body.phoneNumber) {
+            errors.push('Phone number cannot be changed after profile creation');
+        }
         
         // Validate staff-specific fields
         if (fullName && fullName.length > 100) {
             errors.push('Full name cannot exceed 100 characters');
         }
         
+        if (currentAddress && currentAddress.length > 300) {
+            errors.push('Current address cannot exceed 300 characters');
+        }
+        
         if (city && city.length > 100) {
             errors.push('City cannot exceed 100 characters');
+        }
+        
+        if (state && !INDIAN_STATES.includes(state)) {
+            errors.push('Invalid state. Must be a valid Indian state');
+        }
+        
+        if (pincode && !/^[1-9][0-9]{5}$/.test(pincode)) {
+            errors.push('Pincode must be a valid 6-digit Indian postal code');
         }
         
         if (coordinates) {

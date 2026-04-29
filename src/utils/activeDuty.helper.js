@@ -118,6 +118,14 @@ async function formatActiveDuty(duty, realtimeLocations = {}) {
                 id: staff._id,
                 name: staff.fullName,
                 userName: staff.user?.name || staff.fullName,
+                email: staff.user?.email || staff.email,
+                currentAddress: staff.currentAddress,
+                city: staff.city,
+                state: staff.state,
+                pincode: staff.pincode,
+                location: staff.currentAddress ? 
+                    `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : 
+                    `${staff.city}, ${staff.state} - ${staff.pincode}`,
                 coordinates: staff.coordinates
             } : null,
             timing: {

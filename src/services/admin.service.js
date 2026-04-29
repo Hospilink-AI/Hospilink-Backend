@@ -428,7 +428,7 @@ class AdminService {
 
             const nearbyStaff = await MedicalStaff.find(query)
                 .populate('user', 'name email')
-                .select('fullName jobRole city area phoneNumber coordinates isAvailable averageRating user');
+                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating user');
 
             console.log('Found', nearbyStaff.length, 'candidates via bounding box');
 
@@ -459,7 +459,13 @@ class AdminService {
                         return {
                             _id: staffMember._id,
                             staffName: staffMember.fullName,
-                            location: `${staffMember.area}, ${staffMember.city}`,
+                            location: staffMember.currentAddress ? 
+                                `${staffMember.currentAddress}, ${staffMember.city}, ${staffMember.state} - ${staffMember.pincode}` : 
+                                `${staffMember.city}, ${staffMember.state} - ${staffMember.pincode}`,
+                            currentAddress: staffMember.currentAddress,
+                            city: staffMember.city,
+                            state: staffMember.state,
+                            pincode: staffMember.pincode,
                             role: staffMember.jobRole,
                             mobileNumber: staffMember.phoneNumber,
                             email: staffMember.user?.email || null,
@@ -878,7 +884,10 @@ class AdminService {
                                 staffId: '$_id',
                                 fullName: 1,
                                 jobRole: 1,
-                                location: { $concat: ['$area', ', ', '$city'] },
+                                currentAddress: '$currentAddress',
+                                city: '$city', 
+                                state: '$state',
+                                pincode: '$pincode',
                                 email: '$userInfo.email',
                                 phoneNumber: 1,
                                 completedDuties: { $ifNull: [{ $arrayElemAt: ['$completedDuties.count', 0] }, 0] },
@@ -944,9 +953,13 @@ class AdminService {
             userId: staff.user?._id,
             fullName: staff.fullName,
             jobRole: staff.jobRole,
-            location: `${staff.area}, ${staff.city}`,
+            currentAddress: staff.currentAddress,
             city: staff.city,
-            area: staff.area,
+            state: staff.state,
+            pincode: staff.pincode,
+            location: staff.currentAddress ? 
+                `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : 
+                `${staff.city}, ${staff.state} - ${staff.pincode}`,
             phoneNumber: staff.phoneNumber,
             email: staff.user?.email,
             profileSummary: staff.profileSummary,
@@ -1245,7 +1258,7 @@ class AdminService {
             const duties = await Duty.find(query)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates',
+                    select: 'fullName user coordinates currentAddress city state pincode email',
                     populate: {
                         path: 'user',
                         select: 'name email'
@@ -1339,7 +1352,7 @@ class AdminService {
             const duty = await Duty.findById(dutyId)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience city area verificationStatus education profileSummary',
+                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience currentAddress city state pincode email verificationStatus education profileSummary',
                     populate: {
                         path: 'user',
                         select: 'name email'
@@ -1420,7 +1433,10 @@ class AdminService {
                     mobileNumber: staff.phoneNumber,
                     skills: staff.skills || [],
                     avgRating: staff.averageRating || 0,
-                    address: `${staff.area}, ${staff.city}`,
+                    currentAddress: staff.currentAddress,
+                    city: staff.city,
+                    state: staff.state,
+                    pincode: staff.pincode,
                     location: {
                         latitude: currentLocation.latitude,
                         longitude: currentLocation.longitude,

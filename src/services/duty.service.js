@@ -1772,7 +1772,7 @@ class DutyService {
             })
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience city area verificationStatus education profileSummary',
+                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience currentAddress city state pincode email verificationStatus education profileSummary',
                     populate: {
                         path: 'user',
                         select: 'name email'
@@ -1881,11 +1881,15 @@ class DutyService {
             return {
                 staff: {
                     name: staff.fullName,
-                    email: staff.user?.email || null,
+                    email: staff.user?.email || staff.email,
                     mobileNumber: staff.phoneNumber,
                     skills: staff.skills || [],
                     avgRating: staff.averageRating || 0,
-                    address: `${staff.area}, ${staff.city}`,
+                    // address: staff.currentAddress ? `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : `${staff.city}, ${staff.state} - ${staff.pincode}`,
+                    currentAddress: staff.currentAddress,
+                    city: staff.city, 
+                    state: staff.state,
+                    pincode: staff.pincode,
                     location: {
                         latitude: currentLocation.latitude,
                         longitude: currentLocation.longitude,

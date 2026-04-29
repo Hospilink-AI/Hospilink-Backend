@@ -9,6 +9,7 @@ const Review = require('../models/Review');
 const path = require('path');
 const { uploadToS3, deleteFromS3, generatePreSignedURL } = require('./s3.service');
 
+
 class ProfileService {
     // Create medical staff profile
     async createMedicalStaffProfile(userId, profileData) {
@@ -23,6 +24,19 @@ class ProfileService {
                 throw new Error('User must have staff role to create medical staff profile');
             }
 
+            // Email must match signup email
+            if (profileData.email && profileData.email !== user.email) {
+                throw new Error('Email must match the email used during signup');
+            }
+
+            // Full name must match signup name
+            if (profileData.fullName && profileData.fullName.trim() !== user.name.trim()) {
+                throw new Error(`Full name "${profileData.fullName}" must match the name used during signup "${user.name}"`);
+            }
+
+            // Use signup email for profile
+            profileData.email = user.email;
+
             // Check if profile already exists
             const existingProfile = await MedicalStaff.findOne({ user: userId });
             if (existingProfile) {
@@ -32,7 +46,7 @@ class ProfileService {
             let coordinates = null;
 
             // Always geocode from address - no location permission during profile creation
-            const address = `${profileData.area}, ${profileData.city}`;
+            const address = `${profileData.currentAddress}, ${profileData.city}, ${profileData.state}, ${profileData.pincode}`;
             try {
                 const geocoded = await geocodingService.geocodeAddress(address);
                 coordinates = {
@@ -56,9 +70,12 @@ class ProfileService {
                 user: userId,
                 fullName: profileData.fullName || user.name,
                 jobRole: profileData.jobRole,
+                currentAddress: profileData.currentAddress,
                 city: profileData.city,
-                area: profileData.area,
+                state: profileData.state,
+                pincode: profileData.pincode,
                 phoneNumber: profileData.phoneNumber,
+                email: profileData.email,
                 coordinates: coordinates,
                 profileSummary: profileData.profileSummary || '',
                 education: profileData.education || [],
@@ -294,8 +311,8 @@ class ProfileService {
 
                     // Profile completion %
                     const completionFields = [
-                        raw.fullName, raw.jobRole, raw.city, raw.area,
-                        raw.phoneNumber, raw.profileSummary,
+                        raw.fullName, raw.jobRole, raw.currentAddress, raw.city,
+                        raw.state, raw.pincode, raw.phoneNumber, raw.profileSummary,
                         raw.education?.length > 0,
                         raw.skills?.length > 0,
                         raw.coordinates?.coordinates?.latitude
@@ -308,9 +325,12 @@ class ProfileService {
                         fullName: raw.fullName,
                         profilePicture: profilePictureUrl,
                         jobRole: raw.jobRole,
+                        currentAddress: raw.currentAddress,
                         city: raw.city,
-                        area: raw.area,
+                        state: raw.state,
+                        pincode: raw.pincode,
                         phoneNumber: raw.phoneNumber,
+                        email: user.email, // Get from user collection
                         profileSummary: raw.profileSummary || '',
                         education: raw.education || [],
                         skills: raw.skills || [],
@@ -424,11 +444,28 @@ class ProfileService {
                     throw new Error('Staff profile not found');
                 }
 
+                // Prevent email changes (read-only after creation)
+                if (updateData.email && updateData.email !== user.email) {
+                    throw new Error('Email cannot be changed after profile creation');
+                }
+
+                // Prevent phone number changes (read-only after creation)
+                if (updateData.phoneNumber && updateData.phoneNumber !== currentProfile.phoneNumber) {
+                    throw new Error('Phone number cannot be changed after profile creation');
+                }
+
+                // Remove read-only fields from update data
+                delete updateData.email;
+                delete updateData.phoneNumber;
+
                 let finalUpdateData = { ...updateData };
 
                 // Check if location fields changed
                 const cityChanged = updateData.city && updateData.city !== currentProfile.city;
                 const areaChanged = updateData.area && updateData.area !== currentProfile.area;
+                const currentAddressChanged = updateData.currentAddress && updateData.currentAddress !== currentProfile.currentAddress;
+                const stateChanged = updateData.state && updateData.state !== currentProfile.state;
+                const pincodeChanged = updateData.pincode && updateData.pincode !== currentProfile.pincode;
 
                 // Handle optional fields update safely
                 if (updateData.profileSummary !== undefined) {
@@ -444,9 +481,9 @@ class ProfileService {
                 }
 
                 // Only geocode if location fields actually changed
-                if (cityChanged || areaChanged) {
+                if (cityChanged || currentAddressChanged || stateChanged || pincodeChanged) {
                     if (!updateData.coordinates || !updateData.coordinates.latitude || !updateData.coordinates.longitude) {
-                        const address = `${updateData.area || currentProfile.area}, ${updateData.city || currentProfile.city}`;
+                        const address = `${updateData.currentAddress || currentProfile.currentAddress}, ${updateData.city || currentProfile.city}, ${updateData.state || currentProfile.state}, ${updateData.pincode || currentProfile.pincode}`;
 
                         // Try cache first
                         const cachedGeocoding = await cacheService.getGeocoding(address);
@@ -475,7 +512,6 @@ class ProfileService {
                         }
                     } else {
                         // Validate provided coordinates
-                        const geocodingService = require('../services/geocoding.service');
                         geocodingService.validateCoordinates(
                             updateData.coordinates.latitude,
                             updateData.coordinates.longitude
@@ -617,14 +653,25 @@ class ProfileService {
             const freshProfile = await this.getUserProfile(userId);
 
             // Ensure email and phone are always included in response
-            if (freshProfile.profile && user.role === 'hospital') {
-                // Email comes from user collection (always available)
-                freshProfile.profile.email = user.email;
-                
-                // Phone comes from hospital profile (read-only)
-                const hospitalProfile = await Hospital.findOne({ user: userId }).lean();
-                if (hospitalProfile) {
-                    freshProfile.profile.phoneNumber = hospitalProfile.phoneNumber;
+            if (freshProfile.profile) {
+                if (user.role === 'hospital') {
+                    // Email comes from user collection (always available)
+                    freshProfile.profile.email = user.email;
+                    
+                    // Phone comes from hospital profile (read-only)
+                    const hospitalProfile = await Hospital.findOne({ user: userId }).lean();
+                    if (hospitalProfile) {
+                        freshProfile.profile.phoneNumber = hospitalProfile.phoneNumber;
+                    }
+                } else if (user.role === 'staff') {
+                    // Email comes from user collection (always available)
+                    freshProfile.profile.email = user.email;
+                    
+                    // Phone comes from staff profile (read-only)
+                    const staffProfile = await MedicalStaff.findOne({ user: userId }).lean();
+                    if (staffProfile) {
+                        freshProfile.profile.phoneNumber = staffProfile.phoneNumber;
+                    }
                 }
             }
 
@@ -926,7 +973,7 @@ class ProfileService {
                 }
             })
                 .populate('user', 'name email role isEmailVerified')         // populate minimal user data fields only
-                .select('fullName jobRole city area phoneNumber coordinates isAvailable averageRating')         // select only required fields
+                .select('fullName jobRole currentAddress city state pincode phoneNumber email coordinates isAvailable averageRating')         // select only required fields
                 .lean();    // return plain JavaScript objects instead of Mongoose documents
 
             console.log('Found', nearbyStaff.length, 'candidates via bounding box');
@@ -956,6 +1003,12 @@ class ProfileService {
             // Format response
             const staffWithDistance = exactNearbyStaff.map(staff => ({
                 ...staff,
+                address: {
+                    currentAddress: staff.currentAddress,
+                    city: staff.city,
+                    state: staff.state,
+                    pincode: staff.pincode
+                },
                 location: {
                     latitude: staff.coordinates.coordinates.latitude,
                     longitude: staff.coordinates.coordinates.longitude
