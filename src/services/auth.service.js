@@ -130,8 +130,8 @@ class AuthService {
                 // Generate JWT token
                 const token = jwt.sign(
                     { id: user._id, role: user.role },
-                    process.env.JWT_SECRET || 'your-secret-key-123',
-                    { expiresIn: process.env.JWT_EXPIRES_IN || '1d' }
+                    process.env.JWT_SECRET,
+                    { expiresIn: process.env.JWT_EXPIRES_IN }
                 );
 
                 logger.info(`Email verified and user created: ${user.email}`);
