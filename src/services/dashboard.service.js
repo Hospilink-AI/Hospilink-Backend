@@ -5,28 +5,64 @@ const redisClient = require('../config/redis');
 const geocodingService = require('./geocoding.service');
 
 class DashboardService {
-    // Get staff overview with profile and basic stats
+    // Get staff overview — rating with month-over-month growth
     async getStaffOverview(userId) {
-
-        const medicalStaff = await MedicalStaff.findOne({ user: userId });
+        const medicalStaff = await MedicalStaff.findOne({ user: userId })
+            .select('averageRating totalRatings');
 
         if (!medicalStaff) {
             throw new Error('Medical staff profile not found');
         }
 
-        const stats = await this.getStaffStats(medicalStaff._id);
-        const recentDuties = await this.getRecentDuties(medicalStaff._id);
+        const now = getCurrentIST();
+        const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        // Get reviews this month vs last month to compute rating growth
+        const Review = require('../models/Review');
+        const [thisMonthReviews, lastMonthReviews] = await Promise.all([
+            Review.aggregate([
+                {
+                    $match: {
+                        medicalStaff: medicalStaff._id,
+                        createdAt: { $gte: thisMonthStart }
+                    }
+                },
+                { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } }
+            ]),
+            Review.aggregate([
+                {
+                    $match: {
+                        medicalStaff: medicalStaff._id,
+                        createdAt: { $gte: lastMonthStart, $lt: lastMonthEnd }
+                    }
+                },
+                { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } }
+            ])
+        ]);
+
+        const thisMonthAvg = thisMonthReviews[0]?.avg || 0;
+        const lastMonthAvg = lastMonthReviews[0]?.avg || 0;
+
+        let growthPercent = 0;
+        let growthTrend = 'neutral';
+        if (lastMonthAvg > 0) {
+            growthPercent = Math.round(((thisMonthAvg - lastMonthAvg) / lastMonthAvg) * 100);
+            growthTrend = growthPercent >= 0 ? 'up' : 'down';
+        } else if (thisMonthAvg > 0) {
+            growthPercent = 100;
+            growthTrend = 'up';
+        }
 
         return {
-            profile: {
-                ...medicalStaff.toObject(),
-                rating: {
-                    averageRating: medicalStaff.averageRating,
-                    totalRatings: medicalStaff.totalRatings
-                }
-            },
-            stats,
-            recentDuties
+            averageRating: parseFloat((medicalStaff.averageRating || 0).toFixed(1)),
+            totalRatings: medicalStaff.totalRatings || 0,
+            growth: {
+                percent: Math.abs(growthPercent),
+                trend: growthTrend,
+                label: `${growthPercent >= 0 ? '+' : '-'}${Math.abs(growthPercent)}%`
+            }
         };
     }
 
@@ -66,21 +102,6 @@ class DashboardService {
     }
 
 
-    // Get recent duties for dashboard
-    async getRecentDuties(staffId, limit = 5) {
-        return await Duty.find({ assignedTo: staffId })
-            .populate({
-                path: 'hospital',
-                populate: {
-                    path: 'user',
-                    select: 'name email'
-                }
-            })
-            .sort({ createdAt: -1 })
-            .limit(limit);
-    }
-
-
     // Get upcoming duties with details
     async getUpcomingDuties(userId) {
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
@@ -110,19 +131,67 @@ class DashboardService {
     }
 
 
-    // Get earnings information
+    // Get earnings information with month-over-month growth
     async getEarnings(staffId) {
-        const completedDuties = await Duty.find({
-            assignedTo: staffId,
-            status: 'completed'
-        }).select('totalPayment completedAt');
+        const now = getCurrentIST();
+        const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1); // exclusive
 
-        const totalEarnings = completedDuties.reduce((sum, duty) => sum + (duty.totalPayment || 0), 0);
+        const [allTime, thisMonth, lastMonth] = await Promise.all([
+            Duty.aggregate([
+                { $match: { assignedTo: staffId, status: 'completed' } },
+                { $group: { _id: null, total: { $sum: '$totalPayment' }, count: { $sum: 1 } } }
+            ]),
+            Duty.aggregate([
+                {
+                    $match: {
+                        assignedTo: staffId,
+                        status: 'completed',
+                        completedAt: { $gte: thisMonthStart }
+                    }
+                },
+                { $group: { _id: null, total: { $sum: '$totalPayment' }, count: { $sum: 1 } } }
+            ]),
+            Duty.aggregate([
+                {
+                    $match: {
+                        assignedTo: staffId,
+                        status: 'completed',
+                        completedAt: { $gte: lastMonthStart, $lt: lastMonthEnd }
+                    }
+                },
+                { $group: { _id: null, total: { $sum: '$totalPayment' }, count: { $sum: 1 } } }
+            ])
+        ]);
+
+        const totalEarnings = allTime[0]?.total || 0;
+        const totalCount = allTime[0]?.count || 0;
+        const thisMonthEarnings = thisMonth[0]?.total || 0;
+        const lastMonthEarnings = lastMonth[0]?.total || 0;
+
+        // Month-over-month growth %
+        let growthPercent = 0;
+        let growthTrend = 'neutral'; // up | down | neutral
+        if (lastMonthEarnings > 0) {
+            growthPercent = Math.round(((thisMonthEarnings - lastMonthEarnings) / lastMonthEarnings) * 100);
+            growthTrend = growthPercent >= 0 ? 'up' : 'down';
+        } else if (thisMonthEarnings > 0) {
+            growthPercent = 100;
+            growthTrend = 'up';
+        }
 
         return {
-            totalEarnings: totalEarnings,
-            completedDutiesCount: completedDuties.length,
-            averagePerDuty: completedDuties.length > 0 ? (totalEarnings / completedDuties.length).toFixed(2) : '0.0'
+            totalEarnings,
+            completedDutiesCount: totalCount,
+            averagePerDuty: totalCount > 0 ? parseFloat((totalEarnings / totalCount).toFixed(2)) : 0,
+            thisMonthEarnings,
+            lastMonthEarnings,
+            growth: {
+                percent: Math.abs(growthPercent),
+                trend: growthTrend,
+                label: `${growthPercent >= 0 ? '+' : '-'}${Math.abs(growthPercent)}%`
+            }
         };
     }
 
