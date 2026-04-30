@@ -105,7 +105,9 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
         return res.status(400).json({ success: false, message: 'hospital_id is required' });
     }
 
-    const hospital = await Hospital.findById(hospital_id).populate('user', '_id name');
+    const hospital = await Hospital.findById(hospital_id)
+        .select('hospitalLegalName currentAddress city state pincode coordinates servicesAvailable staffCount isProfileComplete user')
+        .populate('user', '_id name');
     if (!hospital) {
         return res.status(404).json({ success: false, message: 'Hospital not found' });
     }

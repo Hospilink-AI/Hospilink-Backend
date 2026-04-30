@@ -428,7 +428,7 @@ class AdminService {
 
             const nearbyStaff = await MedicalStaff.find(query)
                 .populate('user', 'name email')
-                .select('fullName jobRole city area phoneNumber coordinates isAvailable averageRating user');
+                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating user');
 
             console.log('Found', nearbyStaff.length, 'candidates via bounding box');
 
@@ -459,7 +459,13 @@ class AdminService {
                         return {
                             _id: staffMember._id,
                             staffName: staffMember.fullName,
-                            location: `${staffMember.area}, ${staffMember.city}`,
+                            location: staffMember.currentAddress ? 
+                                `${staffMember.currentAddress}, ${staffMember.city}, ${staffMember.state} - ${staffMember.pincode}` : 
+                                `${staffMember.city}, ${staffMember.state} - ${staffMember.pincode}`,
+                            currentAddress: staffMember.currentAddress,
+                            city: staffMember.city,
+                            state: staffMember.state,
+                            pincode: staffMember.pincode,
                             role: staffMember.jobRole,
                             mobileNumber: staffMember.phoneNumber,
                             email: staffMember.user?.email || null,
@@ -519,14 +525,14 @@ class AdminService {
         }
 
         const hospitals = await Hospital.find(match)
-            .select('_id hospitalLegalName location')
+            .select('_id hospitalLegalName currentAddress city state pincode')
             .sort({ hospitalLegalName: 1 })
             .lean();
 
         return hospitals.map(h => ({
             id: h._id,
             name: h.hospitalLegalName,
-            location: h.location
+            location: `${h.currentAddress}, ${h.city}, ${h.state}, ${h.pincode}`
         }));
     }
 
@@ -537,7 +543,7 @@ class AdminService {
         // Build match stage
         const match = {};
         if (status) match.verificationStatus = status;
-        if (city) match.location = { $regex: city.trim(), $options: 'i' };
+        if (city) match.city = { $regex: city.trim(), $options: 'i' };
         if (search) {
             const re = { $regex: search.trim(), $options: 'i' };
             match.$or = [{ hospitalLegalName: re }];
@@ -582,8 +588,10 @@ class AdminService {
                             $project: {
                                 _id: 1,
                                 hospitalLegalName: 1,
-                                location: 1,
                                 currentAddress: 1,
+                                city: 1,
+                                state: 1,
+                                pincode: 1,
                                 staffCount: 1,
                                 verificationStatus: '$verificationStatus',
                                 rejectionReason: '$rejectionReason',
@@ -621,6 +629,7 @@ class AdminService {
     // GET /api/admin/hospitals/:id — preview modal
     async getHospitalDetail(hospitalId) {
         const hospital = await Hospital.findById(hospitalId)
+            .select('hospitalLegalName currentAddress city state pincode staffCount servicesAvailable isProfileComplete verificationStatus coordinates createdAt')
             .populate('user', 'name email createdAt')
             .lean();
 
@@ -653,7 +662,9 @@ class AdminService {
             id: hospital._id,
             hospitalLegalName: hospital.hospitalLegalName,
             currentAddress: hospital.currentAddress,
-            location: hospital.location,
+            city: hospital.city,
+            state: hospital.state,
+            pincode: hospital.pincode,
             staffCount: hospital.staffCount,
             servicesAvailable: hospital.servicesAvailable,
             verificationStatus: hospital.verificationStatus,
@@ -873,7 +884,10 @@ class AdminService {
                                 staffId: '$_id',
                                 fullName: 1,
                                 jobRole: 1,
-                                location: { $concat: ['$area', ', ', '$city'] },
+                                currentAddress: '$currentAddress',
+                                city: '$city', 
+                                state: '$state',
+                                pincode: '$pincode',
                                 email: '$userInfo.email',
                                 phoneNumber: 1,
                                 completedDuties: { $ifNull: [{ $arrayElemAt: ['$completedDuties.count', 0] }, 0] },
@@ -939,9 +953,13 @@ class AdminService {
             userId: staff.user?._id,
             fullName: staff.fullName,
             jobRole: staff.jobRole,
-            location: `${staff.area}, ${staff.city}`,
+            currentAddress: staff.currentAddress,
             city: staff.city,
-            area: staff.area,
+            state: staff.state,
+            pincode: staff.pincode,
+            location: staff.currentAddress ? 
+                `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : 
+                `${staff.city}, ${staff.state} - ${staff.pincode}`,
             phoneNumber: staff.phoneNumber,
             email: staff.user?.email,
             profileSummary: staff.profileSummary,
@@ -1240,13 +1258,13 @@ class AdminService {
             const duties = await Duty.find(query)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates',
+                    select: 'fullName user coordinates currentAddress city state pincode email',
                     populate: {
                         path: 'user',
                         select: 'name email'
                     }
                 })
-                .populate('hospital', 'hospitalLegalName location coordinates')
+                .populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates')
                 .sort({ createdAt: -1 }) // Latest duties first
                 .skip(skip)
                 .limit(limit);
@@ -1334,13 +1352,13 @@ class AdminService {
             const duty = await Duty.findById(dutyId)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience city area verificationStatus education profileSummary',
+                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience currentAddress city state pincode email verificationStatus education profileSummary',
                     populate: {
                         path: 'user',
                         select: 'name email'
                     }
                 })
-                .populate('hospital', 'hospitalLegalName location currentAddress coordinates')
+                .populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates')
                 .lean(); // Use lean for better performance
 
             if (!duty) {
@@ -1415,7 +1433,10 @@ class AdminService {
                     mobileNumber: staff.phoneNumber,
                     skills: staff.skills || [],
                     avgRating: staff.averageRating || 0,
-                    address: `${staff.area}, ${staff.city}`,
+                    currentAddress: staff.currentAddress,
+                    city: staff.city,
+                    state: staff.state,
+                    pincode: staff.pincode,
                     location: {
                         latitude: currentLocation.latitude,
                         longitude: currentLocation.longitude,
@@ -1452,7 +1473,9 @@ class AdminService {
                     id: hospital._id,
                     name: hospital.hospitalLegalName,
                     address: hospital.currentAddress,
-                    location: hospital.location,
+                    city: hospital.city,
+                    state: hospital.state,
+                    pincode: hospital.pincode,
                     coordinates: {
                         latitude: hospital.coordinates.coordinates.latitude,
                         longitude: hospital.coordinates.coordinates.longitude
@@ -1662,7 +1685,7 @@ class AdminService {
                         select: 'name email'
                     }
                 })
-                .populate('hospital', 'hospitalLegalName location')
+                .populate('hospital', 'hospitalLegalName currentAddress city state pincode')
                 .sort({ completedAt: -1, date: -1 })
                 .skip(skip)
                 .limit(limit)
@@ -1690,7 +1713,12 @@ class AdminService {
                     formattedRole: duty.formattedRole,
                     department: duty.description || 'General',
                     hospitalName: hospital?.hospitalLegalName || 'Unknown',
-                    hospitalLocation: hospital?.location || 'Unknown',
+                    hospitalLocation: hospital?.currentAddress ? {
+                        currentAddress: hospital.currentAddress,
+                        city: hospital.city,
+                        state: hospital.state,
+                        pincode: hospital.pincode
+                    } : null,
                     shiftDuration: duration,
                     hoursCompleted: calculateDutyDuration(
                         duty.date,

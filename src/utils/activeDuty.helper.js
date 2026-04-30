@@ -108,13 +108,24 @@ async function formatActiveDuty(duty, realtimeLocations = {}) {
             hospital: {
                 id: hospital._id,
                 name: hospital.hospitalLegalName,
-                location: hospital.location,
+                currentAddress: hospital.currentAddress,
+                city: hospital.city,
+                state: hospital.state,
+                pincode: hospital.pincode,
                 coordinates: hospital.coordinates
             },
             staff: staff ? {
                 id: staff._id,
                 name: staff.fullName,
                 userName: staff.user?.name || staff.fullName,
+                email: staff.user?.email || staff.email,
+                currentAddress: staff.currentAddress,
+                city: staff.city,
+                state: staff.state,
+                pincode: staff.pincode,
+                location: staff.currentAddress ? 
+                    `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : 
+                    `${staff.city}, ${staff.state} - ${staff.pincode}`,
                 coordinates: staff.coordinates
             } : null,
             timing: {

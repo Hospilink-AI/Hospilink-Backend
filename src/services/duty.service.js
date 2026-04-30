@@ -267,7 +267,7 @@ class DutyService {
                 }
             ]
         })
-            .populate('hospital', 'hospitalLegalName currentAddress location coordinates')
+            .populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates')
             .sort({ date: 1, startTime: 1 }); // Sort by date and start time
 
         // Filter out duties that have already ended today
@@ -340,7 +340,7 @@ class DutyService {
                     distance: distanceInfo.distance,
                     duration: distanceInfo.duration,
                     distanceText: distanceInfo.distanceText,
-                    durationText: distanceInfo.durationText
+                    durationText: distanceInfo.durationText,
                 });
             } catch (error) {
                 console.error('Failed to calculate distance for duty:', error.message);
@@ -1015,7 +1015,12 @@ class DutyService {
                         dutyObject.hospitalLocation = {
                             latitude: hospitalLat,
                             longitude: hospitalLng,
-                            address: duty.hospital.currentAddress
+                            address: {
+                                currentAddress: duty.hospital.currentAddress,
+                                city: duty.hospital.city,
+                                state: duty.hospital.state,
+                                pincode: duty.hospital.pincode
+                            }
                         };
 
                         // Add review data before returning
@@ -1163,7 +1168,7 @@ class DutyService {
 
             // Get available duties
             const duties = await Duty.find(query)
-                .populate('hospital', 'hospitalLegalName currentAddress location coordinates')
+                .populate('hospital', 'hospitalLegalName currentAddress city state pincode location coordinates')
                 .sort({ date: 1, startTime: 1 });
 
             // Additional safety filter to ensure no expired duties
@@ -1217,11 +1222,16 @@ class DutyService {
                         duration: distanceInfo.duration,
                         distanceText: distanceInfo.distanceText,
                         durationText: distanceInfo.durationText,
-                        hospitalLocation: {
-                            latitude: hospitalLat,
-                            longitude: hospitalLng,
-                            address: duty.hospital.currentAddress
-                        }
+                        // hospitalLocation: {
+                        //     latitude: hospitalLat,
+                        //     longitude: hospitalLng,
+                        //     address: {
+                        //         currentAddress: duty.hospital.currentAddress,
+                        //         city: duty.hospital.city,
+                        //         state: duty.hospital.state,
+                        //         pincode: duty.hospital.pincode
+                        //     }
+                        // }
                     };
 
                     jobsWithDistance.push(jobWithDistance);
@@ -1258,7 +1268,7 @@ class DutyService {
     async getJobRouteInfo(dutyId, staffId, currentLocation) {
         try {
             // Get duty details
-            const duty = await Duty.findById(dutyId).populate('hospital', 'hospitalLegalName currentAddress location coordinates');
+            const duty = await Duty.findById(dutyId).populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates');
 
             if (!duty) {
                 throw new Error('Duty not found');
@@ -1303,9 +1313,12 @@ class DutyService {
                         offeredRate: duty.offeredRate
                     },
                     hospital: {
-                        id: duty.hospital._id,  // Add this line
+                        id: duty.hospital._id,
                         name: duty.hospital.hospitalLegalName,
                         address: duty.hospital.currentAddress,
+                        city: duty.hospital.city,
+                        state: duty.hospital.state,
+                        pincode: duty.hospital.pincode,
                         location: {
                             latitude: hospitalLat,
                             longitude: hospitalLng
@@ -1368,7 +1381,7 @@ class DutyService {
                 assignedTo: staff._id,
                 status: 'completed'
             })
-                .populate('hospital', 'hospitalLegalName currentAddress location')
+                .populate('hospital', 'hospitalLegalName currentAddress city state pincode')
                 .populate({
                     path: 'assignedTo',
                     populate: {
@@ -1759,7 +1772,7 @@ class DutyService {
             })
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience city area verificationStatus education profileSummary',
+                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience currentAddress city state pincode email verificationStatus education profileSummary',
                     populate: {
                         path: 'user',
                         select: 'name email'
@@ -1868,11 +1881,15 @@ class DutyService {
             return {
                 staff: {
                     name: staff.fullName,
-                    email: staff.user?.email || null,
+                    email: staff.user?.email || staff.email,
                     mobileNumber: staff.phoneNumber,
                     skills: staff.skills || [],
                     avgRating: staff.averageRating || 0,
-                    address: `${staff.area}, ${staff.city}`,
+                    // address: staff.currentAddress ? `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : `${staff.city}, ${staff.state} - ${staff.pincode}`,
+                    currentAddress: staff.currentAddress,
+                    city: staff.city, 
+                    state: staff.state,
+                    pincode: staff.pincode,
                     location: {
                         latitude: currentLocation.latitude,
                         longitude: currentLocation.longitude,
