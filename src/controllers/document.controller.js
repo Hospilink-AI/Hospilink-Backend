@@ -1,5 +1,8 @@
 const documentService = require("../services/document.service");
 const { deleteFromS3 } = require("../services/s3.service");
+const Document = require("../models/Document");
+const User = require("../models/User");
+const rules = require("../config/requiredDocs");
 
 exports.uploadDocument = async (req, res) => {
 
@@ -35,6 +38,26 @@ exports.uploadDocument = async (req, res) => {
                 uploadedKeys.push(result.s3Key);
                 results.push(result);
             }
+            const userDocs = await Document.findOne({ userId: user._id });
+
+            let isComplete = false;
+
+            if (userDocs) {
+                const uploadedTypes = userDocs.documents
+                    .filter(doc => !doc.isDeleted)
+                    .map(doc => doc.documentType);
+
+                const requiredDocs = rules[user.role]?.required || [];
+
+                isComplete = requiredDocs.every(doc =>
+                    uploadedTypes.includes(doc)
+                );
+            }
+
+            // update user
+            await User.findByIdAndUpdate(user._id, {
+                isDocumentsUploaded: isComplete
+            });
 
             res.status(200).json({
                 success: true,

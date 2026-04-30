@@ -232,7 +232,7 @@ class ProfileService {
     // Get user profile based on role
     async getUserProfile(userId) {
         try {
-            const user = await User.findById(userId).select('name email role isEmailVerified').lean();
+            const user = await User.findById(userId).select('name email role isEmailVerified isDocumentsUploaded').lean();
             if (!user) throw new Error('User not found');
 
             // Check cache first
@@ -364,7 +364,8 @@ class ProfileService {
                     name: user.name,
                     email: user.email,
                     role: user.role,
-                    isEmailVerified: user.isEmailVerified
+                    isEmailVerified: user.isEmailVerified,
+                    isDocumentsUploaded: user.isDocumentsUploaded
                 },
                 profile,
                 documents
