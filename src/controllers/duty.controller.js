@@ -121,71 +121,25 @@ exports.createDuty = asyncHandler(async (req, res) => {
 
 
 exports.getDuties = asyncHandler(async (req, res) => {
-    let query = {
-        hospital: req.user.id // Only show duties for this hospital
-    };
+    const userId = req.user.id;
+    const { date, startDate, endDate, status, staffRole, page = 1, limit = 10 } = req.query;
 
-    if (req.query.status) {
-        query.status = req.query.status;
-    }
-
-    if (req.query.staffRole) {
-        query.staffRole = req.query.staffRole;
-    }
-
-    if (req.query.date) {
-        const startDate = new Date(req.query.date);
-        const endDate = new Date(req.query.date);
-        endDate.setDate(endDate.getDate() + 1);
-
-        query.date = {
-            $gte: startDate,
-            $lt: endDate
-        };
-    }
-
-    if (req.query.urgency) {
-        query.urgency = req.query.urgency;
-    }
-
-    const duties = await DutyService.getDuties(query);
-
-    // Format duties with staff names for hospital view
-    const formattedDuties = duties.map(duty => {
-        const dutyObj = duty.toObject();
-
-        if (duty.assignedTo && duty.assignedTo.user) {
-            // Keep only essential staff information
-            dutyObj.assignedTo = {
-                _id: duty.assignedTo._id,
-                user: {
-                    _id: duty.assignedTo.user._id,
-                    name: duty.assignedTo.user.name
-                }
-            };
-            dutyObj.staffName = duty.assignedTo.user.name;
-        } else {
-            dutyObj.assignedTo = null;
-            dutyObj.staffName = '_____';
-        }
-
-        return dutyObj;
+    const result = await DutyService.getDutyHistory({
+        hospitalUserId: userId,
+        date,
+        startDate,
+        endDate,
+        status,
+        staffRole,
+        page: parseInt(page),
+        limit: parseInt(limit)
     });
 
-    // Response for hospital users
     res.status(200).json({
         success: true,
-        count: duties.length,
-        data: formattedDuties,
-        filters: {
-            status: query.status,
-            staffRole: query.staffRole,
-            date: req.query.date,
-            urgency: query.urgency
-        },
-        message: duties.length > 0
-            ? `Found ${duties.length} duties for your hospital`
-            : 'No duties found for your hospital. Create your first duty now.'
+        count: result.duties.length,
+        data: result.duties,
+        pagination: result.pagination
     });
 });
 
