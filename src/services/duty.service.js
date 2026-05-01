@@ -1769,7 +1769,7 @@ class DutyService {
             const duties = await Duty.find(query)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates',
+                    select: 'fullName user coordinates currentAddress city state pincode',
                     populate: {
                         path: 'user',
                         select: 'name email'
