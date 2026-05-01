@@ -959,25 +959,19 @@ class DutyService {
                 throw new Error('Access denied: This duty has expired and is no longer available');
             }
 
-            // Add distance information for staff members only
+            // Add distance information for staff members only (always show distance)
             try {
-                // Get staff member's current location
-                const staff = await MedicalStaff.findOne({ user: userId });
-                if (!staff || !staff.coordinates) {
-                    throw new Error('Staff location not found. Please update your location.');
-                }
+                // Get staff real-time location with fallback to profile
+                const locationInfo = await DashboardService.getStaffLocationForDuties(userId);
+                const staffLat = locationInfo.location.latitude;
+                const staffLng = locationInfo.location.longitude;
+                const locationSource = locationInfo.source; // 'browser' or 'profile'
 
-                // Handle both old and new coordinate structures
-                let staffLat, staffLng;
-                if (staff.coordinates.coordinates) {
-                    // New structure
-                    staffLat = staff.coordinates.coordinates.latitude;
-                    staffLng = staff.coordinates.coordinates.longitude;
-                } else {
-                    // Old structure (backward compatibility)
-                    staffLat = staff.coordinates.latitude;
-                    staffLng = staff.coordinates.longitude;
-                }
+                console.log(`Staff accessing duty ${duty._id} - using ${locationSource} location:`, {
+                    lat: staffLat,
+                    lng: staffLng,
+                    permissionGranted: locationInfo.permissionGranted
+                });
 
                 // Check if hospital has coordinates
                 if (duty.hospital.coordinates &&
@@ -991,7 +985,8 @@ class DutyService {
                     console.log(`Processing distance for duty ${duty._id}:`, {
                         staffLocation: { lat: staffLat, lng: staffLng },
                         hospitalLocation: { lat: hospitalLat, lng: hospitalLng },
-                        hospitalName: duty.hospital.hospitalLegalName
+                        hospitalName: duty.hospital.hospitalLegalName,
+                        locationSource: locationSource
                     });
 
                     try {
@@ -1003,7 +998,8 @@ class DutyService {
                         console.log(`Distance calculation completed for duty ${duty._id}:`, {
                             method: distanceInfo.source,
                             distance: distanceInfo.distanceText,
-                            duration: distanceInfo.durationText
+                            duration: distanceInfo.durationText,
+                            locationSource: locationSource
                         });
 
                         // Convert duty to plain object and add distance information
@@ -1012,6 +1008,7 @@ class DutyService {
                         dutyObject.duration = distanceInfo.duration;
                         dutyObject.distanceText = distanceInfo.distanceText;
                         dutyObject.durationText = distanceInfo.durationText;
+                        dutyObject.staffLocationSource = locationSource; // Add location source info
                         dutyObject.hospitalLocation = {
                             latitude: hospitalLat,
                             longitude: hospitalLng,
@@ -1086,7 +1083,7 @@ class DutyService {
                 return dutyObject;
             }
         } else if (userRole === 'hospital') {
-            console.log('Entering hospital block - NO distance calculation');
+            console.log('Entering hospital block - CONDITIONAL distance calculation');
             // Find hospital profile
             const hospital = await Hospital.findOne({ user: userId });
             if (!hospital) {
@@ -1097,11 +1094,76 @@ class DutyService {
             if (duty.hospital._id.toString() !== hospital._id.toString()) {
                 throw new Error('Access denied: You can only view your hospital duties');
             }
+
+            // Add distance/time ONLY when duty is assigned (accepted by staff)
+            const shouldShowDistance = duty.status === 'assigned' || 
+                                    duty.status === 'enroute' || 
+                                    duty.status === 'in-progress';
+
+            if (shouldShowDistance && duty.assignedTo && duty.assignedTo.user) {
+                try {
+                    console.log(`Hospital viewing assigned duty ${duty._id} - calculating staff distance`);
+                    
+                    // Get assigned staff's real-time location
+                    const locationInfo = await DashboardService.getStaffLocationForDuties(duty.assignedTo.user._id);
+                    const staffLat = locationInfo.location.latitude;
+                    const staffLng = locationInfo.location.longitude;
+                    const locationSource = locationInfo.source;
+
+                    // Get hospital coordinates
+                    const hospitalLat = duty.hospital.coordinates.coordinates.latitude;
+                    const hospitalLng = duty.hospital.coordinates.coordinates.longitude;
+
+                    // Calculate distance and time
+                    const distanceInfo = await geocodingService.calculateDistanceAndETA(
+                        staffLat, staffLng, hospitalLat, hospitalLng
+                    );
+
+                    console.log(`Hospital distance calculated for duty ${duty._id}:`, {
+                        distance: distanceInfo.distanceText,
+                        duration: distanceInfo.durationText,
+                        staffLocationSource: locationSource
+                    });
+
+                    // Add distance info to duty object
+                    const dutyObject = duty.toObject();
+                    dutyObject.distance = distanceInfo.distance;
+                    dutyObject.duration = distanceInfo.duration;
+                    dutyObject.distanceText = distanceInfo.distanceText;
+                    dutyObject.durationText = distanceInfo.durationText;
+                    dutyObject.staffLocationSource = locationSource;
+                    dutyObject.hospitalLocation = {
+                        latitude: hospitalLat,
+                        longitude: hospitalLng,
+                        address: {
+                            currentAddress: duty.hospital.currentAddress,
+                            city: duty.hospital.city,
+                            state: duty.hospital.state,
+                            pincode: duty.hospital.pincode
+                        }
+                    };
+
+                    // Add review data
+                    const review = await Review.findOne({ duty: dutyId })
+                        .select('rating review createdAt');
+                    dutyObject.review = review ? {
+                        rating: review.rating,
+                        review: review.review,
+                        reviewedAt: review.createdAt
+                    } : null;
+
+                    return dutyObject;
+                } catch (distanceError) {
+                    console.error(`Hospital distance calculation failed for duty ${duty._id}:`, distanceError.message);
+                }
+            }
+
+            console.log(`Hospital viewing duty ${duty._id} - no distance calculation (status: ${duty.status})`);
         } else {
             console.log(`Unknown user role: "${userRole}"`);
         }
 
-        // For hospital users, add review data and return
+        // For hospital users (or when distance calculation fails), add review data and return
         const dutyObject = duty.toObject();
 
         // Add review data for hospital users
@@ -1885,7 +1947,7 @@ class DutyService {
                     mobileNumber: staff.phoneNumber,
                     skills: staff.skills || [],
                     avgRating: staff.averageRating || 0,
-                    // address: staff.currentAddress ? `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : `${staff.city}, ${staff.state} - ${staff.pincode}`,
+                    address: staff.currentAddress ? `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : `${staff.city}, ${staff.state} - ${staff.pincode}`,
                     currentAddress: staff.currentAddress,
                     city: staff.city, 
                     state: staff.state,
@@ -1925,7 +1987,10 @@ class DutyService {
                 hospital: {
                     id: hospital._id,
                     name: hospital.hospitalLegalName,
-                    address: hospital.currentAddress,
+                    currentAddress: hospital.currentAddress,
+                    city: hospital.city,
+                    state: hospital.state,
+                    pincode: hospital.pincode,
                     location: hospital.location,
                     coordinates: {
                         latitude: hospital.coordinates.coordinates.latitude,
