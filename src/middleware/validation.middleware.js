@@ -344,11 +344,11 @@ const validateHospitalProfile = (req, res, next) => {
     console.log('Request body:', req.body);
     console.log('Received fields:', Object.keys(req.body));
     
-    const { hospitalLegalName, currentAddress, servicesAvailable, city, state, pincode, staffCount, phoneNumber, email } = req.body;
+    const { hospitalLegalName, currentAddress, servicesAvailable, city, state, pincode, staffCount, phoneNumber, email, description } = req.body;
     const errors = [];
 
     // Check for unexpected fields
-    const allowedFields = ['hospitalLegalName', 'currentAddress', 'servicesAvailable', 'city', 'state', 'pincode', 'staffCount', 'phoneNumber', 'email'];
+    const allowedFields = ['hospitalLegalName', 'currentAddress', 'servicesAvailable', 'city', 'state', 'pincode', 'staffCount', 'phoneNumber', 'email', 'description'];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
     
@@ -426,6 +426,11 @@ const validateHospitalProfile = (req, res, next) => {
     // Phone number validation
     if (!phoneNumber || !/^(\+91) [6-9]\d{9}$/.test(phoneNumber)) {
         errors.push('Phone number must start with +91 followed by 10 digits');
+    }
+
+    // Description validation 
+    if (description && description.length > 1000) {
+        errors.push('Description cannot exceed 1000 characters');
     }
 
     if (errors.length > 0) {
@@ -593,7 +598,7 @@ const validateProfileUpdate = (req, res, next) => {
         }
         
     } else if (role === 'hospital') {
-        const { hospitalLegalName, currentAddress, servicesAvailable, city, state, pincode, staffCount, phoneNumber, email } = req.body;
+        const { hospitalLegalName, currentAddress, servicesAvailable, city, state, pincode, staffCount, phoneNumber, email, description } = req.body;
         
         // Prevent email and phone number changes
         if (email && email !== req.user.email) {
@@ -629,6 +634,11 @@ const validateProfileUpdate = (req, res, next) => {
         // services validation
         if (servicesAvailable && (!Array.isArray(servicesAvailable) || servicesAvailable.length === 0)) {
             errors.push('At least one service must be selected');
+        }
+
+        // Description validation 
+        if (description && description.length > 1000) {
+            errors.push('Description cannot exceed 1000 characters');
         }
     }
     

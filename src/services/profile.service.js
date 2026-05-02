@@ -230,6 +230,7 @@ class ProfileService {
                 phoneNumber: profileData.phoneNumber,
                 servicesAvailable: profileData.servicesAvailable,
                 staffCount: profileData.staffCount,
+                description: profileData.description || '',
                 coordinates: coordinates
             });
 
@@ -376,6 +377,7 @@ class ProfileService {
                         servicesAvailable: raw.servicesAvailable,
                         isProfileComplete: raw.isProfileComplete,
                         staffCount: raw.staffCount,
+                        description: raw.description || '',
                         coordinates: {
                             latitude: raw.coordinates?.coordinates?.latitude,
                             longitude: raw.coordinates?.coordinates?.longitude
