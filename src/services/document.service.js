@@ -1,4 +1,6 @@
 const Document = require("../models/Document");
+const MedicalStaff = require("../models/MedicalStaff");
+const Hospital = require("../models/Hospital");
 const { uploadToS3, generatePreSignedURL, deleteFromS3 } = require("./s3.service");
 const requiredDocsConfig = require("../config/requiredDocs");
 const { extractTextFromBuffer } = require("./ocr.service");
@@ -71,6 +73,35 @@ const ocrSupportedDocs = [
     "rohini-certificate",
     "cghs-certificate"
 ];
+
+// Sync isDocumentsUploaded flag on MedicalStaff or Hospital after any doc change
+const syncDocumentsUploadedFlag = async (userId, userRole) => {
+    try {
+        const config = requiredDocsConfig[userRole];
+        if (!config) return;
+
+        const docRecord = await Document.findOne({ userId }).select('documents').lean();
+        const uploadedTypes = (docRecord?.documents || [])
+            .filter(d => !d.isDeleted)
+            .map(d => d.documentType);
+
+        const allRequiredPresent = (config.required || [])
+            .every(type => uploadedTypes.includes(type));
+
+        const allConditionalPresent = (config.conditional || [])
+            .every(group => group.some(type => uploadedTypes.includes(type)));
+
+        const isDocumentsUploaded = allRequiredPresent && allConditionalPresent;
+
+        if (userRole === 'staff') {
+            await MedicalStaff.updateOne({ user: userId }, { isDocumentsUploaded });
+        } else if (userRole === 'hospital') {
+            await Hospital.updateOne({ user: userId }, { isDocumentsUploaded });
+        }
+    } catch (err) {
+        console.error('syncDocumentsUploadedFlag error:', err.message);
+    }
+};
 
 exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
@@ -390,6 +421,9 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         verificationMeta
     });
     await userDocs.save();
+
+    // Sync the isDocumentsUploaded flag non-blocking
+    syncDocumentsUploadedFlag(user._id, user.role).catch(() => {});
 
     let redirectUrl = null;
 
@@ -746,6 +780,9 @@ exports.deleteDocument = async (user, documentId) => {
     document.updatedAt = new Date();
 
     await docRecord.save();
+
+    // Sync the isDocumentsUploaded flag non-blocking
+    syncDocumentsUploadedFlag(user._id, user.role).catch(() => {});
 
     return true;
 };
