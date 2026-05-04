@@ -137,6 +137,11 @@ const hospitalSchema = new mongoose.Schema({
             message: 'Staff count must be one of: 2-10, 11-50, 51-100, 100+'
         }
     },
+    description: {
+        type: String,
+        trim: true,
+        maxlength: [1000, 'Description cannot exceed 1000 characters']
+    },
     isProfileComplete: {
         type: Boolean,
         default: true

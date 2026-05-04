@@ -1248,7 +1248,7 @@ class AdminService {
                 }
             }
 
-            // Get total count for pagination
+            // Get total count for pagination (before filtering)
             const totalDuties = await Duty.countDocuments(query);
 
             // Calculate pagination parameters
@@ -1269,8 +1269,11 @@ class AdminService {
                 .skip(skip)
                 .limit(limit);
 
+            // Filter out duties with missing staff data before processing
+            const validDuties = duties.filter(duty => duty.assignedTo);
+
             // Batch process real-time locations for better performance
-            const staffUserIds = duties
+            const staffUserIds = validDuties
                 .filter(duty => duty.assignedTo && duty.assignedTo.user)
                 .map(duty => duty.assignedTo.user._id);
 
@@ -1278,14 +1281,17 @@ class AdminService {
             const realtimeLocations = await getBatchStaffLocations(staffUserIds);
 
             const formattedDuties = await Promise.all(
-                duties.map(async (duty) => {
+                validDuties.map(async (duty) => {
                     return await formatActiveDuty(duty, realtimeLocations);
                 })
             );
 
+            // Filter out null results from duties with missing staff
+            const validFormattedDuties = formattedDuties.filter(duty => duty !== null);
+
             return {
-                duties: formattedDuties,
-                pagination: getPaginationMeta(totalDuties, page, limit),
+                duties: validFormattedDuties,
+                pagination: getPaginationMeta(validFormattedDuties.length, page, limit),
                 filters: {
                     role: role || 'all',
                     location: location || 'all',

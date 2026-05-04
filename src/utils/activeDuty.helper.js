@@ -50,6 +50,18 @@ async function formatActiveDuty(duty, realtimeLocations = {}) {
         const staff = duty.assignedTo;
         const hospital = duty.hospital;
         
+        // Add null checks for staff data - return null instead of throwing error
+        if (!staff) {
+            console.warn('Staff data not found for duty:', duty._id);
+            return null;
+        }
+        
+        // Ensure staff object has required fields with defaults
+        staff.currentAddress = staff.currentAddress || null;
+        staff.city = staff.city || null;
+        staff.state = staff.state || null;
+        staff.pincode = staff.pincode || null;
+        
         // Determine status
         let statusInfo = {
             status: duty.status
@@ -123,9 +135,22 @@ async function formatActiveDuty(duty, realtimeLocations = {}) {
                 city: staff.city,
                 state: staff.state,
                 pincode: staff.pincode,
-                location: staff.currentAddress ? 
-                    `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : 
-                    `${staff.city}, ${staff.state} - ${staff.pincode}`,
+                location: (() => {
+                    const parts = [];
+                    if (staff.currentAddress && staff.currentAddress.trim()) parts.push(staff.currentAddress.trim());
+                    if (staff.city && staff.city.trim()) parts.push(staff.city.trim());
+                    if (staff.state && staff.state.trim()) parts.push(staff.state.trim());
+                    
+                    if (parts.length === 0) return 'Location not available';
+                    
+                    // Handle pincode separately for proper formatting
+                    let locationStr = parts.join(', ');
+                    if (staff.pincode && staff.pincode.trim()) {
+                        locationStr += ' - ' + staff.pincode.trim();
+                    }
+                    
+                    return locationStr;
+                })(),
                 coordinates: staff.coordinates
             } : null,
             timing: {
