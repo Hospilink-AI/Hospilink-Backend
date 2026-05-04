@@ -3,13 +3,13 @@ module.exports = {
         required: [
             "aadhaar-card",
             "pan-card",
-            "license-permit",
-            "resume-experience"
+            "license-permit"
         ],
         conditional: [
             ["mcim-certificate", "ncim-certificate"]
         ],
         optional: [
+            "resume-experience",
             "recommendation-letter"
         ]
     },

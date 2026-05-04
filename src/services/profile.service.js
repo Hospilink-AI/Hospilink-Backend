@@ -337,6 +337,7 @@ class ProfileService {
                         skills: raw.skills || [],
                         isAvailable: raw.isAvailable,
                         isProfileComplete: raw.isProfileComplete,
+                        isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
                         profileCompletion,
                         activeApplications,
                         verifiedDocs,
@@ -376,6 +377,7 @@ class ProfileService {
                         phoneNumber: raw.phoneNumber,
                         servicesAvailable: raw.servicesAvailable,
                         isProfileComplete: raw.isProfileComplete,
+                        isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
                         staffCount: raw.staffCount,
                         description: raw.description || '',
                         coordinates: {
@@ -700,56 +702,82 @@ class ProfileService {
                 };
             }
 
-            // Use lean query with only required fields
             const user = await User.findById(userId)
-                .select('role isEmailVerified _id')  // Only select needed fields
-                .lean();  // Convert to plain object for better performance
+                .select('role isEmailVerified _id')
+                .lean();
 
-            if (!user) {
-                throw new Error('User not found');
+            if (!user) throw new Error('User not found');
+
+            const requiredDocsConfig = require('../config/requiredDocs');
+            const Document = require('../models/Document');
+
+            // Run profile + document checks in parallel
+            let profileDoc = null;
+            const [profileResult, docRecord] = await Promise.all([
+                user.role === 'staff'
+                    ? MedicalStaff.findOne({ user: userId }).select('_id isDocumentsUploaded').lean()
+                    : user.role === 'hospital'
+                        ? Hospital.findOne({ user: userId }).select('_id isDocumentsUploaded').lean()
+                        : Promise.resolve(null),
+                Document.findOne({ userId }).select('documents').lean()
+            ]);
+
+            const hasProfile = !!profileResult;
+
+            // Check document completeness against required docs config
+            let documentsStatus = { uploaded: [], missing: [], hasAllRequired: false };
+
+            if (hasProfile && user.role !== 'admin') {
+                const roleConfig = requiredDocsConfig[user.role];
+                const uploadedTypes = (docRecord?.documents || [])
+                    .filter(d => !d.isDeleted)
+                    .map(d => d.documentType);
+
+                const missingRequired = (roleConfig?.required || [])
+                    .filter(type => !uploadedTypes.includes(type));
+
+                const missingConditional = (roleConfig?.conditional || [])
+                    .filter(group => !group.some(type => uploadedTypes.includes(type)))
+                    .map(group => group);
+
+                // Use the cached flag for the boolean, dynamic check for details
+                const hasAllRequired = profileResult.isDocumentsUploaded === true;
+
+                documentsStatus = {
+                    uploaded: uploadedTypes,
+                    missingRequired,
+                    missingConditional,
+                    hasAllRequired
+                };
             }
 
-            // Parallel profile check using aggregation
-            let hasProfile = false;
-            const profileCheckPromises = [];
-
-            if (user.role === 'staff') {
-                profileCheckPromises.push(
-                    MedicalStaff.findOne({ user: userId })
-                        .select('_id')  // Only check existence
-                        .lean()
-                        .then(profile => !!profile)
-                );
-            } else if (user.role === 'hospital') {
-                profileCheckPromises.push(
-                    Hospital.findOne({ user: userId })
-                        .select('_id')  // Only check existence
-                        .lean()
-                        .then(profile => !!profile)
-                );
+            // Derive onboarding step for frontend routing:
+            // 'verify_email'  → email not verified
+            // 'create_profile' → email verified but no profile
+            // 'upload_documents' → profile exists but required docs missing
+            // 'complete' → everything done
+            let onboardingStep = 'complete';
+            if (!user.isEmailVerified) {
+                onboardingStep = 'verify_email';
+            } else if (!hasProfile) {
+                onboardingStep = 'create_profile';
+            } else if (!documentsStatus.hasAllRequired) {
+                onboardingStep = 'upload_documents';
             }
 
-            // Execute profile checks in parallel
-            if (profileCheckPromises.length > 0) {
-                const results = await Promise.all(profileCheckPromises);
-                hasProfile = results[0];
-            }
-
-            // Prepare result
             const result = {
                 success: true,
-                hasProfile,
-                userRole: user.role,
+                onboardingStep,
                 isEmailVerified: user.isEmailVerified,
+                hasProfile,
+                documents: documentsStatus,
+                userRole: user.role,
                 fromCache: false
             };
 
-            // Cache the result for future requests
             await cacheService.setProfileStatus(userId, result);
-
             return result;
         } catch (error) {
-            // Log error for monitoring
             console.error(`Profile completion check failed for user ${userId}:`, error.message);
             throw new Error(error.message);
         }

@@ -149,6 +149,11 @@ const medicalStaffSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    isDocumentsUploaded: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
     isAvailable: {
         type: Boolean,
         default: true,

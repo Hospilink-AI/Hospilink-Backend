@@ -146,6 +146,11 @@ const hospitalSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    isDocumentsUploaded: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
     verificationStatus: {
         type: String,
         enum: ['pending', 'verified', 'rejected'],
