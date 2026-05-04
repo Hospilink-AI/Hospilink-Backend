@@ -200,12 +200,13 @@ medicalStaffSchema.index({ jobRole: 1 });
 medicalStaffSchema.index({ 'coordinates.coordinates.longitude': 1 });
 medicalStaffSchema.index({ 'coordinates.coordinates.latitude': 1 });
 
-// COMPOUND INDEX for optimal nearby staff queries
+// COMPOUND INDEX for role + location + availability queries
 medicalStaffSchema.index({
     isAvailable: 1,         // filter only available staff
+    jobRole: 1,             // filter by job role
     'coordinates.coordinates.latitude': 1,      // filter latitude range
     'coordinates.coordinates.longitude': 1      // filter longitude range
-});
+}); // For location-based duty notifications
 
 
 // compound indexes for availability and updates
