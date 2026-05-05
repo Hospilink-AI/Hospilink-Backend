@@ -12,6 +12,10 @@ const geocodingService = require('./geocoding.service');
 const locationTrackingService = require('./locationTracking.service');
 const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
+const EmailService = require('./email.service');
+const CacheInvalidationService = require('./cacheInvalidation.service');
+const logger = require('../utils/logger');
+
 
 
 class AdminService {
@@ -684,6 +688,8 @@ class AdminService {
         };
     }
 
+    
+
     // PATCH /api/admin/hospitals/:id/verify
     async verifyHospital(hospitalId) {
         const hospital = await Hospital.findById(hospitalId).populate('user', 'name email');
@@ -694,16 +700,41 @@ class AdminService {
             throw new Error('Hospital is already verified');
         }
 
+        const previousStatus = hospital.verificationStatus;
         hospital.verificationStatus = 'verified';
         hospital.rejectionReason = null; // clear reason if coming from rejected
         await hospital.save();
 
-        const EmailService = require('./email.service');
-        EmailService.sendHospitalVerifiedEmail(hospital.user.email, hospital.hospitalLegalName)
-            .catch(err => console.error('Verify email error:', err.message));
+        // Invalidate cache with retry mechanism
+        const cacheInvalidated = await CacheInvalidationService.invalidateHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheInvalidated) {
+            logger.error(`Failed to invalidate cache for hospital ${hospitalId} after verification`);
+            // Continue with email sending, but log the error
+        }
 
-        return { id: hospital._id, verificationStatus: hospital.verificationStatus };
+        // Refresh cache to ensure consistency
+        const cacheRefreshed = await CacheInvalidationService.refreshHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheRefreshed) {
+            logger.error(`Failed to refresh cache for hospital ${hospitalId} after verification`);
+        }
+
+        logger.info(`Hospital ${hospitalId} verified: ${previousStatus} → verified`);
+
+        EmailService.sendHospitalVerifiedEmail(hospital.user.email, hospital.hospitalLegalName)
+            .catch(err => logger.error('Verify email error:', err.message));
+
+        return { 
+            id: hospital._id, 
+            verificationStatus: hospital.verificationStatus,
+            previousStatus: previousStatus,
+            cacheInvalidated: cacheInvalidated,
+            cacheRefreshed: !!cacheRefreshed
+        };
     }
+
+
 
     // PATCH /api/admin/hospitals/:id/reject
     async rejectHospital(hospitalId, reason) {
@@ -721,16 +752,41 @@ class AdminService {
             throw new Error('Hospital is already rejected');
         }
 
+        const previousStatus = hospital.verificationStatus;
         hospital.verificationStatus = 'rejected';
         hospital.rejectionReason = reason;
         await hospital.save();
 
-        const EmailService = require('./email.service');
-        EmailService.sendHospitalRejectedEmail(hospital.user.email, hospital.hospitalLegalName, reason)
-            .catch(err => console.error('Reject email error:', err.message));
+        // IMMEDIATE: Invalidate cache with retry mechanism
+        const cacheInvalidated = await CacheInvalidationService.invalidateHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheInvalidated) {
+            logger.error(`Failed to invalidate cache for hospital ${hospitalId} after rejection`);
+        }
 
-        return { id: hospital._id, verificationStatus: hospital.verificationStatus, rejectionReason: hospital.rejectionReason };
+        // IMMEDIATE: Refresh cache to ensure consistency
+        const cacheRefreshed = await CacheInvalidationService.refreshHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheRefreshed) {
+            logger.error(`Failed to refresh cache for hospital ${hospitalId} after rejection`);
+        }
+
+        logger.info(`Hospital ${hospitalId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
+
+        EmailService.sendHospitalRejectedEmail(hospital.user.email, hospital.hospitalLegalName, reason)
+            .catch(err => logger.error('Reject email error:', err.message));
+
+        return { 
+            id: hospital._id, 
+            verificationStatus: hospital.verificationStatus, 
+            rejectionReason: hospital.rejectionReason,
+            previousStatus: previousStatus,
+            cacheInvalidated: cacheInvalidated,
+            cacheRefreshed: !!cacheRefreshed
+        };
     }
+
+
 
     // GET /api/admin/medical-staff/stats — dashboard stats for medical staff management
     async getMedicalStaffStats() {
@@ -987,36 +1043,62 @@ class AdminService {
         const staff = await MedicalStaff.findById(staffId).populate('user', 'name email');
         if (!staff) throw new Error('Medical staff not found');
 
-        // Check current status
+        // Allow: pending → verified, rejected → verified
         if (staff.verificationStatus === 'verified') {
             throw new Error('Medical staff is already verified');
         }
 
-        // Update account verification status
+        const previousStatus = staff.verificationStatus;
         staff.verificationStatus = 'verified';
-        staff.rejectionReason = null; // clear any previous rejection reason
+        staff.rejectionReason = null; // clear reason if coming from rejected
+        staff.isAvailable = true; // Auto-enable availability when verified
         await staff.save();
 
-        // Send email notification
-        const EmailService = require('./email.service');
+        // Invalidate availability cache after enabling
+        await cacheService.del(`staff_availability:${staff.user._id}`);
+
+        // IMMEDIATE: Invalidate cache with retry mechanism
+        const cacheInvalidated = await CacheInvalidationService.invalidateStaffVerificationCache(staff.user._id);
+
+        if (!cacheInvalidated) {
+            logger.error(`Failed to invalidate cache for staff ${staffId} after verification`);
+        }
+
+        // IMMEDIATE: Refresh cache to ensure consistency
+        const cacheRefreshed = await CacheInvalidationService.refreshStaffVerificationCache(staff.user._id);
+
+        if (!cacheRefreshed) {
+            logger.error(`Failed to refresh cache for staff ${staffId} after verification`);
+        }
+
+        // NEW: Invalidate availability cache after enabling
+        await cacheService.del(`staff_availability:${staff.user._id}`);
+
+        logger.info(`Medical staff ${staffId} verified: ${previousStatus} → verified`);
+
         EmailService.sendMedicalStaffVerifiedEmail(staff.user.email, staff.fullName)
-            .catch(err => console.error('Verify email error:', err.message));
+            .catch(err => logger.error('Verify email error:', err.message));
 
         return { 
             id: staff._id, 
             verificationStatus: staff.verificationStatus,
-            message: 'Medical staff account verified successfully'
+            previousStatus: previousStatus,
+            isAvailable: staff.isAvailable, 
+            message: staff.isAvailable ? 'Staff verified and availability enabled' : 'Staff verified',
+            cacheInvalidated: cacheInvalidated,
+            cacheRefreshed: !!cacheRefreshed
         };
     }
 
     // PATCH /api/admin/medical-staff/:staffId/reject — reject medical staff account
     async rejectMedicalStaff(staffId, reason) {
         if (!reason) throw new Error('Rejection reason is required');
-
+        
         const staff = await MedicalStaff.findById(staffId).populate('user', 'name email');
         if (!staff) throw new Error('Medical staff not found');
 
-        // State machine: pending → rejected only (verified cannot be rejected)
+        // Allow: pending → rejected only
+        // verified → rejected is NOT allowed
         if (staff.verificationStatus === 'verified') {
             throw new Error('Verified medical staff cannot be rejected. Verification is final.');
         }
@@ -1024,24 +1106,41 @@ class AdminService {
             throw new Error('Medical staff is already rejected');
         }
 
-        // Update account verification status
+        const previousStatus = staff.verificationStatus;
         staff.verificationStatus = 'rejected';
         staff.rejectionReason = reason;
         await staff.save();
 
-        // Send email notification
-        const EmailService = require('./email.service');
+        // IMMEDIATE: Invalidate cache with retry mechanism
+        const cacheInvalidated = await CacheInvalidationService.invalidateStaffVerificationCache(staff.user._id);
+        
+        if (!cacheInvalidated) {
+            logger.error(`Failed to invalidate cache for staff ${staffId} after rejection`);
+        }
+
+        // IMMEDIATE: Refresh cache to ensure consistency
+        const cacheRefreshed = await CacheInvalidationService.refreshStaffVerificationCache(staff.user._id);
+        
+        if (!cacheRefreshed) {
+            logger.error(`Failed to refresh cache for staff ${staffId} after rejection`);
+        }
+
+        logger.info(`Medical staff ${staffId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
+
         EmailService.sendMedicalStaffRejectedEmail(staff.user.email, staff.fullName, reason)
-            .catch(err => console.error('Reject email error:', err.message));
+            .catch(err => logger.error('Reject email error:', err.message));
 
         return { 
             id: staff._id, 
-            verificationStatus: staff.verificationStatus,
+            verificationStatus: staff.verificationStatus, 
             rejectionReason: staff.rejectionReason,
-            message: 'Medical staff account rejected'
+            previousStatus: previousStatus,
+            cacheInvalidated: cacheInvalidated,
+            cacheRefreshed: !!cacheRefreshed
         };
     }
 
+    
     // GET /api/admin/documents — paginated list of all documents across all users
     async getAllDocuments({ status, userRole, page = 1, limit = 10, sortBy = 'uploadedAt', sortOrder = 'desc' }) {
         const { skip } = getPaginationParams(page, limit);

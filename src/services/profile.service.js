@@ -79,7 +79,8 @@ class ProfileService {
                 coordinates: coordinates,
                 profileSummary: profileData.profileSummary || '',
                 education: profileData.education || [],
-                skills: profileData.skills || []
+                skills: profileData.skills || [],
+                isAvailable: false
             });
 
             await medicalStaffProfile.save();
@@ -871,6 +872,7 @@ class ProfileService {
         }
     }
 
+
     // Toggle medical staff availability status
     async toggleMedicalStaffAvailability(userId, isAvailable) {
         try {
@@ -882,7 +884,7 @@ class ProfileService {
             // Parallel database queries for better performance
             const [user, medicalStaff] = await Promise.all([
                 User.findById(userId).select('role _id').lean(),
-                MedicalStaff.findOne({ user: userId }).select('_id').lean()
+                MedicalStaff.findOne({ user: userId }).select('verificationStatus isAvailable _id').lean()
             ]);
 
             if (!user) {
@@ -897,8 +899,37 @@ class ProfileService {
                 throw new Error('Medical staff profile not found');
             }
 
+            // Check verification status for availability toggle
+            if (medicalStaff.verificationStatus === 'pending') {
+                const availabilityMessage = isAvailable 
+                    ? 'You cannot set availability to ON until your profile has been verified.'
+                    : 'You won\'t receive duty requests unless your profile has been verified.';
+                
+                return {
+                    success: false,
+                    message: availabilityMessage,
+                    verificationStatus: medicalStaff.verificationStatus,
+                    canToggleAvailability: false
+                };
+            }
+
+            if (medicalStaff.verificationStatus === 'rejected') {
+                return {
+                    success: false,
+                    message: `Your profile has been rejected. Reason: ${medicalStaff.rejectionReason || 'Not specified'}. Please contact support for assistance.`,
+                    verificationStatus: medicalStaff.verificationStatus,
+                    canToggleAvailability: false
+                };
+            }
+
+            // Auto-enable availability when verified and setting to ON
+            let finalAvailability = isAvailable;
+            if (isAvailable && medicalStaff.verificationStatus === 'verified') {
+                finalAvailability = true;
+            }
+
             // Optimized duty check with caching
-            if (!isAvailable) {
+            if (!finalAvailability) {
                 const cacheKey = `upcoming:duties:${userId}`;
                 let upcomingDuties = await cacheService.get(cacheKey);
 
@@ -924,7 +955,7 @@ class ProfileService {
             const updatedStaff = await MedicalStaff.findOneAndUpdate(
                 { user: userId },
                 {
-                    isAvailable: isAvailable,
+                    isAvailable: finalAvailability,
                     updatedAt: new Date()
                 },
                 {
@@ -945,14 +976,23 @@ class ProfileService {
                 // Invalidate nearby staff cache for hospitals
                 cacheService.invalidatePattern('nearby:staff:*'),
                 // Update availability cache
-                cacheService.setStaffAvailability(userId, isAvailable, 60)
+                cacheService.setStaffAvailability(userId, finalAvailability, 60),
+                // Invalidate verification cache to refresh availability status
+                cacheService.del(`staff_verification:${userId}`)
             ]);
+
+            // Return appropriate response based on verification status
+            const successMessage = medicalStaff.verificationStatus === 'verified' && finalAvailability
+                ? 'Ready to receive new duties'
+                : 'Availability status updated successfully';
 
             return {
                 success: true,
-                isAvailable: isAvailable,
+                isAvailable: finalAvailability,
                 updatedAt: updatedStaff.updatedAt,
-                message: `You are now ${isAvailable ? 'available' : 'unavailable'} for duties`
+                message: successMessage,
+                verificationStatus: medicalStaff.verificationStatus,
+                canToggleAvailability: medicalStaff.verificationStatus === 'verified'
             };
         } catch (error) {
             throw new Error(error.message);
