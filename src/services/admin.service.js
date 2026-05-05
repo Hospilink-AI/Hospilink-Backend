@@ -14,6 +14,7 @@ const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
 const EmailService = require('./email.service');
 const CacheInvalidationService = require('./cacheInvalidation.service');
+const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
 
 
@@ -578,7 +579,7 @@ class AdminService {
             {
                 $lookup: {
                     from: 'documents',
-                    localField: '_id',
+                    localField: 'user',
                     foreignField: 'userId',
                     as: 'docRecord'
                 }
@@ -639,8 +640,8 @@ class AdminService {
 
         if (!hospital) throw new Error('Hospital not found');
 
-        // Get documents with presigned URLs
-        const docRecord = await Document.findOne({ userId: hospital._id }).lean();
+        // Documents are stored against the User's _id, not the Hospital profile's _id
+        const docRecord = await Document.findOne({ userId: hospital.user._id }).lean();
         const documents = [];
 
         if (docRecord?.documents) {
@@ -710,7 +711,6 @@ class AdminService {
         
         if (!cacheInvalidated) {
             logger.error(`Failed to invalidate cache for hospital ${hospitalId} after verification`);
-            // Continue with email sending, but log the error
         }
 
         // Refresh cache to ensure consistency
@@ -719,6 +719,13 @@ class AdminService {
         if (!cacheRefreshed) {
             logger.error(`Failed to refresh cache for hospital ${hospitalId} after verification`);
         }
+
+        // Also clear profile and profile-status caches so /profile/me reflects the new status
+        const userId = hospital.user._id.toString();
+        await Promise.allSettled([
+            cacheService.invalidateUserProfiles(userId),
+            cacheService.invalidateProfileStatus(userId)
+        ]);
 
         logger.info(`Hospital ${hospitalId} verified: ${previousStatus} → verified`);
 
@@ -770,6 +777,13 @@ class AdminService {
         if (!cacheRefreshed) {
             logger.error(`Failed to refresh cache for hospital ${hospitalId} after rejection`);
         }
+
+        // Clear profile caches so /profile/me reflects the new status
+        const rejectedUserId = hospital.user._id.toString();
+        await Promise.allSettled([
+            cacheService.invalidateUserProfiles(rejectedUserId),
+            cacheService.invalidateProfileStatus(rejectedUserId)
+        ]);
 
         logger.info(`Hospital ${hospitalId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
 
@@ -974,8 +988,8 @@ class AdminService {
 
         if (!staff) throw new Error('Medical staff not found');
 
-        // Get documents with presigned URLs
-        const docRecord = await Document.findOne({ userId: staff._id }).lean();
+        // Documents are stored against the User's _id, not the MedicalStaff profile's _id
+        const docRecord = await Document.findOne({ userId: staff.user._id }).lean();
         const documents = [];
 
         if (docRecord?.documents) {
