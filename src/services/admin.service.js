@@ -15,7 +15,7 @@ const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDut
 const EmailService = require('./email.service');
 const CacheInvalidationService = require('./cacheInvalidation.service');
 const logger = require('../utils/logger');
-
+const cacheService = require('./cache.service');
 
 
 class AdminService {
