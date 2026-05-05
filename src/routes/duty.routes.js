@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const dutyController = require('../controllers/duty.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
+const { requireHospitalVerification } = require('../middleware/accountsVerification.middleware');
 const { 
     validateDutyStatusHistory, 
     validateDutyCreation,
@@ -22,11 +23,12 @@ router.use(protect);
 router.post(
     '/hospitals/:hospitalId/duties',
     authorize('hospital'),
+    requireHospitalVerification, 
     validateDutyCreation,
     dutyController.createDuty
 );
 
-router.get('/duties-published', authorize('hospital'), validatePagination, dutyController.getDuties);
+router.get('/duties-published', authorize('hospital'), requireHospitalVerification, validatePagination, dutyController.getDuties);
 
 router.get('/duties/available', authorize('staff'), dutyController.getAvailableJobsWithDistance);
 
@@ -59,6 +61,7 @@ router.get('/completed-duties', authorize('staff'), validatePagination, dutyCont
 router.patch(
     '/duties/:id',
     authorize('hospital'),
+    requireHospitalVerification,
     validateDutyEdit,
     dutyController.editDuty
 );
@@ -73,14 +76,15 @@ router.get(
 
 
 // Hospital active duties and route map endpoints
-router.get('/duties/active-duties', authorize('hospital'), validateHospitalActiveDutiesQuery, dutyController.getHospitalActiveDuties);
+router.get('/duties/active-duties', authorize('hospital'), requireHospitalVerification, validateHospitalActiveDutiesQuery, dutyController.getHospitalActiveDuties);
  
-router.get('/duties/duty-route-map/:dutyId', authorize('hospital'), validateHospitalDutyRouteMap, dutyController.getHospitalDutyRouteMap);
- 
+router.get('/duties/duty-route-map/:dutyId', authorize('hospital'), requireHospitalVerification, validateHospitalDutyRouteMap, dutyController.getHospitalDutyRouteMap);
+
 router.get('/duties/:id', validateObjectId('id'), dutyController.getDutyDetail);
 
 router.post('/duties/:id/route', authorize('staff'), dutyController.getDutyRoute);
 
-router.patch('/duties/:id/cancel', authorize('hospital'), validateDutyCancellation, dutyController.cancelDuty);
+router.patch('/duties/:id/cancel', authorize('hospital'), requireHospitalVerification, validateDutyCancellation, dutyController.cancelDuty);
+
 
 module.exports = router;

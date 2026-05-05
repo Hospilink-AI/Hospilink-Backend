@@ -15,6 +15,7 @@ const {
 } = require('../middleware/validation.middleware');
 const { staffAvailabilityRateLimit } = require('../middleware/rateLimit.middleware');
 const upload = require('../middleware/upload.middleware');
+const { requireHospitalVerification } = require('../middleware/accountsVerification.middleware');
 
 // Apply protection to all profile routes
 router.use(protect);
@@ -58,6 +59,7 @@ router.patch('/staff-availability',
 // Get nearby available staff for hospital map dashboard
 router.get('/nearby-staff',
     authorize('hospital'),
+    requireHospitalVerification, 
     validateNearbyStaff,
     profileController.getNearbyStaff
 );

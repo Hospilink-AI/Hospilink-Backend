@@ -174,15 +174,31 @@ const hospitalSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Index for faster queries - Update index for new format
-hospitalSchema.index({ user: 1 });
+
+// Index for faster queries
+hospitalSchema.index({ user: 1 }); 
 hospitalSchema.index({ 'coordinates.coordinates.longitude': 1 });
 hospitalSchema.index({ 'coordinates.coordinates.latitude': 1 });
 hospitalSchema.index({ servicesAvailable: 1 });
+
+// Compound index for verification status queries 
+hospitalSchema.index({ user: 1, verificationStatus: 1 });
+
+// Index for admin verification workflows
+hospitalSchema.index({ verificationStatus: 1, createdAt: -1 });
+
+// Index for rejection tracking
+hospitalSchema.index({ verificationStatus: 1, rejectionReason: 1 });
+
+// Index for cache invalidation queries
+hospitalSchema.index({ user: 1, verificationStatus: 1, rejectionReason: 1 });
+
+
 // For geospatial queries, we need to create a virtual field that returns array format
 hospitalSchema.virtual('coordinatesArray').get(function () {
     return [this.coordinates.coordinates.latitude, this.coordinates.coordinates.longitude];
 });
+
 hospitalSchema.index({ coordinatesArray: '2dsphere' });
 
 hospitalSchema.index({ user: 1, updatedAt: -1 }); // For recent updates

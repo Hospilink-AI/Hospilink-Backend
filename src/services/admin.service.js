@@ -12,6 +12,10 @@ const geocodingService = require('./geocoding.service');
 const locationTrackingService = require('./locationTracking.service');
 const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
+const EmailService = require('./email.service');
+const CacheInvalidationService = require('./cacheInvalidation.service');
+const logger = require('../utils/logger');
+
 
 
 class AdminService {
@@ -684,6 +688,8 @@ class AdminService {
         };
     }
 
+    
+
     // PATCH /api/admin/hospitals/:id/verify
     async verifyHospital(hospitalId) {
         const hospital = await Hospital.findById(hospitalId).populate('user', 'name email');
@@ -694,16 +700,41 @@ class AdminService {
             throw new Error('Hospital is already verified');
         }
 
+        const previousStatus = hospital.verificationStatus;
         hospital.verificationStatus = 'verified';
         hospital.rejectionReason = null; // clear reason if coming from rejected
         await hospital.save();
 
-        const EmailService = require('./email.service');
-        EmailService.sendHospitalVerifiedEmail(hospital.user.email, hospital.hospitalLegalName)
-            .catch(err => console.error('Verify email error:', err.message));
+        // Invalidate cache with retry mechanism
+        const cacheInvalidated = await CacheInvalidationService.invalidateHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheInvalidated) {
+            logger.error(`Failed to invalidate cache for hospital ${hospitalId} after verification`);
+            // Continue with email sending, but log the error
+        }
 
-        return { id: hospital._id, verificationStatus: hospital.verificationStatus };
+        // Refresh cache to ensure consistency
+        const cacheRefreshed = await CacheInvalidationService.refreshHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheRefreshed) {
+            logger.error(`Failed to refresh cache for hospital ${hospitalId} after verification`);
+        }
+
+        logger.info(`Hospital ${hospitalId} verified: ${previousStatus} → verified`);
+
+        EmailService.sendHospitalVerifiedEmail(hospital.user.email, hospital.hospitalLegalName)
+            .catch(err => logger.error('Verify email error:', err.message));
+
+        return { 
+            id: hospital._id, 
+            verificationStatus: hospital.verificationStatus,
+            previousStatus: previousStatus,
+            cacheInvalidated: cacheInvalidated,
+            cacheRefreshed: !!cacheRefreshed
+        };
     }
+
+
 
     // PATCH /api/admin/hospitals/:id/reject
     async rejectHospital(hospitalId, reason) {
@@ -721,16 +752,41 @@ class AdminService {
             throw new Error('Hospital is already rejected');
         }
 
+        const previousStatus = hospital.verificationStatus;
         hospital.verificationStatus = 'rejected';
         hospital.rejectionReason = reason;
         await hospital.save();
 
-        const EmailService = require('./email.service');
-        EmailService.sendHospitalRejectedEmail(hospital.user.email, hospital.hospitalLegalName, reason)
-            .catch(err => console.error('Reject email error:', err.message));
+        // IMMEDIATE: Invalidate cache with retry mechanism
+        const cacheInvalidated = await CacheInvalidationService.invalidateHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheInvalidated) {
+            logger.error(`Failed to invalidate cache for hospital ${hospitalId} after rejection`);
+        }
 
-        return { id: hospital._id, verificationStatus: hospital.verificationStatus, rejectionReason: hospital.rejectionReason };
+        // IMMEDIATE: Refresh cache to ensure consistency
+        const cacheRefreshed = await CacheInvalidationService.refreshHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheRefreshed) {
+            logger.error(`Failed to refresh cache for hospital ${hospitalId} after rejection`);
+        }
+
+        logger.info(`Hospital ${hospitalId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
+
+        EmailService.sendHospitalRejectedEmail(hospital.user.email, hospital.hospitalLegalName, reason)
+            .catch(err => logger.error('Reject email error:', err.message));
+
+        return { 
+            id: hospital._id, 
+            verificationStatus: hospital.verificationStatus, 
+            rejectionReason: hospital.rejectionReason,
+            previousStatus: previousStatus,
+            cacheInvalidated: cacheInvalidated,
+            cacheRefreshed: !!cacheRefreshed
+        };
     }
+
+
 
     // GET /api/admin/medical-staff/stats — dashboard stats for medical staff management
     async getMedicalStaffStats() {
