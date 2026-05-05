@@ -15,7 +15,7 @@ const {
 } = require('../middleware/validation.middleware');
 const { staffAvailabilityRateLimit } = require('../middleware/rateLimit.middleware');
 const upload = require('../middleware/upload.middleware');
-const { requireHospitalVerification } = require('../middleware/accountsVerification.middleware');
+const { requireHospitalVerification, requireStaffVerificationandisAvailable, requireVerifiedStaffOnly} = require('../middleware/accountsVerification.middleware');
 
 // Apply protection to all profile routes
 router.use(protect);
@@ -51,6 +51,7 @@ router.get('/services', profileController.getAvailableServices);
 router.patch('/staff-availability',
     staffAvailabilityRateLimit,
     authorize('staff'),
+    requireVerifiedStaffOnly, 
     validateStaffAvailability,
     profileController.toggleMedicalStaffAvailability
 );

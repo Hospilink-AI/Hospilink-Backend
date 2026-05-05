@@ -156,7 +156,7 @@ const medicalStaffSchema = new mongoose.Schema({
     },
     isAvailable: {
         type: Boolean,
-        default: true,
+        default: false,
         index: true
     },
     averageRating: {
@@ -208,7 +208,6 @@ medicalStaffSchema.index({
     'coordinates.coordinates.longitude': 1      // filter longitude range
 }); // For location-based duty notifications
 
-
 // compound indexes for availability and updates
 medicalStaffSchema.index({
     user: 1,
@@ -234,7 +233,6 @@ medicalStaffSchema.index({ coordinatesArray: '2dsphere' });
 medicalStaffSchema.index({ skills: 1 });
 medicalStaffSchema.index({ 'education.speciality': 1 });
 
-
 // Enhanced indexes for staff details optimization
 medicalStaffSchema.index({
     verificationStatus: 1,
@@ -253,6 +251,25 @@ medicalStaffSchema.index({
     'updatedAt': -1
 }); // For recent updates
 
+// Compound indexes for verification status queries 
+medicalStaffSchema.index({ user: 1, verificationStatus: 1 });
+
+// Index for admin verification workflows 
+medicalStaffSchema.index({ verificationStatus: 1, createdAt: -1 });
+
+// Index for rejection tracking 
+medicalStaffSchema.index({ verificationStatus: 1, rejectionReason: 1 });
+
+// Index for cache invalidation queries 
+medicalStaffSchema.index({ user: 1, verificationStatus: 1, rejectionReason: 1 });
+
+// Compound index for availability + verification 
+medicalStaffSchema.index({ 
+    isAvailable: 1, 
+    verificationStatus: 1, 
+    'coordinates.coordinates.latitude': 1, 
+    'coordinates.coordinates.longitude': 1 
+}); // For verified staff location queries
 
 const MedicalStaff = mongoose.model('MedicalStaff', medicalStaffSchema);
 

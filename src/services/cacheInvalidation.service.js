@@ -1,5 +1,6 @@
 const cacheService = require('./cache.service');
 const Hospital = require('../models/Hospital');
+const MedicalStaff = require('../models/MedicalStaff');
 const logger = require('../utils/logger');
 
 class CacheInvalidationService {
@@ -133,6 +134,112 @@ class CacheInvalidationService {
             logger.error(`Error getting cache info for user ${userId}:`, error);
             return null;
         }
+    }
+
+
+
+    // Staff verification cache methods 
+    // Invalidates the cache for a specific staff member
+    static async invalidateStaffVerificationCache(userId, maxRetries = 3) {
+        const cacheKey = `staff_verification:${userId}`;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                // Attempt to delete cache
+                await cacheService.del(cacheKey);
+                
+                // Verify cache is actually deleted
+                const cachedValue = await cacheService.get(cacheKey);
+                if (!cachedValue) {
+                    logger.info(`Staff cache invalidated successfully for user ${userId} (attempt ${attempt})`);
+                    return true;
+                }
+                
+                logger.warn(`Staff cache invalidation failed for user ${userId} (attempt ${attempt})`);
+                
+                if (attempt < maxRetries) {
+                    // Exponential backoff: 100ms, 200ms, 400ms
+                    const delay = 100 * Math.pow(2, attempt - 1);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+                
+            } catch (error) {
+                logger.error(`Staff cache invalidation error for user ${userId} (attempt ${attempt}):`, error);
+                
+                if (attempt < maxRetries) {
+                    const delay = 100 * Math.pow(2, attempt - 1);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+        
+        logger.error(`Staff cache invalidation failed after ${maxRetries} attempts for user ${userId}`);
+        return false;
+    }
+
+
+    // Refreshes the cache for a specific staff member
+    static async refreshStaffVerificationCache(userId) {
+        const cacheKey = `staff_verification:${userId}`;
+        
+        try {
+            // Delete existing cache first
+            await this.invalidateStaffVerificationCache(userId);
+            
+            // Fetch fresh data from database
+            const staff = await MedicalStaff.findOne({ user: userId })
+                .select('verificationStatus rejectionReason')
+                .lean();
+                
+            if (staff) {
+                const freshData = {
+                    status: staff.verificationStatus,
+                    rejectionReason: staff.rejectionReason
+                };
+                
+                // Set fresh cache with 5-minute TTL
+                await cacheService.set(cacheKey, freshData, 300);
+                logger.info(`Staff cache refreshed successfully for user ${userId}`);
+                return freshData;
+            } else {
+                logger.warn(`Staff not found for user ${userId} during cache refresh`);
+                return null;
+            }
+        } catch (error) {
+            logger.error(`Staff cache refresh error for user ${userId}:`, error);
+            return null;
+        }
+    }
+
+
+    // Batch staff cache invalidation 
+    static async batchInvalidateStaffCache(userIds) {
+        const results = {
+            success: 0,
+            failed: 0,
+            errors: []
+        };
+        
+        // Process in parallel for better performance
+        const promises = userIds.map(async (userId) => {
+            try {
+                const success = await this.invalidateStaffVerificationCache(userId);
+                if (success) {
+                    results.success++;
+                } else {
+                    results.failed++;
+                    results.errors.push(`Failed to invalidate cache for user ${userId}`);
+                }
+            } catch (error) {
+                results.failed++;
+                results.errors.push(`Error invalidating cache for user ${userId}: ${error.message}`);
+            }
+        });
+        
+        await Promise.all(promises);
+        
+        logger.info(`Batch staff cache invalidation completed: ${results.success} success, ${results.failed} failed`);
+        return results;
     }
 }
 
