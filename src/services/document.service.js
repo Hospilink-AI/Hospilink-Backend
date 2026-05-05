@@ -80,7 +80,12 @@ const syncDocumentsUploadedFlag = async (userId, userRole) => {
         const config = requiredDocsConfig[userRole];
         if (!config) return;
 
-        const docRecord = await Document.findOne({ userId }).select('documents').lean();
+        const mongoose = require('mongoose');
+        const userObjectId = typeof userId === 'string'
+            ? new mongoose.Types.ObjectId(userId)
+            : userId;
+
+        const docRecord = await Document.findOne({ userId: userObjectId }).select('documents').lean();
         const uploadedTypes = (docRecord?.documents || [])
             .filter(d => !d.isDeleted)
             .map(d => d.documentType);
@@ -94,10 +99,12 @@ const syncDocumentsUploadedFlag = async (userId, userRole) => {
         const isDocumentsUploaded = allRequiredPresent && allConditionalPresent;
 
         if (userRole === 'staff') {
-            await MedicalStaff.updateOne({ user: userId }, { isDocumentsUploaded });
+            await MedicalStaff.updateOne({ user: userObjectId }, { isDocumentsUploaded });
         } else if (userRole === 'hospital') {
-            await Hospital.updateOne({ user: userId }, { isDocumentsUploaded });
+            await Hospital.updateOne({ user: userObjectId }, { isDocumentsUploaded });
         }
+
+        console.log(`[syncDocumentsUploadedFlag] userId=${userId} role=${userRole} uploaded=${uploadedTypes} flag=${isDocumentsUploaded}`);
     } catch (err) {
         console.error('syncDocumentsUploadedFlag error:', err.message);
     }
