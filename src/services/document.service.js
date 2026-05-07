@@ -5,6 +5,8 @@ const { extractTextFromBuffer } = require("./ocr.service");
 const { paginateArray } = require("../utils/pagination");
 const notificationEmitter = require('./notificationEmitter');
 const idfyService = require("./idfy.service");
+const ncismService = require("./ncism.service");
+const detectSystem = require("../utils/systemDetector");
 
 const getAllowedDocs = (role) => {
     const config = requiredDocsConfig[role];
@@ -259,9 +261,9 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 verificationStatus = "pending";
 
                 try {
-                    const referenceId = crypto.randomUUID(); // ✅ ADD THIS
+                    const referenceId = crypto.randomUUID(); 
 
-                    const idfyResponse = await idfyService.verifyAadhaarDigilocker(referenceId); // ✅ PASS IT
+                    const idfyResponse = await idfyService.verifyAadhaarDigilocker(referenceId); 
 
                     if (idfyResponse && idfyResponse.request_id) {
 
@@ -271,7 +273,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         verificationMeta = {
                             provider: "idfy-digilocker",
                             requestId: idfyResponse.request_id,
-                            referenceId: referenceId, // ✅ NOW CORRECT
+                            referenceId: referenceId, 
                             status: "initiated",
                             type: "aadhaar-card",
                             createdAt: new Date()
@@ -291,79 +293,171 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 fetchQRUrlData
             } = require("./qr.service");
 
-            const parseMCIMHtml = require("./parsers/mcimHtml.parser");
-            const { compareCertificateData } = require("../utils/compare");
+            if (
+                documentType === "mcim-certificate" ||
+                documentType === "ncim-certificate"
+            ) {
+                const parseMCIMHtml = require("./parsers/mcimHtml.parser");
+                const parseNCIMHtml = require("./parsers/ncimHtml.parser");
+                const { compareCertificateData } = require("../utils/compare");
 
-            let qrRaw = null;
-            let qrType = null;
+                let qrRaw = null;
+                let qrType = null;
+                let qrMatched = false;
 
-            try {
-                qrRaw = await extractQRFromBuffer(file.buffer);
-                qrType = detectQRType(qrRaw);
+                try {
+                    qrRaw = await extractQRFromBuffer(file.buffer);
+                    qrType = detectQRType(qrRaw);
 
-                console.log("QR RAW:", qrRaw);
-                console.log("QR TYPE:", qrType);
+                    console.log("QR RAW:", qrRaw);
+                    console.log("QR TYPE:", qrType);
 
-                // URL QR
-                if (verificationStatus !== "auto-verified" && qrType === "url") {
+                    // URL QR
+                    if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "url") {
 
-                    const html = await fetchQRUrlData(qrRaw);
+                        const html = await fetchQRUrlData(qrRaw);
 
-                    if (html) {
-                        const qrData = parseMCIMHtml(html);
+                        if (html) {
+                            let qrData = {};
 
-                        const normalizedOCR = {
-                            name: extractedData.doctorName,
-                            registrationNumber: extractedData.registrationNumber
-                        };
+                            if (documentType === "mcim-certificate") {
+                                qrData = parseMCIMHtml(html);
+                            }
 
-                        const result = compareCertificateData(normalizedOCR, qrData);
+                            if (documentType === "ncim-certificate") {
+                                qrData = parseNCIMHtml(html);
+                            }
 
-                        if (result === "match" || result === "partial") {
-                            verificationStatus = "auto-verified";
+                            const normalizedOCR = {
+                                name: extractedData.doctorName,
+                                registrationNumber: extractedData.registrationNumber
+                            };
+
+                            const result = compareCertificateData(normalizedOCR, qrData);
+
+                            if (result === "match" || result === "partial") {
+                                verificationStatus = "auto-verified";
+                                qrMatched = true;
+                            } else {
+                                verificationStatus = "manual-pending-verification";
+                            }
                         } else {
                             verificationStatus = "manual-pending-verification";
                         }
-                    } else {
-                        verificationStatus = "manual-pending-verification";
                     }
-                }
-                // BASE64 QR
-                else if (verificationStatus !== "auto-verified" && qrType === "base64") {
+                    // BASE64 QR
+                    else if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "base64") {
 
-                    const decoded = decodeBase64QR(qrRaw);
-                    console.log("DECODED QR:", decoded);
+                        const decoded = decodeBase64QR(qrRaw);
+                        console.log("DECODED QR:", decoded);
 
-                    let ocrReg = extractedData.registrationNumber;
+                        let ocrReg = extractedData.registrationNumber;
 
-                    // simple fallback
-                    if (!ocrReg && decoded) {
-                        ocrReg = decoded;
-                    }
+                        // simple fallback
+                        if (!ocrReg && decoded) {
+                            ocrReg = decoded;
+                        }
 
-                    if (decoded && ocrReg) {
-                        const ocrNumber = ocrReg.toString().replace(/\D/g, "");
+                        if (decoded && ocrReg) {
+                            const ocrNumber = ocrReg.toString().replace(/\D/g, "");
 
-                        if (ocrNumber.endsWith(decoded)) {
-                            verificationStatus = "auto-verified";
-                        } else {
+                            if (ocrNumber.endsWith(decoded)) {
+                                verificationStatus = "auto-verified";
+                                qrMatched = true;
+                            } else {
+                                verificationStatus = "manual-pending-verification";
+                            }
+                            extractedData.registrationNumber = ocrNumber;
+                        } else if (verificationStatus !== "auto-verified") {
                             verificationStatus = "manual-pending-verification";
                         }
-                        extractedData.registrationNumber = ocrNumber;
-                    } else if (verificationStatus !== "auto-verified") {
+                    }
+                    // NO QR → DO NOT OVERRIDE IF ALREADY VERIFIED
+                    else if (
+                        verificationStatus !== "auto-verified" &&
+                        documentType !== "aadhaar-card"
+                    ) {
                         verificationStatus = "manual-pending-verification";
                     }
-                }
-                // NO QR → DO NOT OVERRIDE IF ALREADY VERIFIED
-                else if (
-                    verificationStatus !== "auto-verified" &&
-                    documentType !== "aadhaar-card"
-                ) {
+                } catch (err) {
+                    console.error("QR verification error:", err);
                     verificationStatus = "manual-pending-verification";
                 }
-            } catch (err) {
-                console.error("QR verification error:", err);
-                verificationStatus = "manual-pending-verification";
+                if (
+                    !qrMatched &&
+                    (
+                        documentType === "mcim-certificate" ||
+                        documentType === "ncim-certificate"
+                    )
+                ) {
+
+                    const verificationAgent = require("./verificationAgent.service");
+
+                    const system = detectSystem({
+                        reg: extractedData.registrationNumber,
+                        qualification: extractedData.qualification
+                    });
+
+                    console.log("DETECTED SYSTEM:", system);
+
+                    //AYURVED / UNANI 
+                    if (system === "AYURVED" || system === "UNANI") {
+
+                        try {
+
+                            const result = await ncismService.verify(
+                                extractedData.registrationNumber,
+                                extractedData.doctorName
+                            );
+
+                            verificationStatus = result.status;
+
+                            verificationMeta = {
+                                provider: result.source,
+                                verifiedAt: new Date()
+                            };
+
+                        } catch (err) {
+
+                            verificationStatus = "manual-pending-verification";
+                        }
+                    }
+
+                    // NMC / DCI / MNC / PHARMACIST 
+                    else if (
+                        ["NMC", "DCI", "MNC", "PHARMACIST"].includes(system)
+                    ) {
+
+                        try {
+
+                            const result = await verificationAgent.verifyDoctor({
+                                registrationNumber: extractedData.registrationNumber,
+                                doctorName: extractedData.doctorName,
+                                qualification: extractedData.qualification
+                            });
+
+                            verificationStatus = result.status;
+
+                            verificationMeta = {
+                                provider: result.source || system,
+                                reason: result.reason,
+                                verifiedAt: new Date()
+                            };
+
+                        } catch (err) {
+
+                            console.error("AGENT ERROR:", err);
+
+                            verificationStatus = "manual-pending-verification";
+                        }
+                    }
+
+                    // UNKNOWN 
+                    else {
+
+                        verificationStatus = "manual-pending-verification";
+                    }
+                }
             }
 
             // auto verification 
