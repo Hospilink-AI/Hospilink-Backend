@@ -617,6 +617,8 @@ class EmailService {
             return false;
         }
     }
+
+    
     async sendHospitalVerifiedEmail(email, hospitalName) {
         try {
             const mailOptions = {

@@ -256,7 +256,17 @@ class AuthService {
         ]);
 
         logger.info(`User signed in: ${user.email}`);
-        
+
+        // Fetch onboarding step for immediate redirect — non-blocking parallel query
+        let onboardingStep = 'complete';
+        try {
+            if (user.role === 'staff' || user.role === 'hospital') {
+                const ProfileService = require('./profile.service');
+                const status = await ProfileService.checkProfileCompletion(user._id.toString());
+                onboardingStep = status.onboardingStep;
+            }
+        } catch (_) {}
+
         return {
             message: 'Sign in successful',
             token,
@@ -266,7 +276,8 @@ class AuthService {
                 email: user.email,
                 role: user.role,
                 isEmailVerified: user.isEmailVerified
-            }
+            },
+            onboardingStep
         };
     }
 

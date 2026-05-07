@@ -46,7 +46,8 @@ exports.protect = asyncHandler(async (req, res, next) => {
             _id: user._id,
             id: user._id,
             email: user.email,
-            role: user.role
+            role: user.role,
+            name: user.name
         }, 86400);
         
         req.user = user;

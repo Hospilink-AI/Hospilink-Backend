@@ -25,11 +25,43 @@ const medicalStaffSchema = new mongoose.Schema({
         trim: true,
         maxlength: [100, 'City cannot exceed 100 characters']
     },
-    area: {
+    currentAddress: {
         type: String,
-        required: [true, 'Area is required'],
+        required: [true, 'Current address is required'],
         trim: true,
-        maxlength: [100, 'Area cannot exceed 100 characters']
+        maxlength: [300, 'Current address cannot exceed 300 characters']
+    },
+    state: {
+        type: String,
+        required: [true, 'State is required'],
+        trim: true,
+        enum: {
+            values: ['Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry'],
+            message: 'Invalid state. Must be a valid Indian state'
+        }
+    },
+    pincode: {
+        type: String,
+        required: [true, 'Pincode is required'],
+        trim: true,
+        validate: {
+            validator: function(v) {
+                return /^[1-9][0-9]{5}$/.test(v);
+            },
+            message: 'Pincode must be a valid 6-digit Indian postal code'
+        }
+    },
+    email: {
+        type: String,
+        required: [true, 'Email is required'],
+        trim: true,
+        lowercase: true,
+        validate: {
+            validator: function(v) {
+                return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+            },
+            message: 'Please provide a valid email address'
+        }
     },
     profilePicture: {
         s3Key: {
@@ -117,9 +149,14 @@ const medicalStaffSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    isDocumentsUploaded: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
     isAvailable: {
         type: Boolean,
-        default: true,
+        default: false,
         index: true
     },
     averageRating: {
@@ -155,20 +192,21 @@ const medicalStaffSchema = new mongoose.Schema({
 // Basic indexes
 medicalStaffSchema.index({ user: 1 });
 medicalStaffSchema.index({ city: 1 });
-medicalStaffSchema.index({ area: 1 });
+medicalStaffSchema.index({ state: 1 });
+medicalStaffSchema.index({ currentAddress: 1 });
 medicalStaffSchema.index({ jobRole: 1 });
 
 // Individual coordinate indexes (for bounding box queries)
 medicalStaffSchema.index({ 'coordinates.coordinates.longitude': 1 });
 medicalStaffSchema.index({ 'coordinates.coordinates.latitude': 1 });
 
-// COMPOUND INDEX for optimal nearby staff queries
+// COMPOUND INDEX for role + location + availability queries
 medicalStaffSchema.index({
     isAvailable: 1,         // filter only available staff
+    jobRole: 1,             // filter by job role
     'coordinates.coordinates.latitude': 1,      // filter latitude range
     'coordinates.coordinates.longitude': 1      // filter longitude range
-});
-
+}); // For location-based duty notifications
 
 // compound indexes for availability and updates
 medicalStaffSchema.index({
@@ -195,7 +233,6 @@ medicalStaffSchema.index({ coordinatesArray: '2dsphere' });
 medicalStaffSchema.index({ skills: 1 });
 medicalStaffSchema.index({ 'education.speciality': 1 });
 
-
 // Enhanced indexes for staff details optimization
 medicalStaffSchema.index({
     verificationStatus: 1,
@@ -214,6 +251,25 @@ medicalStaffSchema.index({
     'updatedAt': -1
 }); // For recent updates
 
+// Compound indexes for verification status queries 
+medicalStaffSchema.index({ user: 1, verificationStatus: 1 });
+
+// Index for admin verification workflows 
+medicalStaffSchema.index({ verificationStatus: 1, createdAt: -1 });
+
+// Index for rejection tracking 
+medicalStaffSchema.index({ verificationStatus: 1, rejectionReason: 1 });
+
+// Index for cache invalidation queries 
+medicalStaffSchema.index({ user: 1, verificationStatus: 1, rejectionReason: 1 });
+
+// Compound index for availability + verification 
+medicalStaffSchema.index({ 
+    isAvailable: 1, 
+    verificationStatus: 1, 
+    'coordinates.coordinates.latitude': 1, 
+    'coordinates.coordinates.longitude': 1 
+}); // For verified staff location queries
 
 const MedicalStaff = mongoose.model('MedicalStaff', medicalStaffSchema);
 

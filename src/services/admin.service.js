@@ -12,6 +12,11 @@ const geocodingService = require('./geocoding.service');
 const locationTrackingService = require('./locationTracking.service');
 const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
+const EmailService = require('./email.service');
+const CacheInvalidationService = require('./cacheInvalidation.service');
+const cacheService = require('./cache.service');
+const logger = require('../utils/logger');
+
 
 
 class AdminService {
@@ -428,7 +433,7 @@ class AdminService {
 
             const nearbyStaff = await MedicalStaff.find(query)
                 .populate('user', 'name email')
-                .select('fullName jobRole city area phoneNumber coordinates isAvailable averageRating user');
+                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating user');
 
             console.log('Found', nearbyStaff.length, 'candidates via bounding box');
 
@@ -459,7 +464,13 @@ class AdminService {
                         return {
                             _id: staffMember._id,
                             staffName: staffMember.fullName,
-                            location: `${staffMember.area}, ${staffMember.city}`,
+                            location: staffMember.currentAddress ? 
+                                `${staffMember.currentAddress}, ${staffMember.city}, ${staffMember.state} - ${staffMember.pincode}` : 
+                                `${staffMember.city}, ${staffMember.state} - ${staffMember.pincode}`,
+                            currentAddress: staffMember.currentAddress,
+                            city: staffMember.city,
+                            state: staffMember.state,
+                            pincode: staffMember.pincode,
                             role: staffMember.jobRole,
                             mobileNumber: staffMember.phoneNumber,
                             email: staffMember.user?.email || null,
@@ -519,14 +530,14 @@ class AdminService {
         }
 
         const hospitals = await Hospital.find(match)
-            .select('_id hospitalLegalName location')
+            .select('_id hospitalLegalName currentAddress city state pincode')
             .sort({ hospitalLegalName: 1 })
             .lean();
 
         return hospitals.map(h => ({
             id: h._id,
             name: h.hospitalLegalName,
-            location: h.location
+            location: `${h.currentAddress}, ${h.city}, ${h.state}, ${h.pincode}`
         }));
     }
 
@@ -537,7 +548,7 @@ class AdminService {
         // Build match stage
         const match = {};
         if (status) match.verificationStatus = status;
-        if (city) match.location = { $regex: city.trim(), $options: 'i' };
+        if (city) match.city = { $regex: city.trim(), $options: 'i' };
         if (search) {
             const re = { $regex: search.trim(), $options: 'i' };
             match.$or = [{ hospitalLegalName: re }];
@@ -568,7 +579,7 @@ class AdminService {
             {
                 $lookup: {
                     from: 'documents',
-                    localField: '_id',
+                    localField: 'user',
                     foreignField: 'userId',
                     as: 'docRecord'
                 }
@@ -582,8 +593,10 @@ class AdminService {
                             $project: {
                                 _id: 1,
                                 hospitalLegalName: 1,
-                                location: 1,
                                 currentAddress: 1,
+                                city: 1,
+                                state: 1,
+                                pincode: 1,
                                 staffCount: 1,
                                 verificationStatus: '$verificationStatus',
                                 rejectionReason: '$rejectionReason',
@@ -621,13 +634,14 @@ class AdminService {
     // GET /api/admin/hospitals/:id — preview modal
     async getHospitalDetail(hospitalId) {
         const hospital = await Hospital.findById(hospitalId)
+            .select('hospitalLegalName currentAddress city state pincode staffCount servicesAvailable isProfileComplete verificationStatus coordinates createdAt')
             .populate('user', 'name email createdAt')
             .lean();
 
         if (!hospital) throw new Error('Hospital not found');
 
-        // Get documents with presigned URLs
-        const docRecord = await Document.findOne({ userId: hospital._id }).lean();
+        // Documents are stored against the User's _id, not the Hospital profile's _id
+        const docRecord = await Document.findOne({ userId: hospital.user._id }).lean();
         const documents = [];
 
         if (docRecord?.documents) {
@@ -653,7 +667,9 @@ class AdminService {
             id: hospital._id,
             hospitalLegalName: hospital.hospitalLegalName,
             currentAddress: hospital.currentAddress,
-            location: hospital.location,
+            city: hospital.city,
+            state: hospital.state,
+            pincode: hospital.pincode,
             staffCount: hospital.staffCount,
             servicesAvailable: hospital.servicesAvailable,
             verificationStatus: hospital.verificationStatus,
@@ -673,6 +689,8 @@ class AdminService {
         };
     }
 
+    
+
     // PATCH /api/admin/hospitals/:id/verify
     async verifyHospital(hospitalId) {
         const hospital = await Hospital.findById(hospitalId).populate('user', 'name email');
@@ -683,16 +701,47 @@ class AdminService {
             throw new Error('Hospital is already verified');
         }
 
+        const previousStatus = hospital.verificationStatus;
         hospital.verificationStatus = 'verified';
         hospital.rejectionReason = null; // clear reason if coming from rejected
         await hospital.save();
 
-        const EmailService = require('./email.service');
-        EmailService.sendHospitalVerifiedEmail(hospital.user.email, hospital.hospitalLegalName)
-            .catch(err => console.error('Verify email error:', err.message));
+        // Invalidate cache with retry mechanism
+        const cacheInvalidated = await CacheInvalidationService.invalidateHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheInvalidated) {
+            logger.error(`Failed to invalidate cache for hospital ${hospitalId} after verification`);
+        }
 
-        return { id: hospital._id, verificationStatus: hospital.verificationStatus };
+        // Refresh cache to ensure consistency
+        const cacheRefreshed = await CacheInvalidationService.refreshHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheRefreshed) {
+            logger.error(`Failed to refresh cache for hospital ${hospitalId} after verification`);
+        }
+
+        // Also clear profile and profile-status caches so /profile/me reflects the new status
+        const userId = hospital.user._id.toString();
+        await Promise.allSettled([
+            cacheService.invalidateUserProfiles(userId),
+            cacheService.invalidateProfileStatus(userId)
+        ]);
+
+        logger.info(`Hospital ${hospitalId} verified: ${previousStatus} → verified`);
+
+        EmailService.sendHospitalVerifiedEmail(hospital.user.email, hospital.hospitalLegalName)
+            .catch(err => logger.error('Verify email error:', err.message));
+
+        return { 
+            id: hospital._id, 
+            verificationStatus: hospital.verificationStatus,
+            previousStatus: previousStatus,
+            cacheInvalidated: cacheInvalidated,
+            cacheRefreshed: !!cacheRefreshed
+        };
     }
+
+
 
     // PATCH /api/admin/hospitals/:id/reject
     async rejectHospital(hospitalId, reason) {
@@ -710,16 +759,48 @@ class AdminService {
             throw new Error('Hospital is already rejected');
         }
 
+        const previousStatus = hospital.verificationStatus;
         hospital.verificationStatus = 'rejected';
         hospital.rejectionReason = reason;
         await hospital.save();
 
-        const EmailService = require('./email.service');
-        EmailService.sendHospitalRejectedEmail(hospital.user.email, hospital.hospitalLegalName, reason)
-            .catch(err => console.error('Reject email error:', err.message));
+        // IMMEDIATE: Invalidate cache with retry mechanism
+        const cacheInvalidated = await CacheInvalidationService.invalidateHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheInvalidated) {
+            logger.error(`Failed to invalidate cache for hospital ${hospitalId} after rejection`);
+        }
 
-        return { id: hospital._id, verificationStatus: hospital.verificationStatus, rejectionReason: hospital.rejectionReason };
+        // IMMEDIATE: Refresh cache to ensure consistency
+        const cacheRefreshed = await CacheInvalidationService.refreshHospitalVerificationCache(hospital.user._id);
+        
+        if (!cacheRefreshed) {
+            logger.error(`Failed to refresh cache for hospital ${hospitalId} after rejection`);
+        }
+
+        // Clear profile caches so /profile/me reflects the new status
+        const rejectedUserId = hospital.user._id.toString();
+        await Promise.allSettled([
+            cacheService.invalidateUserProfiles(rejectedUserId),
+            cacheService.invalidateProfileStatus(rejectedUserId)
+        ]);
+
+        logger.info(`Hospital ${hospitalId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
+
+        EmailService.sendHospitalRejectedEmail(hospital.user.email, hospital.hospitalLegalName, reason)
+            .catch(err => logger.error('Reject email error:', err.message));
+
+        return { 
+            id: hospital._id, 
+            verificationStatus: hospital.verificationStatus, 
+            rejectionReason: hospital.rejectionReason,
+            previousStatus: previousStatus,
+            cacheInvalidated: cacheInvalidated,
+            cacheRefreshed: !!cacheRefreshed
+        };
     }
+
+
 
     // GET /api/admin/medical-staff/stats — dashboard stats for medical staff management
     async getMedicalStaffStats() {
@@ -873,7 +954,10 @@ class AdminService {
                                 staffId: '$_id',
                                 fullName: 1,
                                 jobRole: 1,
-                                location: { $concat: ['$area', ', ', '$city'] },
+                                currentAddress: '$currentAddress',
+                                city: '$city', 
+                                state: '$state',
+                                pincode: '$pincode',
                                 email: '$userInfo.email',
                                 phoneNumber: 1,
                                 completedDuties: { $ifNull: [{ $arrayElemAt: ['$completedDuties.count', 0] }, 0] },
@@ -904,8 +988,8 @@ class AdminService {
 
         if (!staff) throw new Error('Medical staff not found');
 
-        // Get documents with presigned URLs
-        const docRecord = await Document.findOne({ userId: staff._id }).lean();
+        // Documents are stored against the User's _id, not the MedicalStaff profile's _id
+        const docRecord = await Document.findOne({ userId: staff.user._id }).lean();
         const documents = [];
 
         if (docRecord?.documents) {
@@ -939,9 +1023,13 @@ class AdminService {
             userId: staff.user?._id,
             fullName: staff.fullName,
             jobRole: staff.jobRole,
-            location: `${staff.area}, ${staff.city}`,
+            currentAddress: staff.currentAddress,
             city: staff.city,
-            area: staff.area,
+            state: staff.state,
+            pincode: staff.pincode,
+            location: staff.currentAddress ? 
+                `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : 
+                `${staff.city}, ${staff.state} - ${staff.pincode}`,
             phoneNumber: staff.phoneNumber,
             email: staff.user?.email,
             profileSummary: staff.profileSummary,
@@ -969,36 +1057,62 @@ class AdminService {
         const staff = await MedicalStaff.findById(staffId).populate('user', 'name email');
         if (!staff) throw new Error('Medical staff not found');
 
-        // Check current status
+        // Allow: pending → verified, rejected → verified
         if (staff.verificationStatus === 'verified') {
             throw new Error('Medical staff is already verified');
         }
 
-        // Update account verification status
+        const previousStatus = staff.verificationStatus;
         staff.verificationStatus = 'verified';
-        staff.rejectionReason = null; // clear any previous rejection reason
+        staff.rejectionReason = null; // clear reason if coming from rejected
+        staff.isAvailable = true; // Auto-enable availability when verified
         await staff.save();
 
-        // Send email notification
-        const EmailService = require('./email.service');
+        // Invalidate availability cache after enabling
+        await cacheService.del(`staff_availability:${staff.user._id}`);
+
+        // IMMEDIATE: Invalidate cache with retry mechanism
+        const cacheInvalidated = await CacheInvalidationService.invalidateStaffVerificationCache(staff.user._id);
+
+        if (!cacheInvalidated) {
+            logger.error(`Failed to invalidate cache for staff ${staffId} after verification`);
+        }
+
+        // IMMEDIATE: Refresh cache to ensure consistency
+        const cacheRefreshed = await CacheInvalidationService.refreshStaffVerificationCache(staff.user._id);
+
+        if (!cacheRefreshed) {
+            logger.error(`Failed to refresh cache for staff ${staffId} after verification`);
+        }
+
+        // NEW: Invalidate availability cache after enabling
+        await cacheService.del(`staff_availability:${staff.user._id}`);
+
+        logger.info(`Medical staff ${staffId} verified: ${previousStatus} → verified`);
+
         EmailService.sendMedicalStaffVerifiedEmail(staff.user.email, staff.fullName)
-            .catch(err => console.error('Verify email error:', err.message));
+            .catch(err => logger.error('Verify email error:', err.message));
 
         return { 
             id: staff._id, 
             verificationStatus: staff.verificationStatus,
-            message: 'Medical staff account verified successfully'
+            previousStatus: previousStatus,
+            isAvailable: staff.isAvailable, 
+            message: staff.isAvailable ? 'Staff verified and availability enabled' : 'Staff verified',
+            cacheInvalidated: cacheInvalidated,
+            cacheRefreshed: !!cacheRefreshed
         };
     }
 
     // PATCH /api/admin/medical-staff/:staffId/reject — reject medical staff account
     async rejectMedicalStaff(staffId, reason) {
         if (!reason) throw new Error('Rejection reason is required');
-
+        
         const staff = await MedicalStaff.findById(staffId).populate('user', 'name email');
         if (!staff) throw new Error('Medical staff not found');
 
-        // State machine: pending → rejected only (verified cannot be rejected)
+        // Allow: pending → rejected only
+        // verified → rejected is NOT allowed
         if (staff.verificationStatus === 'verified') {
             throw new Error('Verified medical staff cannot be rejected. Verification is final.');
         }
@@ -1006,24 +1120,41 @@ class AdminService {
             throw new Error('Medical staff is already rejected');
         }
 
-        // Update account verification status
+        const previousStatus = staff.verificationStatus;
         staff.verificationStatus = 'rejected';
         staff.rejectionReason = reason;
         await staff.save();
 
-        // Send email notification
-        const EmailService = require('./email.service');
+        // IMMEDIATE: Invalidate cache with retry mechanism
+        const cacheInvalidated = await CacheInvalidationService.invalidateStaffVerificationCache(staff.user._id);
+        
+        if (!cacheInvalidated) {
+            logger.error(`Failed to invalidate cache for staff ${staffId} after rejection`);
+        }
+
+        // IMMEDIATE: Refresh cache to ensure consistency
+        const cacheRefreshed = await CacheInvalidationService.refreshStaffVerificationCache(staff.user._id);
+        
+        if (!cacheRefreshed) {
+            logger.error(`Failed to refresh cache for staff ${staffId} after rejection`);
+        }
+
+        logger.info(`Medical staff ${staffId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
+
         EmailService.sendMedicalStaffRejectedEmail(staff.user.email, staff.fullName, reason)
-            .catch(err => console.error('Reject email error:', err.message));
+            .catch(err => logger.error('Reject email error:', err.message));
 
         return { 
             id: staff._id, 
-            verificationStatus: staff.verificationStatus,
+            verificationStatus: staff.verificationStatus, 
             rejectionReason: staff.rejectionReason,
-            message: 'Medical staff account rejected'
+            previousStatus: previousStatus,
+            cacheInvalidated: cacheInvalidated,
+            cacheRefreshed: !!cacheRefreshed
         };
     }
 
+    
     // GET /api/admin/documents — paginated list of all documents across all users
     async getAllDocuments({ status, userRole, page = 1, limit = 10, sortBy = 'uploadedAt', sortOrder = 'desc' }) {
         const { skip } = getPaginationParams(page, limit);
@@ -1230,7 +1361,7 @@ class AdminService {
                 }
             }
 
-            // Get total count for pagination
+            // Get total count for pagination (before filtering)
             const totalDuties = await Duty.countDocuments(query);
 
             // Calculate pagination parameters
@@ -1240,19 +1371,22 @@ class AdminService {
             const duties = await Duty.find(query)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates',
+                    select: 'fullName user coordinates currentAddress city state pincode email',
                     populate: {
                         path: 'user',
                         select: 'name email'
                     }
                 })
-                .populate('hospital', 'hospitalLegalName location coordinates')
+                .populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates')
                 .sort({ createdAt: -1 }) // Latest duties first
                 .skip(skip)
                 .limit(limit);
 
+            // Filter out duties with missing staff data before processing
+            const validDuties = duties.filter(duty => duty.assignedTo);
+
             // Batch process real-time locations for better performance
-            const staffUserIds = duties
+            const staffUserIds = validDuties
                 .filter(duty => duty.assignedTo && duty.assignedTo.user)
                 .map(duty => duty.assignedTo.user._id);
 
@@ -1260,14 +1394,17 @@ class AdminService {
             const realtimeLocations = await getBatchStaffLocations(staffUserIds);
 
             const formattedDuties = await Promise.all(
-                duties.map(async (duty) => {
+                validDuties.map(async (duty) => {
                     return await formatActiveDuty(duty, realtimeLocations);
                 })
             );
 
+            // Filter out null results from duties with missing staff
+            const validFormattedDuties = formattedDuties.filter(duty => duty !== null);
+
             return {
-                duties: formattedDuties,
-                pagination: getPaginationMeta(totalDuties, page, limit),
+                duties: validFormattedDuties,
+                pagination: getPaginationMeta(validFormattedDuties.length, page, limit),
                 filters: {
                     role: role || 'all',
                     location: location || 'all',
@@ -1334,13 +1471,13 @@ class AdminService {
             const duty = await Duty.findById(dutyId)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience city area verificationStatus education profileSummary',
+                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience currentAddress city state pincode email verificationStatus education profileSummary',
                     populate: {
                         path: 'user',
                         select: 'name email'
                     }
                 })
-                .populate('hospital', 'hospitalLegalName location currentAddress coordinates')
+                .populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates')
                 .lean(); // Use lean for better performance
 
             if (!duty) {
@@ -1415,7 +1552,10 @@ class AdminService {
                     mobileNumber: staff.phoneNumber,
                     skills: staff.skills || [],
                     avgRating: staff.averageRating || 0,
-                    address: `${staff.area}, ${staff.city}`,
+                    currentAddress: staff.currentAddress,
+                    city: staff.city,
+                    state: staff.state,
+                    pincode: staff.pincode,
                     location: {
                         latitude: currentLocation.latitude,
                         longitude: currentLocation.longitude,
@@ -1452,7 +1592,9 @@ class AdminService {
                     id: hospital._id,
                     name: hospital.hospitalLegalName,
                     address: hospital.currentAddress,
-                    location: hospital.location,
+                    city: hospital.city,
+                    state: hospital.state,
+                    pincode: hospital.pincode,
                     coordinates: {
                         latitude: hospital.coordinates.coordinates.latitude,
                         longitude: hospital.coordinates.coordinates.longitude
@@ -1662,7 +1804,7 @@ class AdminService {
                         select: 'name email'
                     }
                 })
-                .populate('hospital', 'hospitalLegalName location')
+                .populate('hospital', 'hospitalLegalName currentAddress city state pincode')
                 .sort({ completedAt: -1, date: -1 })
                 .skip(skip)
                 .limit(limit)
@@ -1690,7 +1832,12 @@ class AdminService {
                     formattedRole: duty.formattedRole,
                     department: duty.description || 'General',
                     hospitalName: hospital?.hospitalLegalName || 'Unknown',
-                    hospitalLocation: hospital?.location || 'Unknown',
+                    hospitalLocation: hospital?.currentAddress ? {
+                        currentAddress: hospital.currentAddress,
+                        city: hospital.city,
+                        state: hospital.state,
+                        pincode: hospital.pincode
+                    } : null,
                     shiftDuration: duration,
                     hoursCompleted: calculateDutyDuration(
                         duty.date,

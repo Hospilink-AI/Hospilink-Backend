@@ -11,6 +11,7 @@ const logger = require('../utils/logger');
 const dutyService = require('../services/duty.service');
 const locationTrackingService = require('../services/locationTracking.service');
 const DashboardService = require('../services/dashboard.service');
+const locationBasedStaffService = require('../services/locationBasedStaff.service');
 
 // Extend logger with debug method
 logger.debug = (message) => {
@@ -54,20 +55,36 @@ exports.createDuty = asyncHandler(async (req, res) => {
 
     // Emit WebSocket notification to matching available staff AND hospital
     try {
-        // Find matching available staff
-        const normalizedRole = normalizeRole(staff_role);
-        const matchingStaff = await MedicalStaff.find({
-            jobRole: staff_role,
-            isAvailable: true
-        }).populate('user', '_id');
+        // Get hospital details first for coordinates
+        const hospital = await Hospital.findOne({ user: userId }).populate('user', 'name');
+        
+        if (!hospital) {
+            logger.error('Hospital not found for user: ' + userId);
+            throw new Error('Hospital profile not found');
+        }
 
-        // Filter out staff with null user references and map to user IDs
+        // Check if hospital has coordinates
+        if (!hospital.coordinates || !hospital.coordinates.coordinates) {
+            logger.error('Hospital coordinates not found for user: ' + userId);
+            throw new Error('Hospital location not set. Please update hospital profile.');
+        }
+        
+        const hospitalCoords = {
+            latitude: hospital.coordinates.coordinates.latitude,
+            longitude: hospital.coordinates.coordinates.longitude
+        };
+
+        const matchingStaff = await locationBasedStaffService.getNearbyStaffByRole(
+            hospitalCoords,
+            staff_role
+        );
+
+        // Convert to user IDs for notification
         const staffUserIds = matchingStaff
             .filter(staff => staff.user && staff.user._id)
             .map(staff => staff.user._id.toString());
 
-        // Get hospital details
-        const hospital = await Hospital.findOne({ user: userId }).populate('user', 'name');
+        console.log(`Found ${staffUserIds.length} staff within 50km for ${staff_role} role`);
 
         if (!hospital) {
             logger.error('Hospital not found for user: ' + userId);
@@ -802,17 +819,14 @@ exports.getDutyRoute = asyncHandler(async (req, res) => {
 exports.getAvailableJobsWithDistance = asyncHandler(async (req, res) => {
     const staffId = req.user.id;
     const filters = req.query;
-
-    const result = await DutyService.getAvailableJobsWithDistance(staffId, filters);
-
-    // Additional safety check
-    const availableJobs = result.jobs.filter(job => job.status === 'available');
-
+    
+    const result = await locationBasedStaffService.getAvailableJobsWithDistance(staffId, filters);
+    
     res.status(200).json({
         success: true,
-        jobs: availableJobs,
+        jobs: result.jobs,
         staffLocation: result.staffLocation,
-        totalJobs: availableJobs.length
+        totalJobs: result.jobs.length
     });
 });
 
