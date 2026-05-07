@@ -393,7 +393,7 @@ class AdminService {
 
 
     // Get nearby available staff using bounding box query (same as working profile service)
-    async getNearbyAvailableStaff(hospitalId, distanceKm, role = null) {
+    async getNearbyAvailableStaff(hospitalId, radiusKm, role = null) {
         try {
             // Get hospital coordinates first
             const hospital = await Hospital.findById(hospitalId)
@@ -407,11 +407,11 @@ class AdminService {
             const hospitalLat = hospital.coordinates.coordinates.latitude;
             const hospitalLng = hospital.coordinates.coordinates.longitude;
 
-            console.log('Searching for staff within', distanceKm, 'km radius using Google Maps API only');
+            console.log('Searching for staff within', radiusKm, 'km radius using Google Maps API only', role ? `for role: ${role}` : '');
 
             // Use bounding box query 
-            const latDelta = distanceKm / 111; // Approximate km to degrees
-            const lngDelta = distanceKm / (111 * Math.cos(hospitalLat * Math.PI / 180));
+            const latDelta = radiusKm / 111; // Approximate km to degrees
+            const lngDelta = radiusKm / (111 * Math.cos(hospitalLat * Math.PI / 180));
 
             // Build query with bounding box
             const query = {
@@ -450,36 +450,39 @@ class AdminService {
                                 staffMember.coordinates.coordinates.latitude,
                                 staffMember.coordinates.coordinates.longitude
                             );
-                            
+                                
                             // Only include staff within Google Maps distance
-                            if (distanceResult.distance > distanceKm) {
+                            if (distanceResult.distance > radiusKm) {
                                 return null; // Filter out based on Google Maps distance
                             }
-                            
+                                
                         } catch (apiError) {
                             console.error(`Google Maps API failed for staff ${staffMember._id}:`, apiError.message);
                             return null; // Skip staff if Google Maps API fails
                         }
 
                         return {
-                            _id: staffMember._id,
-                            staffName: staffMember.fullName,
-                            location: staffMember.currentAddress ? 
-                                `${staffMember.currentAddress}, ${staffMember.city}, ${staffMember.state} - ${staffMember.pincode}` : 
-                                `${staffMember.city}, ${staffMember.state} - ${staffMember.pincode}`,
-                            currentAddress: staffMember.currentAddress,
-                            city: staffMember.city,
-                            state: staffMember.state,
-                            pincode: staffMember.pincode,
-                            role: staffMember.jobRole,
-                            mobileNumber: staffMember.phoneNumber,
+                            id: staffMember._id,
+                            name: staffMember.fullName,
                             email: staffMember.user?.email || null,
+                            role: staffMember.jobRole,
+                            phone: staffMember.phoneNumber,
+                            rating: staffMember.averageRating || 0,
+                            isAvailable: staffMember.isAvailable,
                             distance: distanceResult.distance,
                             distanceText: distanceResult.distanceText,
                             estimatedTime: distanceResult.duration,
                             estimatedTimeText: distanceResult.durationText,
-                            coordinates: staffMember.coordinates,
-                            source: distanceResult.source
+                            address: {
+                                currentAddress: staffMember.currentAddress,
+                                city: staffMember.city,
+                                state: staffMember.state,
+                                pincode: staffMember.pincode
+                            },
+                            location: {
+                                latitude: staffMember.coordinates.coordinates.latitude,
+                                longitude: staffMember.coordinates.coordinates.longitude
+                            }
                         };
                     } catch (error) {
                         console.error(`Error processing staff ${staffMember._id}:`, error.message);
@@ -498,19 +501,19 @@ class AdminService {
             // Return complete result
             return {
                 hospital: {
-                    _id: hospital._id,
+                    id: hospital._id,
                     name: hospital.hospitalLegalName,
                     coordinates: hospital.coordinates
                 },
-                staff: validStaff,
-                filters: {
-                    distance: distanceKm,
-                    role: role || 'all'
+                search: {
+                    radius: radiusKm,
+                    role: role || 'all',
+                    totalFound: validStaff.length
                 },
-                totalStaffInRange: validStaff.length,
+                staff: validStaff,
                 queryInfo: {
                     hospitalCoords: [hospitalLng, hospitalLat],
-                    radiusMeters: distanceKm * 1000,
+                    radiusMeters: radiusKm * 1000,
                     hasRoleFilter: !!role,
                     queryMethod: 'google_maps_api'
                 }
@@ -520,6 +523,8 @@ class AdminService {
             throw error;
         }
     }
+
+
 
     // GET /api/admin/hospitals-list — simple list with id, name, location (for dropdowns)
     async getHospitalSimpleList(nameFilter = null) {

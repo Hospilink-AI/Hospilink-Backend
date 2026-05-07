@@ -196,7 +196,7 @@ const validateNearbyStaffQuery = (req, res, next) => {
     }
 
     // Validate allowed query parameters only
-    const allowedParams = ['hospital_id', 'distance', 'role'];
+    const allowedParams = ['hospital_id', 'radius', 'role'];
     const receivedParams = Object.keys(req.query);
 
     // Check for unexpected parameters
@@ -224,12 +224,12 @@ const validateNearbyStaffQuery = (req, res, next) => {
         });
     }
 
-    // Validate distance parameter (1-100 km)
-    const distanceNum = parseFloat(req.query.distance) || 10;
-    if (isNaN(distanceNum) || distanceNum < 1 || distanceNum > 100) {
+    // Validate radius parameter (1-100 km)
+    const radiusNum = parseFloat(req.query.radius) || 10;
+    if (isNaN(radiusNum) || radiusNum < 1 || radiusNum > 100) {
         return res.status(400).json({
             success: false,
-            message: 'Distance must be a number between 1 and 100 km'
+            message: 'Radius must be a number between 1 and 100 km'
         });
     }
 
@@ -245,7 +245,7 @@ const validateNearbyStaffQuery = (req, res, next) => {
     // Add validated values to request object
     req.validatedQuery = {
         hospital_id: req.query.hospital_id,
-        distance: distanceNum,
+        radius: radiusNum,
         role: roleParam
     };
 
