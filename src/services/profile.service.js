@@ -339,6 +339,7 @@ class ProfileService {
                         isAvailable: raw.isAvailable,
                         isProfileComplete: raw.isProfileComplete,
                         isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
+                        verificationStatus: raw.verificationStatus,
                         profileCompletion,
                         activeApplications,
                         verifiedDocs,
@@ -379,6 +380,7 @@ class ProfileService {
                         servicesAvailable: raw.servicesAvailable,
                         isProfileComplete: raw.isProfileComplete,
                         isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
+                        verificationStatus: raw.verificationStatus,
                         staffCount: raw.staffCount,
                         description: raw.description || '',
                         coordinates: {
