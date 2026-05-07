@@ -1004,7 +1004,7 @@ class ProfileService {
 
 
     // Get nearby available staff for hospital map dashboard
-    async getNearbyAvailableStaff(hospitalUserId, radiusKm = 5) {
+    async getNearbyAvailableStaff(hospitalUserId, radiusKm = 5, role = null) {
         try {
             // Get hospital profile
             const hospital = await Hospital.findOne({ user: hospitalUserId });
@@ -1027,13 +1027,13 @@ class ProfileService {
             const hospitalLat = hospital.coordinates.coordinates.latitude;
             const hospitalLng = hospital.coordinates.coordinates.longitude;
 
-            console.log('Searching for staff within', radiusKm, 'km radius');
+            console.log('Searching for staff within', radiusKm, 'km radius', role ? `for role: ${role}` : '');
 
-            // Use MongoDB's $geoWithin with bounding box first
+            // Build query with bounding box
             const latDelta = radiusKm / 111; // Approximate km to degrees
             const lngDelta = radiusKm / (111 * Math.cos(hospitalLat * Math.PI / 180));
 
-            const nearbyStaff = await MedicalStaff.find({
+            const query = {
                 isAvailable: true,
                 'coordinates.coordinates.latitude': {
                     $gte: hospitalLat - latDelta,
@@ -1043,7 +1043,14 @@ class ProfileService {
                     $gte: hospitalLng - lngDelta,
                     $lte: hospitalLng + lngDelta
                 }
-            })
+            };
+
+            // Add role filter if specified
+            if (role) {
+                query.jobRole = role;
+            }
+
+            const nearbyStaff = await MedicalStaff.find(query)
                 .populate('user', 'name email role isEmailVerified')         // populate minimal user data fields only
                 .select('fullName jobRole currentAddress city state pincode phoneNumber email coordinates isAvailable averageRating')         // select only required fields
                 .lean();    // return plain JavaScript objects instead of Mongoose documents
@@ -1072,9 +1079,16 @@ class ProfileService {
                 }
             }
 
-            // Format response
+            // Format response 
             const staffWithDistance = exactNearbyStaff.map(staff => ({
-                ...staff,
+                id: staff._id,
+                name: staff.fullName,
+                email: staff.user?.email || staff.email, 
+                role: staff.jobRole,
+                phone: staff.phoneNumber,
+                rating: staff.averageRating || 0,
+                isAvailable: staff.isAvailable,
+                distance: staff.distance,
                 address: {
                     currentAddress: staff.currentAddress,
                     city: staff.city,
@@ -1092,29 +1106,39 @@ class ProfileService {
 
             return {
                 success: true,
-                hospital: {
-                    name: hospital.hospitalLegalName,
-                    address: {
-                        currentAddress: hospital.currentAddress,
-                        city: hospital.city,
-                        state: hospital.state,
-                        pincode: hospital.pincode
+                data: {
+                    hospital: {
+                        id: hospital._id,
+                        name: hospital.hospitalLegalName,
+                        address: {
+                            currentAddress: hospital.currentAddress,
+                            city: hospital.city,
+                            state: hospital.state,
+                            pincode: hospital.pincode
+                        },
+                        location: {
+                            latitude: hospitalLat,
+                            longitude: hospitalLng
+                        }
                     },
-                    location: {
-                        latitude: hospitalLat,
-                        longitude: hospitalLng
-                    }
+                    search: {
+                        radius: radiusKm,
+                        roleFilter: role || 'all',
+                        totalFound: staffWithDistance.length
+                    },
+                    staff: staffWithDistance
                 },
-                searchRadius: radiusKm,
-                totalStaffFound: staffWithDistance.length,
-                staff: staffWithDistance,
-                message: `Found ${staffWithDistance.length} available staff within ${radiusKm}km radius`
+                message: `Found ${staffWithDistance.length} available staff within ${radiusKm}km radius${role ? ` for role: ${role}` : ''}`
             };
         } catch (error) {
             console.error('Error in getNearbyAvailableStaff:', error);
             throw new Error(error.message);
         }
     }
+
+
+
+
     async uploadProfilePicture(userId, file) {
         try {
             // Validate file exists
@@ -1236,6 +1260,8 @@ class ProfileService {
         }
     }
 
+
+
     async deleteProfilePicture(userId) {
         try {
             const user = await User.findById(userId).lean();
@@ -1286,6 +1312,9 @@ class ProfileService {
             throw new Error(error.message);
         }
     }
+
+
+
     // Add skills (append unique)
     async addSkills(userId, skills = []) {
         if (!Array.isArray(skills) || skills.length === 0) {
