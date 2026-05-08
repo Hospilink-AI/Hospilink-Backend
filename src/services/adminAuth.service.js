@@ -15,47 +15,53 @@ const cacheService = require('./cache.service');
 class AdminAuthService {
     async signin(email, password) {
         try {
-            // Find admin user with password
-            const admin = await User.findOne({ 
-                email: email.toLowerCase(), 
-                role: 'admin' 
-            }).select('+password');
+            // Parallel execution of independent operations
+            const [admin, rateLimitResult] = await Promise.all([
+                // Find admin user with password
+                User.findOne({ 
+                    email: email.toLowerCase(), 
+                    role: 'admin' 
+                }).select('+password'),
+                // Check rate limiting in parallel
+                this._checkRateLimit(email).catch(() => true) // Don't block on rate limit errors
+            ]);
             
             if (!admin) {
                 throw new NotFoundError('Admin not found with this email');
             }
 
-            // Verify password
+            // Verify password 
             const isPasswordValid = await admin.comparePassword(password);
             if (!isPasswordValid) {
                 throw new UnauthorizedError('Invalid credentials');
             }
 
-            // Check rate limiting (max 3 OTP requests per hour)
-            await this._checkRateLimit(email);
-
             // Generate OTP
             const otp = OTPService.generateOTP();
             const otpExpiry = OTPService.getOTPExpiry();
 
-            // Store OTP in user document
-            admin.otp = {
-                code: otp,
-                expiresAt: otpExpiry
-            };
-            await admin.save();
-
-            // Store OTP in Redis for faster access and additional security
+            // Prepare data for parallel storage
             const redisKey = `admin_otp:${email}`;
-            await redisClient.getClientAsync().then(redis => {
-                return redis.setex(redisKey, 600, JSON.stringify({
-                    otp: otp,
-                    userId: admin._id.toString(),
-                    timestamp: new Date().toISOString()
-                }));
-            });
+            const otpData = {
+                otp: otp,
+                userId: admin._id.toString(),
+                timestamp: new Date().toISOString()
+            };
 
-            // Send OTP email — non-blocking, don't await
+            // Parallel storage operations + immediate email sending
+            const [redisResult, saveResult] = await Promise.all([
+                // Store in Redis
+                redisClient.getClientAsync().then(redis => 
+                    redis.setex(redisKey, 600, JSON.stringify(otpData))
+                ),
+                // Store OTP in user document
+                User.updateOne(
+                    { _id: admin._id }, 
+                    { $set: { otp: { code: otp, expiresAt: otpExpiry } } }
+                )
+            ]);
+
+            // Send OTP email immediately (non-blocking)
             EmailService.sendAdminOTPEmail(admin.email, otp, admin.name)
                 .catch(err => logger.error(`Failed to send admin OTP email: ${err.message}`));
 
@@ -76,7 +82,7 @@ class AdminAuthService {
 
     async verifyOTP(email, otp, req = null) {
         try {
-            // Find admin user
+            // Find admin user first 
             const admin = await User.findOne({ 
                 email: email.toLowerCase(), 
                 role: 'admin' 
@@ -86,35 +92,41 @@ class AdminAuthService {
                 throw new NotFoundError('Admin not found');
             }
 
-            // Check OTP validity from user document
-            const isValidOTP = admin.verifyOTP(otp);
+            // Check Redis first (fast path)
+            const redisKey = `admin_otp:${email}`;
+            const redis = await redisClient.getClientAsync();
+            const redisData = await redis.get(redisKey);
+
+            let isValidOTP = false;
+            let verificationSource = '';
+
+            if (redisData) {
+                // Redis path - fast verification
+                const parsedData = JSON.parse(redisData);
+                isValidOTP = parsedData.otp === otp;
+                verificationSource = 'redis';
+                logger.info(`OTP verification from Redis for: ${email}`);
+            } else {
+                // Fallback to Database path
+                isValidOTP = admin.verifyOTP(otp);
+                verificationSource = 'database';
+                logger.info(`OTP verification from Database for: ${email}`);
+            }
+
             if (!isValidOTP) {
                 throw new UnauthorizedError('Invalid or expired OTP');
             }
 
-            // Additional check from Redis
-            const redisKey = `admin_otp:${email}`;
-            const redisClient2 = await redisClient.getClientAsync();
-            const redisData = await redisClient2.get(redisKey);
-
-            if (redisData) {
-                const parsedData = JSON.parse(redisData);
-                if (parsedData.otp !== otp) {
-                    throw new UnauthorizedError('Invalid OTP');
-                }
-            }
-
-            // Clear OTP from both database and Redis in parallel
+            // Clear OTP from both systems in parallel
             await Promise.all([
-                redisClient2.del(redisKey),
+                redis.del(redisKey),
                 User.updateOne({ _id: admin._id }, { $unset: { otp: 1 } })
             ]);
-
-            // Generate JWT token immediately — don't block on device tracking
+            // Generate JWT token immediately
             const token = require('jsonwebtoken').sign(
                 { id: admin._id, role: admin.role },
                 process.env.JWT_SECRET,
-                { expiresIn: process.env.JWT_EXPIRES_IN || '1d' }
+                { expiresIn: process.env.JWT_EXPIRES_IN}
             );
 
             // Device tracking + alert email — fully non-blocking
@@ -180,7 +192,7 @@ class AdminAuthService {
                 });
             }
 
-            logger.info(`Admin signed in successfully: ${admin.email}`);
+            logger.info(`Admin signed in successfully via ${verificationSource}: ${admin.email}`);
             
             return {
                 message: 'Admin signed in successfully',
@@ -202,14 +214,16 @@ class AdminAuthService {
 
     async resendOTP(email) {
         try {
-            // Check rate limiting first
-            await this._checkRateLimit(email);
-
-            // Find admin user
-            const admin = await User.findOne({ 
-                email: email.toLowerCase(), 
-                role: 'admin' 
-            });
+            // Parallel execution of rate limit and user lookup
+            const [admin, rateLimitResult] = await Promise.all([
+                // Find admin user
+                User.findOne({ 
+                    email: email.toLowerCase(), 
+                    role: 'admin' 
+                }),
+                // Check rate limiting in parallel
+                this._checkRateLimit(email).catch(() => true)
+            ]);
             
             if (!admin) {
                 throw new NotFoundError('Admin not found');
@@ -219,25 +233,30 @@ class AdminAuthService {
             const otp = OTPService.generateOTP();
             const otpExpiry = OTPService.getOTPExpiry();
 
-            // Update user with new OTP
-            admin.otp = {
-                code: otp,
-                expiresAt: otpExpiry
-            };
-            await admin.save();
-
-            // Update Redis
+            // Prepare data for parallel operations
             const redisKey = `admin_otp:${email}`;
-            await redisClient.getClientAsync().then(redis => {
-                return redis.setex(redisKey, 600, JSON.stringify({
-                    otp: otp,
-                    userId: admin._id.toString(),
-                    timestamp: new Date().toISOString()
-                }));
-            });
+            const otpData = {
+                otp: otp,
+                userId: admin._id.toString(),
+                timestamp: new Date().toISOString()
+            };
 
-            // Send new OTP email
-            await EmailService.sendAdminOTPEmail(admin.email, otp, admin.name);
+            // Parallel storage operations
+            await Promise.all([
+                // Update Redis
+                redisClient.getClientAsync().then(redis => 
+                    redis.setex(redisKey, 600, JSON.stringify(otpData))
+                ),
+                // Update user document (faster than save)
+                User.updateOne(
+                    { _id: admin._id }, 
+                    { $set: { otp: { code: otp, expiresAt: otpExpiry } } }
+                )
+            ]);
+
+            // Send OTP email immediately (non-blocking for consistency)
+            EmailService.sendAdminOTPEmail(admin.email, otp, admin.name)
+                .catch(err => logger.error(`Failed to send admin OTP email: ${err.message}`));
 
             logger.info(`Admin OTP resent to: ${admin.email}`);
             
@@ -282,12 +301,16 @@ class AdminAuthService {
         const redis = await redisClient.getClientAsync();
         
         try {
-            const currentCount = await redis.incr(rateLimitKey);
+            // Use pipeline for atomic operations
+            const pipeline = redis.pipeline();
+            pipeline.incr(rateLimitKey);
             
-            if (currentCount === 1) {
-                // Set expiry of 1 hour (3600 seconds)
-                await redis.expire(rateLimitKey, 3600);
+            if (await redis.exists(rateLimitKey) === 0) {
+                pipeline.expire(rateLimitKey, 3600);
             }
+            
+            const results = await pipeline.exec();
+            const currentCount = results[0][1];
             
             if (currentCount > 3) {
                 const ttl = await redis.ttl(rateLimitKey);

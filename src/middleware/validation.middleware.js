@@ -686,11 +686,11 @@ const validateStaffAvailability = (req, res, next) => {
 
 // Validation for nearby staff search
 const validateNearbyStaff = (req, res, next) => {
-    const { radius } = req.query;
+    const { radius, role } = req.query;
     const errors = [];
 
     // Check for unexpected fields
-    const allowedFields = ['radius'];
+    const allowedFields = ['radius', 'role'];
     const receivedFields = Object.keys(req.query);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
 
@@ -704,6 +704,11 @@ const validateNearbyStaff = (req, res, next) => {
         if (isNaN(radiusNum) || radiusNum < 1 || radiusNum > 100) {
             errors.push('Radius must be a number between 1 and 100 kilometers');
         }
+    }
+
+    // Role validation (optional)
+    if (role !== undefined && typeof role !== 'string') {
+        errors.push('Role parameter must be a string');
     }
 
     if (errors.length > 0) {

@@ -830,6 +830,66 @@ class EmailService {
             return false;
         }
     }
+
+
+
+    async sendProfileCreatedConfirmationEmail(email, userName, userType) {
+        try {
+            const isHospital = userType === 'hospital';
+            const mailOptions = {
+                from: `HospiLink <${process.env.EMAIL_FROM}>`,
+                to: email,
+                subject: 'HospiLink - Profile Created Successfully',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: #3498db; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">Profile Created Successfully! ✓</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p>Hello <strong>${userName}</strong>,</p>
+                            <p>Congratulations! Your ${isHospital ? 'hospital' : 'medical staff'} profile on HospiLink has been <strong style="color: #27ae60;">successfully created</strong>.</p>
+                            
+                            <div style="background-color: #f0fff4; border-left: 4px solid #27ae60; padding: 15px; margin: 20px 0;">
+                                <h4 style="margin-top: 0; color: #276749;">📋 What's Next?</h4>
+                                <p style="margin: 0; color: #276749;">Your profile will be reviewed and verified by our admin panel within <strong>24 hours</strong>.</p>
+                            </div>
+                            
+                            <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;">
+                                <h4 style="margin-top: 0; color: #856404;">⏰ Verification Process</h4>
+                                <p style="margin: 0; color: #856404;">Once verified, you'll receive an email confirmation and can start using HospiLink platform.</p>
+                            </div>
+                            
+                            <p>In the meantime, you can:</p>
+                            <ul>
+                                ${isHospital ? `
+                                    <li>Complete your hospital profile details</li>
+                                    <li>Upload required documents</li>
+                                    <li>Prepare to post duty requirements</li>
+                                ` : `
+                                    <li>Complete your professional profile</li>
+                                    <li>Upload your medical documents</li>
+                                    <li>Prepare to apply for duty opportunities</li>
+                                `}
+                            </ul>
+                            
+                            <p>If you have any questions, please contact our support team.</p>
+                            
+                            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                        </div>
+                    </div>
+                `
+            };
+
+            await this.transporter.sendMail(mailOptions);
+            logger.info(`Profile creation confirmation email sent to ${email}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending profile creation confirmation email to ${email}: ${error.message}`);
+            return false;
+        }
+    }
 }
 
 module.exports = new EmailService();
+
