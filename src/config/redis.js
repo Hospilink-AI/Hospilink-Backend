@@ -56,7 +56,13 @@ class RedisConfig {
         };
 
         if (enableTLS) {
-            config.tls = { rejectUnauthorized: false };
+            config.tls = { 
+                rejectUnauthorized: false,  // Accept self-signed certificates
+                minVersion: 'TLSv1.2',
+                maxVersion: 'TLSv1.3',
+                // Additional compatibility settings
+                checkServerIdentity: () => undefined  // Skip hostname verification
+            };
             logger.info('Redis TLS enabled');
         }
         return config;
