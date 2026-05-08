@@ -130,6 +130,20 @@ class NotificationEmitter {
                     // Broadcast to role room for real-time notification
                     websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
 
+                    // Phase 2: Mark notifications as delivered for online staff
+                    const onlineStaffIds = matchingStaffUserIds.filter(staffUserId => 
+                        websocketManager.isUserOnline(staffUserId)
+                    );
+                    
+                    if (onlineStaffIds.length > 0) {
+                        await notificationService.markDeliveredForUsers(
+                            onlineStaffIds, 
+                            notificationType, 
+                            duty._id.toString()
+                        );
+                        console.log(`Marked ${onlineStaffIds.length}/${matchingStaffUserIds.length} staff notifications as delivered (online)`);
+                    }
+
                     const notificationTypeLabel = isEmergency ? 'EMERGENCY_DUTY_REQUEST' : 'NEW_DUTY_OFFER';
                     console.log(`Duty created notification emitted to hospital and ${matchingStaffUserIds.length} staff members via role room (${notificationTypeLabel})`);
                 } catch (error) {

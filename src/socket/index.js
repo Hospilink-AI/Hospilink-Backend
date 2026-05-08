@@ -85,6 +85,30 @@ async function initializeSocket(server) {
                 console.error('Error fetching unread count:', error);
             }
 
+            // Auto-push undelivered notifications (Phase 2: Offline Delivery)
+            try {
+                const undelivered = await notificationService.getUndeliveredNotifications(user._id);
+                
+                if (undelivered.length > 0) {
+                    console.log(`Delivering ${undelivered.length} undelivered notifications to user ${user._id}`);
+                    
+                    // Deliver notifications with small stagger to avoid flooding
+                    undelivered.forEach((notification, index) => {
+                        setTimeout(() => {
+                            socket.emit('notification', notification.payload);
+                        }, index * 50); // 50ms between each notification
+                    });
+
+                    // Mark all as delivered
+                    const notificationIds = undelivered.map(n => n._id);
+                    await notificationService.markAsDelivered(notificationIds);
+                    
+                    console.log(`Marked ${notificationIds.length} notifications as delivered for user ${user._id}`);
+                }
+            } catch (error) {
+                console.error('Error delivering undelivered notifications:', error);
+            }
+
             // Handle get_missed_notifications event for reconnection
             socket.on('get_missed_notifications', async (data) => {
                 try {

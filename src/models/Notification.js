@@ -25,6 +25,11 @@ const notificationSchema = new mongoose.Schema({
         default: false,
         index: true
     },
+    deliveredAt: {
+        type: Date,
+        default: null,
+        index: true
+    },
     createdAt: {
         type: Date,
         default: Date.now,
@@ -37,6 +42,7 @@ const notificationSchema = new mongoose.Schema({
 // Compound indexes for efficient queries
 notificationSchema.index({ recipient: 1, createdAt: -1 });
 notificationSchema.index({ recipient: 1, isRead: 1 });
+notificationSchema.index({ recipient: 1, deliveredAt: 1 }); // For undelivered queries
 
 // TTL index - automatically delete notifications older than 90 days
 // This prevents the notifications collection from growing indefinitely

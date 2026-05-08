@@ -20,8 +20,9 @@ class WebSocketManager {
      * @param {string} userId - User ID
      * @param {string} event - Event name
      * @param {Object} payload - Event payload
+     * @param {string} notificationId - Optional notification ID to mark as delivered
      */
-    emitToUser(userId, event, payload) {
+    async emitToUser(userId, event, payload, notificationId = null) {
         try {
             if (!this.io) {
                 console.error('Socket.IO not initialized');
@@ -31,8 +32,34 @@ class WebSocketManager {
             const roomName = `user:${userId}`;
             this.io.to(roomName).emit(event, payload);
             console.log(`Emitted ${event} to user room: ${roomName}`);
+
+            // Mark notification as delivered if user is online and notificationId provided
+            if (notificationId && this.isUserOnline(userId)) {
+                const notificationService = require('./notificationService');
+                await notificationService.markAsDelivered([notificationId]);
+            }
         } catch (error) {
             console.error(`Error emitting to user ${userId}:`, error);
+        }
+    }
+
+    /**
+     * Check if user is currently online
+     * @param {string} userId - User ID
+     * @returns {boolean} True if user is online
+     */
+    isUserOnline(userId) {
+        try {
+            if (!this.io) {
+                return false;
+            }
+            
+            const roomName = `user:${userId}`;
+            const room = this.io.sockets.adapter.rooms.get(roomName);
+            return room && room.size > 0;
+        } catch (error) {
+            console.error(`Error checking if user ${userId} is online:`, error);
+            return false;
         }
     }
 
