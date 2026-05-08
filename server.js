@@ -19,20 +19,33 @@ const startServer = async () => {
             throw new Error('JWT_SECRET environment variable is not set. Cannot start server without a signing secret.');
         }
 
-        // Connect to MongoDB
-        await connectDB();
+        // Parallelize independent operations for faster startup
+        const [mongoResult, redisResult] = await Promise.allSettled([
+            connectDB(),
+            require('./src/config/redis').connect()
+        ]);
+
+        // Check MongoDB connection
+        if (mongoResult.status === 'rejected') {
+            throw new Error(`MongoDB connection failed: ${mongoResult.reason.message}`);
+        }
+
+        // Check Redis connection (non-critical, can continue without it)
+        if (redisResult.status === 'rejected') {
+            logger.warn(`Redis connection failed: ${redisResult.reason.message}`);
+            logger.warn('Continuing without Redis - some features may be limited');
+        }
 
         // Start cron jobs only after DB is ready (local/persistent env only)
         if (process.env.ENABLE_CRON_JOBS === 'true') {
             CronJobs.startAllJobs();
         }
 
-        // Connect to Redis
-        const redisConfig = require('./src/config/redis');
-        await redisConfig.connect();
-
-        // Initialize Agent services
-        await initAgent();
+        // Initialize Agent services (runs in background)
+        initAgent().catch(err => {
+            logger.error('Agent initialization failed:', err.message);
+            logger.warn('Continuing without Agent services');
+        });
 
         // Create HTTP server
         const server = http.createServer(app);
@@ -51,8 +64,7 @@ const startServer = async () => {
             logger.info(`Server running on port ${PORT}`);
             logger.info(`API Documentation: http://localhost:${PORT}/api-docs`);
             logger.info(`MongoDB Connected`);
-            logger.info(`Redis Connected`);
-            logger.info(`Agent Services initialized`);
+            logger.info(`Redis ${redisResult.status === 'fulfilled' ? 'Connected' : 'Unavailable'}`);
             logger.info(`WebSocket server initialized`);
         });
     } catch (error) {

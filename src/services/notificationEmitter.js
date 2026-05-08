@@ -1,5 +1,6 @@
 const notificationService = require('./notificationService');
 const websocketManager = require('./websocketManager');
+const notificationDelivery = require('./notificationDelivery.service');
 const geocodingService = require('./geocoding.service');
 const MedicalStaff = require('../models/MedicalStaff');
 
@@ -64,8 +65,9 @@ class NotificationEmitter {
             try {
                 const hospitalNotificationType = isEmergency ? 'EMERGENCY_REQUEST_ACKNOWLEDGED' : 'DUTY_CREATED';
                 const { unreadCount } = await notificationService.createNotificationWithCount(hospitalUserId, hospitalNotificationType, hospitalPayload);
-                websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-                websocketManager.emitToUser(hospitalUserId, 'notification', hospitalPayload);
+                
+                // Phase 3: Use delivery service for smart routing (WebSocket or FCM)
+                await notificationDelivery.deliverToUser(hospitalUserId, hospitalNotificationType, hospitalPayload, unreadCount);
             } catch (error) {
                 console.error(`Error creating notification for hospital ${hospitalUserId}:`, error);
             }
@@ -118,17 +120,11 @@ class NotificationEmitter {
                     // Persist notifications in bulk for all matching staff
                     await notificationService.createBulkNotifications(matchingStaffUserIds, notificationType, staffPayload);
                     
-                    // Batch fetch unread counts for all staff
-                    const unreadCounts = await notificationService.getBulkUnreadCounts(matchingStaffUserIds);
-                    
-                    // Send unread counts to each staff member
-                    for (const staffUserId of matchingStaffUserIds) {
-                        const count = unreadCounts[staffUserId] || 0;
-                        websocketManager.sendUnreadCount(staffUserId, count);
-                    }
-
-                    // Broadcast to role room for real-time notification
+                    // Broadcast to role room for real-time notification (online staff)
                     websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
+
+                    // Phase 3: Smart delivery - WebSocket (online) + FCM (offline)
+                    await notificationDelivery.deliverToUsers(matchingStaffUserIds, notificationType, staffPayload);
 
                     // Phase 2: Mark notifications as delivered for online staff
                     const onlineStaffIds = matchingStaffUserIds.filter(staffUserId => 
@@ -249,8 +245,7 @@ class NotificationEmitter {
             // Persist notification for hospital (isolated try-catch)
             try {
                 const { unreadCount } = await notificationService.createNotificationWithCount(hospitalUserId, 'STAFF_ASSIGNED', hospitalPayload);
-                websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-                websocketManager.emitToUser(hospitalUserId, 'notification', hospitalPayload);
+                await notificationDelivery.deliverToUser(hospitalUserId, 'STAFF_ASSIGNED', hospitalPayload, unreadCount);
                 console.log(`Staff assigned notification sent to hospital ${hospitalUserId}`);
             } catch (error) {
                 console.error(`Error sending staff assigned notification to hospital ${hospitalUserId}:`, error);
@@ -261,8 +256,7 @@ class NotificationEmitter {
                 console.log(`Attempting to send DUTY_CONFIRMED to staff ${staffUserId}`);
                 const { unreadCount } = await notificationService.createNotificationWithCount(staffUserId, 'DUTY_CONFIRMED', staffPayload);
                 console.log(`DUTY_CONFIRMED notification created in DB for staff ${staffUserId}, unread count: ${unreadCount}`);
-                websocketManager.sendUnreadCount(staffUserId, unreadCount);
-                websocketManager.emitToUser(staffUserId, 'notification', staffPayload);
+                await notificationDelivery.deliverToUser(staffUserId, 'DUTY_CONFIRMED', staffPayload, unreadCount);
                 console.log(`Duty confirmed notification sent to staff ${staffUserId}`);
             } catch (error) {
                 console.error(`Error sending duty confirmed notification to staff ${staffUserId}:`, error);
@@ -330,8 +324,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-                websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+                await notificationDelivery.deliverToUser(hospitalUserId, 'STAFF_EN_ROUTE', payload, unreadCount);
                 
                 console.log(`Staff en route notification sent to hospital ${hospitalUserId}`);
             } catch (error) {
@@ -395,8 +388,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-                websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+                await notificationDelivery.deliverToUser(hospitalUserId, 'STAFF_ON_SITE', payload, unreadCount);
                 
                 console.log(`Staff on-site notification sent to hospital ${hospitalUserId}`);
             } catch (error) {
@@ -451,8 +443,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(staffUserId, unreadCount);
-                websocketManager.emitToUser(staffUserId, 'notification', payload);
+                await notificationDelivery.deliverToUser(staffUserId, 'NAVIGATE_TO_DUTY', payload, unreadCount);
                 
                 console.log(`Navigate to duty notification sent to staff ${staffUserId}`);
             } catch (error) {
@@ -544,11 +535,8 @@ class NotificationEmitter {
                         payload
                     );
                     
-                    // Send unread count
-                    websocketManager.sendUnreadCount(recipientUserId, unreadCount);
-                    
-                    // Emit real-time notification
-                    websocketManager.emitToUser(recipientUserId, 'notification', payload);
+                    // Deliver via smart routing (WebSocket or FCM)
+                    await notificationDelivery.deliverToUser(recipientUserId, notificationType, payload, unreadCount);
                     
                     console.log(`Duty cancelled notification (${notificationType}) sent to user ${recipientUserId}`);
                 } catch (error) {
@@ -586,10 +574,9 @@ class NotificationEmitter {
 
             // Persist notification for staff
             const { unreadCount } = await notificationService.createNotificationWithCount(staffUserId, 'DUTY_EDITED', payload);
-            websocketManager.sendUnreadCount(staffUserId, unreadCount);
 
-            // Emit to staff
-            websocketManager.emitToUser(staffUserId, 'notification', payload);
+            // Deliver via smart routing (WebSocket or FCM)
+            await notificationDelivery.deliverToUser(staffUserId, 'DUTY_EDITED', payload, unreadCount);
 
             console.log(`Duty edited notification emitted to staff ${staffUserId}`);
         } catch (error) {
@@ -622,18 +609,14 @@ class NotificationEmitter {
             const staffUserId = staff.user.toString();
 
             // Save notification
-            await notificationService.createNotification(
+            const { unreadCount } = await notificationService.createNotificationWithCount(
                 staffUserId,
                 'REVIEW_RECEIVED',
                 payload
             );
 
-            const unreadCount = await notificationService.getUnreadCount(staffUserId);
-
-            websocketManager.sendUnreadCount(staffUserId, unreadCount);
-
-            // Real-time emit
-            websocketManager.emitToUser(staffUserId, 'notification', payload);
+            // Deliver via smart routing (WebSocket or FCM)
+            await notificationDelivery.deliverToUser(staffUserId, 'REVIEW_RECEIVED', payload, unreadCount);
 
             console.log(`Review notification sent to staff ${staffUserId}`);
 
@@ -690,8 +673,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(staffUserId, unreadCount);
-                websocketManager.emitToUser(staffUserId, 'notification', payload);
+                await notificationDelivery.deliverToUser(staffUserId, 'DUTY_IN_PROGRESS', payload, unreadCount);
                 
                 console.log(`Duty in-progress notification sent to staff ${staffUserId}`);
             } catch (error) {
@@ -751,8 +733,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-                websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+                await notificationDelivery.deliverToUser(hospitalUserId, 'DUTY_COMPLETED', payload, unreadCount);
                 
                 console.log(`Duty completed notification sent to hospital ${hospitalUserId}`);
             } catch (error) {
@@ -812,15 +793,8 @@ class NotificationEmitter {
             try {
                 await notificationService.createBulkNotifications(adminUserIds, 'NEW_HOSPITAL_REGISTRATION', payload);
                 
-                // Batch fetch unread counts
-                const unreadCounts = await notificationService.getBulkUnreadCounts(adminUserIds);
-                
-                // Send unread counts and emit to each admin
-                for (const adminUserId of adminUserIds) {
-                    const count = unreadCounts[adminUserId] || 0;
-                    websocketManager.sendUnreadCount(adminUserId, count);
-                    websocketManager.emitToUser(adminUserId, 'notification', payload);
-                }
+                // Deliver to all admins via smart routing (WebSocket or FCM)
+                await notificationDelivery.deliverToUsers(adminUserIds, 'NEW_HOSPITAL_REGISTRATION', payload);
 
                 console.log(`New hospital registration notification sent to ${adminUserIds.length} admins`);
             } catch (error) {
@@ -881,15 +855,8 @@ class NotificationEmitter {
             try {
                 await notificationService.createBulkNotifications(adminUserIds, 'NEW_STAFF_REGISTRATION', payload);
                 
-                // Batch fetch unread counts
-                const unreadCounts = await notificationService.getBulkUnreadCounts(adminUserIds);
-                
-                // Send unread counts and emit to each admin
-                for (const adminUserId of adminUserIds) {
-                    const count = unreadCounts[adminUserId] || 0;
-                    websocketManager.sendUnreadCount(adminUserId, count);
-                    websocketManager.emitToUser(adminUserId, 'notification', payload);
-                }
+                // Deliver to all admins via smart routing (WebSocket or FCM)
+                await notificationDelivery.deliverToUsers(adminUserIds, 'NEW_STAFF_REGISTRATION', payload);
 
                 console.log(`New staff registration notification sent to ${adminUserIds.length} admins`);
             } catch (error) {
@@ -930,8 +897,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(document.userId, unreadCount);
-                websocketManager.emitToUser(document.userId, 'notification', payload);
+                await notificationDelivery.deliverToUser(document.userId, 'DOCUMENT_VERIFIED', payload, unreadCount);
                 
                 console.log(`Document verified notification sent to ${userRole} ${document.userId}`);
             } catch (error) {
@@ -976,8 +942,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(document.userId, unreadCount);
-                websocketManager.emitToUser(document.userId, 'notification', payload);
+                await notificationDelivery.deliverToUser(document.userId, 'DOCUMENT_REJECTED', payload, unreadCount);
                 
                 console.log(`Document rejected notification sent to ${userRole} ${document.userId}`);
             } catch (error) {
@@ -1025,8 +990,7 @@ class NotificationEmitter {
                 payload
             );
 
-            websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-            websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+            await notificationDelivery.deliverToUser(hospitalUserId, 'DUTY_UNASSIGNED_15MIN', payload, unreadCount);
 
             console.log(`Duty unassigned 15-min notification sent to hospital ${hospitalUserId} for duty ${duty._id}`);
         } catch (error) {
@@ -1071,8 +1035,7 @@ class NotificationEmitter {
                 payload
             );
 
-            websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-            websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+            await notificationDelivery.deliverToUser(hospitalUserId, 'DUTY_UNFILLED_CRITICAL', payload, unreadCount);
 
             console.log(`Duty unfilled CRITICAL notification sent to hospital ${hospitalUserId} for duty ${duty._id}`);
         } catch (error) {
@@ -1121,8 +1084,7 @@ class NotificationEmitter {
             for (const adminId of adminUserIds) {
                 try {
                     const { unreadCount } = await notificationService.createNotificationWithCount(adminId, 'EMERGENCY_ADMIN_ALERT', payload);
-                    websocketManager.sendUnreadCount(adminId, unreadCount);
-                    websocketManager.emitToUser(adminId, 'notification', payload);
+                    await notificationDelivery.deliverToUser(adminId, 'EMERGENCY_ADMIN_ALERT', payload, unreadCount);
                 } catch (err) {
                     console.error(`Error sending emergency alert to admin ${adminId}:`, err);
                 }

@@ -17,9 +17,9 @@ const connectDB = async () => {
   if (!cached.promise) {
     const opts = {
       dbName: "Hospilink",
-      serverSelectionTimeoutMS: 50000,
-      socketTimeoutMS: 60000,
-      connectTimeoutMS: 30000,
+      serverSelectionTimeoutMS: 10000,  // Reduced from 50s to 10s
+      socketTimeoutMS: 45000,            // Reduced from 60s to 45s
+      connectTimeoutMS: 10000,           // Reduced from 30s to 10s
 
       bufferCommands: false, // Disable mongoose buffering to fail fast if not connected
       family: 4, // Force IPv4 to avoid ENOTFOUND errors on some systems

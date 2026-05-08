@@ -85,7 +85,7 @@ class RedisConfig {
                 this.redis.removeAllListeners('ready');
                 this.redis.removeAllListeners('error');
                 reject(new Error('Redis connection timeout'));
-            }, 10000);
+            }, 5000);  // Reduced from 10s to 5s
 
             this.redis.once('ready', () => {
                 clearTimeout(timeout);
@@ -133,8 +133,8 @@ class RedisConfig {
 // Singleton instance — reused across warm invocations in serverless
 const instance = new RedisConfig();
 
-// Auto-connect on module load so serverless warm starts reuse the connection
-instance.connect().catch(() => {}); // errors handled by event listeners
+// Don't auto-connect on module load - let server.js control initialization
+// instance.connect().catch(() => {}); // REMOVED - causes slow startup
 
 /**
  * Create dedicated Redis clients for Socket.IO adapter
@@ -186,7 +186,7 @@ async function getPubSubClients() {
                 }
                 const timeout = setTimeout(() => {
                     reject(new Error('Pub client timeout'));
-                }, 10000);
+                }, 5000);  // Reduced from 10s to 5s
                 pubClient.once('ready', () => {
                     clearTimeout(timeout);
                     resolve();
@@ -202,7 +202,7 @@ async function getPubSubClients() {
                 }
                 const timeout = setTimeout(() => {
                     reject(new Error('Sub client timeout'));
-                }, 10000);
+                }, 5000);  // Reduced from 10s to 5s
                 subClient.once('ready', () => {
                     clearTimeout(timeout);
                     resolve();
