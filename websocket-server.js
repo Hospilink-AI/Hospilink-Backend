@@ -11,6 +11,7 @@ const cors = require('cors');
 const connectDB = require('./src/config/database');
 const { initializeSocket } = require('./src/socket/index');
 const websocketManager = require('./src/services/websocketManager');
+const socketMonitor = require('./src/utils/socketMonitor');
 const logger = require('./src/utils/logger');
 const CronJobs = require('./src/utils/cronJobs');
 
@@ -32,11 +33,19 @@ app.use(express.json());
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+    const { getAdapterInfo } = require('./src/socket/index');
+    const adapterInfo = getAdapterInfo();
+    
     res.json({
         status: 'OK',
         service: 'HospiLink WebSocket Server',
         timestamp: new Date().toISOString(),
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        adapter: {
+            type: adapterInfo.adapter,
+            redisEnabled: adapterInfo.redisAdapter,
+            serverCount: adapterInfo.serverCount
+        }
     });
 });
 
@@ -50,39 +59,83 @@ app.get('/', (req, res) => {
     });
 });
 
+// Metrics endpoint (for monitoring/debugging)
+app.get('/metrics', (req, res) => {
+    const socketMonitor = require('./src/utils/socketMonitor');
+    const metrics = socketMonitor.getMetrics();
+    const roomStats = socketMonitor.getRoomStats();
+    
+    res.json({
+        status: 'OK',
+        metrics,
+        rooms: roomStats
+    });
+});
+
 // Start server
 async function startWebSocketServer() {
     try {
         // Connect to MongoDB
         await connectDB();
-        logger.info('MongoDB Connected');
 
         // Connect to Redis
         const redisConfig = require('./src/config/redis');
         await redisConfig.connect();
-        logger.info('Redis Connected');
 
         // Create HTTP server
         const server = http.createServer(app);
 
-        // Initialize Socket.IO
-        const io = initializeSocket(server);
+        // Initialize Socket.IO with Redis adapter (async)
+        const io = await initializeSocket(server);
         websocketManager.setIO(io);
-        logger.info('Socket.IO initialized');
+
+        // Initialize monitoring
+        socketMonitor.initialize(io);
 
         // Initialize Location Tracking Handler
         require('./src/socket/locationTracking.handler');
-        logger.info('Location tracking initialized');
 
         // Start cron jobs
         CronJobs.startAllJobs();
-        logger.info('Cron jobs started');
 
         // Start server
         server.listen(PORT, '0.0.0.0', () => {
             logger.info(`WebSocket Server running on port ${PORT}`);
-            logger.info(`Health check: http://localhost:${PORT}/health`);
+            
+            // Log adapter status
+            const { getAdapterInfo } = require('./src/socket/index');
+            const adapterInfo = getAdapterInfo();
+            logger.info(`Socket.IO adapter: ${adapterInfo.adapter}`);
         });
+
+        // Graceful shutdown handler
+        const gracefulShutdown = async (signal) => {
+            logger.info(`${signal} received, shutting down gracefully...`);
+            
+            try {
+                // Close HTTP server
+                server.close(() => {
+                    logger.info('HTTP server closed');
+                });
+
+                // Disconnect Redis pub/sub clients
+                const { disconnectPubSubClients } = require('./src/config/redis');
+                await disconnectPubSubClients();
+                
+                // Disconnect main Redis client
+                await redisConfig.disconnect();
+                
+                logger.info('All connections closed');
+                process.exit(0);
+            } catch (error) {
+                logger.error('Error during shutdown:', error.message);
+                process.exit(1);
+            }
+        };
+
+        // Register shutdown handlers
+        process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+        process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
     } catch (error) {
         logger.error(`Failed to start WebSocket server: ${error.message}`);
@@ -93,6 +146,7 @@ async function startWebSocketServer() {
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
     logger.error(`Uncaught Exception: ${error.message}`);
+    logger.error(error.stack);
     process.exit(1);
 });
 
@@ -100,17 +154,6 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
     logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`);
     process.exit(1);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-    logger.info('SIGTERM received, shutting down gracefully...');
-    process.exit(0);
-});
-
-process.on('SIGINT', () => {
-    logger.info('SIGINT received, shutting down gracefully...');
-    process.exit(0);
 });
 
 startWebSocketServer();

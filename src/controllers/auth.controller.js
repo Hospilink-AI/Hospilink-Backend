@@ -237,6 +237,69 @@ class AuthController {
         
         res.status(200).json({ success: true, ...result });
     });
+
+    /**
+     * Register FCM token for push notifications (Phase 3)
+     * @route POST /api/auth/fcm-token
+     * @access Private
+     */
+    registerFCMToken = asyncHandler(async (req, res) => {
+        const { token, deviceId, platform } = req.body;
+        const userId = req.user.id;
+
+        if (!token) {
+            return res.status(400).json({
+                success: false,
+                message: 'FCM token is required'
+            });
+        }
+
+        const fcmService = require('../services/fcm.service');
+        const result = await fcmService.registerToken(
+            userId,
+            token,
+            deviceId || 'unknown',
+            platform || 'android'
+        );
+
+        if (result.success) {
+            res.status(200).json({
+                success: true,
+                message: 'FCM token registered successfully'
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                message: 'Failed to register FCM token',
+                error: result.error
+            });
+        }
+    });
+
+    /**
+     * Remove FCM token (on logout or token refresh)
+     * @route DELETE /api/auth/fcm-token
+     * @access Private
+     */
+    removeFCMToken = asyncHandler(async (req, res) => {
+        const { token } = req.body;
+        const userId = req.user.id;
+
+        if (!token) {
+            return res.status(400).json({
+                success: false,
+                message: 'FCM token is required'
+            });
+        }
+
+        const fcmService = require('../services/fcm.service');
+        const result = await fcmService.removeToken(userId, token);
+
+        res.status(200).json({
+            success: true,
+            message: 'FCM token removed successfully'
+        });
+    });
 }
 
 module.exports = new AuthController();

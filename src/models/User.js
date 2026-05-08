@@ -62,6 +62,27 @@ const userSchema = new mongoose.Schema({
         }
     }],
     
+    // FCM tokens for push notifications (Phase 3)
+    fcmTokens: {
+        type: [{
+            token: {
+                type: String,
+                required: true
+            },
+            deviceId: String,
+            platform: {
+                type: String,
+                enum: ['android', 'ios', 'web'],
+                default: 'android'
+            },
+            updatedAt: {
+                type: Date,
+                default: Date.now
+            }
+        }],
+        default: []
+    },
+    
     createdAt: {
         type: Date,
         default: Date.now
