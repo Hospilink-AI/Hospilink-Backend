@@ -113,7 +113,6 @@ class CacheService {
         }
     }
 
-
     // Enhanced caching methods for profile operations
     async getProfile(userId, role) {
         const key = `profile:${userId}:${role}`;
@@ -155,7 +154,6 @@ class CacheService {
         return await this.set(key, data, ttl);
     }
 
-
     // Profile status caching methods
     async getProfileStatus(userId) {
         const key = `profile:status:${userId}`;
@@ -186,7 +184,6 @@ class CacheService {
         }));
     }
     
-    
     // Location permission caching methods
     async getLocationPermission(userId) {
         const key = `location:permission:${userId}`;
@@ -203,7 +200,6 @@ class CacheService {
         return await this.del(key);
     }
 
-  
     // Real-time availability caching methods
     async getStaffAvailability(userId) {
         const key = `availability:${userId}`;
@@ -270,11 +266,82 @@ class CacheService {
         }));
         
         return await this.pipeline(operations);
-    
-
     }
 
-    
+    // Enhanced caching methods for nearby staff queries 
+    async getNearbyStaff(hospitalId, radius, role, page, limit) {
+        const key = `nearby:staff:${hospitalId}:${radius}:${role || 'all'}:${page}:${limit}`;
+        return await this.get(key);
+    }
+
+    async setNearbyStaff(hospitalId, radius, role, page, limit, data, ttl = 120) {
+        const key = `nearby:staff:${hospitalId}:${radius}:${role || 'all'}:${page}:${limit}`;
+        return await this.set(key, data, ttl);
+    }
+
+    async getAdminNearbyStaff(hospitalId, radius, role, page, limit) {
+        const key = `admin:nearby:staff:${hospitalId}:${radius}:${role || 'all'}:${page}:${limit}`;
+        return await this.get(key);
+    }
+
+    async setAdminNearbyStaff(hospitalId, radius, role, page, limit, data, ttl = 60) {
+        const key = `admin:nearby:staff:${hospitalId}:${radius}:${role || 'all'}:${page}:${limit}`;
+        return await this.set(key, data, ttl);
+    }
+
+    // Duty status caching methods
+    async getDutyStatus(staffId) {
+        const key = `duty:status:${staffId}`;
+        return await this.get(key);
+    }
+
+    async setDutyStatus(staffId, data, ttl = 30) {
+        const key = `duty:status:${staffId}`;
+        return await this.set(key, data, ttl);
+    }
+
+    async invalidateDutyStatus(staffId) {
+        const key = `duty:status:${staffId}`;
+        return await this.del(key);
+    }
+
+    // Batch duty status operations
+    async getBatchDutyStatus(staffIds) {
+        const operations = staffIds.map(id => ({
+            type: 'get',
+            key: `duty:status:${id}`
+        }));
+        
+        const results = await this.pipeline(operations);
+        return staffIds.map((id, index) => ({
+            staffId: id,
+            data: results[index] && results[index][1] ? JSON.parse(results[index][1]) : null
+        }));
+    }
+
+    async setBatchDutyStatus(dutyStatusData, ttl = 30) {
+        const operations = dutyStatusData.map(({ staffId, data }) => ({
+            type: 'set',
+            key: `duty:status:${staffId}`,
+            value: data,
+            ttl
+        }));
+        
+        return await this.pipeline(operations);
+    }
+
+    // Invalidate all nearby staff cache for a hospital
+    async invalidateNearbyStaffCache(hospitalId) {
+        const pattern = `nearby:staff:${hospitalId}:*`;
+        return await this.invalidatePattern(pattern);
+    }
+
+    // Invalidate all admin nearby staff cache for a hospital
+    async invalidateAdminNearbyStaffCache(hospitalId) {
+        const pattern = `admin:nearby:staff:${hospitalId}:*`;
+        return await this.invalidatePattern(pattern);
+    }
+
     // Temporary user methods with redis ttl
     // Store temp user data with TTL
     async setTempUser(email, userData, ttl = 600) {

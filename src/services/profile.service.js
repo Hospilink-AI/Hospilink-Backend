@@ -1006,35 +1006,47 @@ class ProfileService {
     // Get nearby available staff for hospital map dashboard
     async getNearbyAvailableStaff(hospitalUserId, radiusKm = 5, role = null) {
         try {
-            // Get hospital profile
-            const hospital = await Hospital.findOne({ user: hospitalUserId });
+            // Input validation
+            if (radiusKm < 1 || radiusKm > 100) {
+                throw new Error('Radius must be between 1km and 100km');
+            }
+
+            // Check cache first (2 minutes for location-based queries)
+            const cacheKey = `nearby:staff:${hospitalUserId}:${radiusKm}:${role || 'all'}`;
+            const cached = await cacheService.get(cacheKey);
+            if (cached) {
+                return {
+                    ...cached,
+                    cached: true,
+                    timestamp: new Date().toISOString()
+                };
+            }
+
+            // Get hospital profile with minimal fields
+            const hospital = await Hospital.findOne({ user: hospitalUserId })
+                .select('_id hospitalLegalName coordinates currentAddress city state pincode')
+                .lean();
+
             if (!hospital) {
                 throw new Error('Hospital profile not found');
             }
 
-            // Validate hospital has coordinates
-            if (!hospital.coordinates || !hospital.coordinates.coordinates || 
-                !hospital.coordinates.coordinates.latitude || 
-                !hospital.coordinates.coordinates.longitude) {
-                throw new Error('Hospital location coordinates not found. Please update your hospital profile with valid location information.');
-            }
-
-            // Validate radius 
-            if (radiusKm < 1 || radiusKm > 100) {
-                throw new Error('Radius must be between 1km and 100km');
+            if (!hospital.coordinates || !hospital.coordinates.coordinates) {
+                throw new Error('Hospital location coordinates not found');
             }
 
             const hospitalLat = hospital.coordinates.coordinates.latitude;
             const hospitalLng = hospital.coordinates.coordinates.longitude;
 
-            console.log('Searching for staff within', radiusKm, 'km radius', role ? `for role: ${role}` : '');
+            console.log(`Searching for staff within ${radiusKm}km radius`);
 
-            // Build query with bounding box
-            const latDelta = radiusKm / 111; // Approximate km to degrees
+            // Optimized bounding box query with compound index
+            const latDelta = radiusKm / 111;
             const lngDelta = radiusKm / (111 * Math.cos(hospitalLat * Math.PI / 180));
 
             const query = {
                 isAvailable: true,
+                verificationStatus: 'verified', // Only verified staff
                 'coordinates.coordinates.latitude': {
                     $gte: hospitalLat - latDelta,
                     $lte: hospitalLat + latDelta
@@ -1045,67 +1057,99 @@ class ProfileService {
                 }
             };
 
-            // Add role filter if specified
             if (role) {
                 query.jobRole = role;
             }
 
+            // Optimized query without pagination
             const nearbyStaff = await MedicalStaff.find(query)
-                .populate('user', 'name email role isEmailVerified')         // populate minimal user data fields only
-                .select('fullName jobRole currentAddress city state pincode phoneNumber email coordinates isAvailable averageRating')         // select only required fields
-                .lean();    // return plain JavaScript objects instead of Mongoose documents
+                .populate('user', 'name email')
+                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating verificationStatus') 
+                .sort({ 'coordinates.coordinates.latitude': 1, 'coordinates.coordinates.longitude': 1 })
+                .lean();
 
-            console.log('Found', nearbyStaff.length, 'candidates via bounding box');
+            console.log(`Found ${nearbyStaff.length} candidates via bounding box`);
 
-            // Filter by exact distance using Google Maps API only
-            const exactNearbyStaff = [];
-            for (const staff of nearbyStaff) {
-                try {
-                    const distanceResult = await geocodingService.calculateDistanceAndETA(
-                        hospitalLat,
-                        hospitalLng,
-                        staff.coordinates.coordinates.latitude,
-                        staff.coordinates.coordinates.longitude
-                    );
+            // Batch Google Maps API calls (optimized for performance)
+            const staffWithDistance = await Promise.allSettled(
+                nearbyStaff.map(async (staff) => {
+                    try {
+                        const distanceResult = await geocodingService.calculateDistanceAndETA(
+                            hospitalLat,
+                            hospitalLng,
+                            staff.coordinates.coordinates.latitude,
+                            staff.coordinates.coordinates.longitude
+                        );
 
-                    staff.distance = parseFloat(distanceResult.distance.toFixed(2));
-                    if (distanceResult.distance <= radiusKm) {
-                        exactNearbyStaff.push(staff);
+                        return {
+                            ...staff,
+                            distance: parseFloat(distanceResult.distance.toFixed(2)),
+                            distanceText: distanceResult.distanceText,
+                            estimatedTime: distanceResult.duration,
+                            estimatedTimeText: distanceResult.durationText
+                        };
+                    } catch (error) {
+                        console.error(`Google Maps API failed for staff ${staff._id}:`, error.message);
+                        return null;
                     }
-                } catch (error) {
-                    console.error(`Google Maps API failed for staff ${staff._id}:`, error.message);
-                    // Skip staff if Google Maps API fails
-                    continue;
-                }
-            }
+                })
+            );
 
-            // Format response 
-            const staffWithDistance = exactNearbyStaff.map(staff => ({
-                id: staff._id,
-                name: staff.fullName,
-                email: staff.user?.email || staff.email, 
-                role: staff.jobRole,
-                phone: staff.phoneNumber,
-                rating: staff.averageRating || 0,
-                isAvailable: staff.isAvailable,
-                distance: staff.distance,
-                address: {
-                    currentAddress: staff.currentAddress,
-                    city: staff.city,
-                    state: staff.state,
-                    pincode: staff.pincode
-                },
-                location: {
-                    latitude: staff.coordinates.coordinates.latitude,
-                    longitude: staff.coordinates.coordinates.longitude
-                }
-            }));
+            // Filter successful results and apply exact distance filter
+            const validStaff = staffWithDistance
+                .filter(result => result.status === 'fulfilled' && result.value && result.value.distance <= radiusKm)
+                .map(result => result.value);
+
+            console.log(`Found ${validStaff.length} staff within exact distance`);
+
+            // Get duty status for all valid staff (batch optimized)
+            const staffIds = validStaff.map(staff => staff._id);
+            const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');
+            const dutyStatusMap = await getBatchStaffDutyStatus(staffIds);
+
+            // Format response with duty status
+            const staffWithDutyStatus = validStaff.map(staff => {
+                const dutyStatus = dutyStatusMap.get(staff._id.toString());
+                
+                return {
+                    id: staff._id,
+                    name: staff.fullName,
+                    email: staff.user?.email || staff.email,
+                    role: staff.jobRole,
+                    phone: staff.phoneNumber,
+                    rating: staff.averageRating || 0,
+                    isAvailable: staff.isAvailable,
+                    verificationStatus: staff.verificationStatus, 
+                    distance: staff.distance,
+                    distanceText: staff.distanceText,
+                    estimatedTime: staff.estimatedTime,
+                    estimatedTimeText: staff.estimatedTimeText,
+                    availabilityStatus: dutyStatus.status,
+                    hasActiveDuty: dutyStatus.hasActiveDuty,
+                    hasUpcomingDuty: dutyStatus.hasUpcomingDuty,
+                    currentDuty: dutyStatus.currentDuty,
+                    nextDuty: dutyStatus.nextDuty,
+                    activeDutyCount: dutyStatus.activeDutyCount,
+                    upcomingDutyCount: dutyStatus.upcomingDutyCount,
+                    address: {
+                        currentAddress: staff.currentAddress,
+                        city: staff.city,
+                        state: staff.state,
+                        pincode: staff.pincode
+                    },
+                    location: {
+                        latitude: staff.coordinates.coordinates.latitude,
+                        longitude: staff.coordinates.coordinates.longitude
+                    }
+                };
+            });
 
             // Sort by distance
-            staffWithDistance.sort((a, b) => a.distance - b.distance);
+            staffWithDutyStatus.sort((a, b) => a.distance - b.distance);
 
-            return {
+            const result = {
                 success: true,
+                cached: false,
                 data: {
                     hospital: {
                         id: hospital._id,
@@ -1124,12 +1168,23 @@ class ProfileService {
                     search: {
                         radius: radiusKm,
                         roleFilter: role || 'all',
-                        totalFound: staffWithDistance.length
+                        totalFound: staffWithDutyStatus.length
                     },
-                    staff: staffWithDistance
+                    staff: staffWithDutyStatus,
+                    summary: {
+                        totalStaff: staffWithDutyStatus.length,
+                        fullyAvailable: staffWithDutyStatus.filter(s => s.availabilityStatus === 'fully_available').length,
+                        hasUpcomingDuties: staffWithDutyStatus.filter(s => s.availabilityStatus === 'has_upcoming_duties').length,
+                        hasActiveDuties: staffWithDutyStatus.filter(s => s.availabilityStatus === 'has_active_duties').length
+                    }
                 },
-                message: `Found ${staffWithDistance.length} available staff within ${radiusKm}km radius${role ? ` for role: ${role}` : ''}`
+                message: `Found ${staffWithDutyStatus.length} available staff within ${radiusKm}km radius${role ? ` for role: ${role}` : ''}`,
+                timestamp: new Date().toISOString()
             };
+
+            // Cache result for 2 minutes
+            await cacheService.set(cacheKey, result, 120);
+            return result;
         } catch (error) {
             console.error('Error in getNearbyAvailableStaff:', error);
             throw new Error(error.message);

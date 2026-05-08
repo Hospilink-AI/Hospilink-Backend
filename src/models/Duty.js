@@ -1,7 +1,6 @@
 const mongoose = require('mongoose');
 const { toIST, getCurrentIST, calculateDutyDuration } = require('../utils/helpers');
 
-
 const dutySchema = new mongoose.Schema({
     hospital: {
         type: mongoose.Schema.Types.ObjectId,
@@ -213,7 +212,6 @@ const dutySchema = new mongoose.Schema({
 });
 
 
-
 // Status validation methods
 dutySchema.methods.canChangeStatus = function (newStatus, userId) {
     // Validate staff assignment
@@ -241,7 +239,6 @@ dutySchema.methods.canChangeStatus = function (newStatus, userId) {
 };
 
 
-
 dutySchema.methods.isWithinStartBuffer = function () {
     // Use getCurrentIST() for consistent time handling
     const now = getCurrentIST();
@@ -261,7 +258,6 @@ dutySchema.methods.isWithinStartBuffer = function () {
 };
 
 
-
 dutySchema.methods.isAtEndTime = function () {
     // Use getCurrentIST() for consistent time handling
     const now = getCurrentIST();
@@ -279,7 +275,6 @@ dutySchema.methods.isAtEndTime = function () {
 };
 
 
-
 dutySchema.methods.canStartDuty = function () {
     if (this.status !== 'enroute') {
         return { allowed: false, reason: 'Duty must be enroute before starting' };
@@ -291,7 +286,6 @@ dutySchema.methods.canStartDuty = function () {
 
     return { allowed: true };
 };
-
 
 
 dutySchema.methods.canCompleteDuty = function () {
@@ -321,7 +315,6 @@ dutySchema.methods.canCompleteDuty = function () {
 
     return { allowed: true };
 };
-
 
 
 dutySchema.methods.canEditDuty = function () {
@@ -427,26 +420,55 @@ dutySchema.pre('save', function (next) {
     }
 });
 
-// Indexes for faster queries
+
+
+
+// Basic single-field indexes
 dutySchema.index({ hospital: 1 });
 dutySchema.index({ staffRole: 1 });
 dutySchema.index({ date: 1 });
 dutySchema.index({ status: 1 });
 dutySchema.index({ createdAt: -1 });
 dutySchema.index({ totalPayment: 1 });
+dutySchema.index({ assignedTo: 1 });
 
-// Compound indexes
+// Essential compound indexes for performance
 dutySchema.index({ hospital: 1, status: 1 });
 dutySchema.index({ staffRole: 1, status: 1, date: 1 });
 dutySchema.index({ createdAt: 1, status: 1 });
 
+// Optimized indexes for staff duty status 
+dutySchema.index({ 
+    assignedTo: 1, 
+    status: 1, 
+    date: 1 
+}); // For staff duty status lookup
+
+dutySchema.index({ 
+    assignedTo: 1, 
+    status: { $in: ['assigned', 'enroute', 'in-progress'] }, 
+    date: 1 
+}); // For active duties
+
+dutySchema.index({ 
+    assignedTo: 1, 
+    status: 'available', 
+    date: { $gte: new Date(), $lte: new Date(Date.now() + 7*24*60*60*1000) }
+}); // For upcoming duties (next 7 days)
+
+dutySchema.index({ 
+    assignedTo: 1, 
+    date: 1, 
+    startTime: 1,
+    endTime: 1
+}); // For time-based duty queries
 
 // Enhanced indexes for route map optimization
 dutySchema.index({ 
     assignedTo: 1, 
     status: 1, 
     date: -1 
-}); // For active duty queries
+}); // For active duty queries (optimized)
 
 dutySchema.index({ 
     status: 1, 
@@ -457,10 +479,10 @@ dutySchema.index({
 dutySchema.index({ 
     hospital: 1, 
     status: 1, 
-    'date': 1 
-}); // For hospital-based queries
+    date: -1 
+}); // For hospital-specific queries 
 
-// TTL index for status history cleanup 
+// TTL index for status history cleanup (90 days)
 dutySchema.index({ 
     'statusHistory.timestamp': 1 
 }, { 
@@ -515,8 +537,6 @@ dutySchema.virtual('formattedRole').get(function () {
     return roleNames[this.staffRole] || this.staffRole;
 });
 
-// Ensure virtual fields are serialized
-// dutySchema.set('toJSON', { virtuals: true });
 
 const Duty = mongoose.model('Duty', dutySchema);
 
