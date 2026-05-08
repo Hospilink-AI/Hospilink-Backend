@@ -8,7 +8,8 @@ const documentService = require('./document.service');
 const Review = require('../models/Review');
 const path = require('path');
 const { uploadToS3, deleteFromS3, generatePreSignedURL } = require('./s3.service');
-
+const notificationEmitter = require('./notificationEmitter');
+const emailService = require('./email.service');
 
 class ProfileService {
     // Create medical staff profile
@@ -98,12 +99,23 @@ class ProfileService {
 
             // Emit notification to admins about new staff registration
             try {
-                const notificationEmitter = require('./notificationEmitter');
                 const user = await User.findById(userId);
                 await notificationEmitter.emitNewStaffRegistration(medicalStaffProfile, user);
             } catch (notifError) {
                 console.error('Error sending staff registration notification:', notifError);
                 // Don't fail the registration if notification fails
+            }
+
+            // Send profile creation confirmation email
+            try {
+                await emailService.sendProfileCreatedConfirmationEmail(
+                    user.email,
+                    medicalStaffProfile.fullName || user.name,
+                    'staff'
+                );
+            } catch (emailError) {
+                console.error('Error sending profile creation email:', emailError);
+                // Don't fail the registration if email fails
             }
 
             return {
@@ -247,12 +259,23 @@ class ProfileService {
 
             // Emit notification to admins about new hospital registration
             try {
-                const notificationEmitter = require('./notificationEmitter');
                 const user = await User.findById(userId);
                 await notificationEmitter.emitNewHospitalRegistration(hospitalProfile, user);
             } catch (notifError) {
                 console.error('Error sending hospital registration notification:', notifError);
                 // Don't fail the registration if notification fails
+            }
+
+            // Send profile creation confirmation email
+            try {
+                await emailService.sendProfileCreatedConfirmationEmail(
+                    user.email,
+                    hospitalProfile.hospitalLegalName || user.name,
+                    'hospital'
+                );
+            } catch (emailError) {
+                console.error('Error sending profile creation email:', emailError);
+                // Don't fail the registration if email fails
             }
 
             return {
