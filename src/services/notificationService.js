@@ -264,6 +264,90 @@ class NotificationService {
             throw error;
         }
     }
+
+    /**
+     * Get undelivered notifications for a user
+     * @param {string} userId - User ID
+     * @param {number} limit - Maximum number of notifications to return
+     * @returns {Promise<Array>} Array of undelivered notifications
+     */
+    async getUndeliveredNotifications(userId, limit = 100) {
+        try {
+            const notifications = await Notification.find({
+                recipient: userId,
+                deliveredAt: null
+            })
+            .sort({ createdAt: 1 }) // Oldest first for chronological delivery
+            .limit(limit)
+            .lean();
+            
+            return notifications;
+        } catch (error) {
+            console.error('Error fetching undelivered notifications:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Mark notifications as delivered
+     * @param {string[]} notificationIds - Array of notification IDs
+     * @returns {Promise<Object>} Update result
+     */
+    async markAsDelivered(notificationIds) {
+        try {
+            if (!notificationIds || notificationIds.length === 0) {
+                return { modifiedCount: 0 };
+            }
+
+            const result = await Notification.updateMany(
+                { _id: { $in: notificationIds } },
+                { deliveredAt: new Date() }
+            );
+            
+            console.log(`Marked ${result.modifiedCount} notifications as delivered`);
+            return result;
+        } catch (error) {
+            console.error('Error marking notifications as delivered:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Mark notifications as delivered for specific users (for role broadcasts)
+     * @param {string[]} userIds - Array of user IDs
+     * @param {string} type - Notification type
+     * @param {string} dutyId - Duty ID (optional, for filtering)
+     * @returns {Promise<Object>} Update result
+     */
+    async markDeliveredForUsers(userIds, type, dutyId = null) {
+        try {
+            if (!userIds || userIds.length === 0) {
+                return { modifiedCount: 0 };
+            }
+
+            const query = {
+                recipient: { $in: userIds },
+                type,
+                deliveredAt: null
+            };
+
+            // If dutyId provided, filter by it
+            if (dutyId) {
+                query['payload.duty.id'] = dutyId.toString();
+            }
+
+            const result = await Notification.updateMany(
+                query,
+                { deliveredAt: new Date() }
+            );
+            
+            console.log(`Marked ${result.modifiedCount} notifications as delivered for ${userIds.length} users`);
+            return result;
+        } catch (error) {
+            console.error('Error marking notifications as delivered for users:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = new NotificationService();
