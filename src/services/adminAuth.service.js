@@ -61,11 +61,14 @@ class AdminAuthService {
                 )
             ]);
 
-            // Send OTP email immediately (non-blocking)
-            EmailService.sendAdminOTPEmail(admin.email, otp, admin.name)
-                .catch(err => logger.error(`Failed to send admin OTP email: ${err.message}`));
+            try {
+                await EmailService.sendAdminOTPEmail(admin.email, otp, admin.name);
+                logger.info(`Admin signin OTP sent to: ${admin.email}`);
+            } catch (err) {
+                logger.error(`Failed to send admin OTP email: ${err.message}`);
+                throw new Error('Failed to send OTP email. Please try again.');
+            }
 
-            logger.info(`Admin signin OTP sent to: ${admin.email}`);
             
             return {
                 message: 'OTP sent to your email for verification',
