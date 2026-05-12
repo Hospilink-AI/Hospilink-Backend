@@ -1,6 +1,8 @@
 const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
 const User = require('../models/User');
+const Duty = require('../models/Duty');
+const Document = require('../models/Document');
 const geocodingService = require('../services/geocoding.service');
 const cacheService = require('./cache.service');
 // const { toRadians } = require('../utils/helpers');
@@ -10,6 +12,9 @@ const path = require('path');
 const { uploadToS3, deleteFromS3, generatePreSignedURL } = require('./s3.service');
 const notificationEmitter = require('./notificationEmitter');
 const emailService = require('./email.service');
+const requiredDocsConfig = require('../config/requiredDocs');
+const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');            
+
 
 class ProfileService {
     // Create medical staff profile
@@ -306,8 +311,6 @@ class ProfileService {
             if (user.role === 'staff') {
                 const raw = await MedicalStaff.findOne({ user: userId }).lean();
                 if (raw) {
-                    const Duty = require('../models/Duty');
-                    const Document = require('../models/Document');
                     let profilePictureUrl = null;
 
                     // Generate presigned URL for profile picture
@@ -455,8 +458,6 @@ class ProfileService {
     // Update user profile with location handling
     async updateUserProfile(userId, updateData) {
         try {
-            const cacheService = require('./cache.service');
-
             // Get user with lean query
             const user = await User.findById(userId).select('name email role').lean();
             if (!user) {
@@ -527,7 +528,6 @@ class ProfileService {
                             };
                         } else {
                             // Geocode and cache result
-                            const geocodingService = require('../services/geocoding.service');
                             const geocoded = await geocodingService.geocodeAddress(address);
                             finalUpdateData.coordinates = {
                                 type: 'Point',
@@ -617,8 +617,7 @@ class ProfileService {
                                 }
                             };
                         } else {
-                            // Geocode and cache
-                            const geocodingService = require('../services/geocoding.service');
+                            // Geocode and cache              
                             const geocoded = await geocodingService.geocodeAddress(locationToGeocode);
                             finalUpdateData.coordinates = {
                                 type: 'Point',
@@ -734,8 +733,6 @@ class ProfileService {
 
             if (!user) throw new Error('User not found');
 
-            const requiredDocsConfig = require('../config/requiredDocs');
-            const Document = require('../models/Document');
 
             // Run profile + document checks in parallel
             let profileDoc = null;
@@ -960,7 +957,6 @@ class ProfileService {
 
                 if (!upcomingDuties) {
                     // Use lean query with minimal fields
-                    const Duty = require('../models/Duty');
                     upcomingDuties = await Duty.find({
                         assignedTo: medicalStaff._id,
                         status: 'assigned',
@@ -1127,7 +1123,6 @@ class ProfileService {
 
             // Get duty status for all valid staff (batch optimized)
             const staffIds = validStaff.map(staff => staff._id);
-            const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');
             const dutyStatusMap = await getBatchStaffDutyStatus(staffIds);
 
             // Format response with duty status

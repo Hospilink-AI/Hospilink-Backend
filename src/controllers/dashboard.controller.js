@@ -1,5 +1,7 @@
 const DashboardService = require('../services/dashboard.service');
 const { asyncHandler } = require('../middleware/error.middleware');
+const MedicalStaff = require('../models/MedicalStaff');
+
 
 // Staff overview endpoint
 exports.getStaffOverview = asyncHandler(async (req, res) => {
@@ -16,7 +18,7 @@ exports.getStaffOverview = asyncHandler(async (req, res) => {
 // Staff statistics endpoint
 exports.getStaffStats = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const medicalStaff = await require('../models/MedicalStaff').findOne({ user: userId });
+    const medicalStaff = await MedicalStaff.findOne({ user: userId });
     
     if (!medicalStaff) {
         return res.status(404).json({
@@ -50,7 +52,7 @@ exports.getUpcomingDuties = asyncHandler(async (req, res) => {
 // Earnings information endpoint
 exports.getEarnings = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const medicalStaff = await require('../models/MedicalStaff').findOne({ user: userId });
+    const medicalStaff = await MedicalStaff.findOne({ user: userId });
     
     if (!medicalStaff) {
         return res.status(404).json({

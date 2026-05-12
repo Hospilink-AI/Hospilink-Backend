@@ -2,7 +2,6 @@ const documentService = require("../services/document.service");
 const { deleteFromS3 } = require("../services/s3.service");
 
 exports.uploadDocument = async (req, res) => {
-
     try {
 
         const user = req.user;
@@ -63,6 +62,7 @@ exports.uploadDocument = async (req, res) => {
     }
 };
 
+
 exports.getDocuments = async (req, res) => {
 
     try {
@@ -87,6 +87,7 @@ exports.getDocuments = async (req, res) => {
     }
 };
 
+
 exports.getDocumentById = async (req, res) => {
 
     try {
@@ -110,6 +111,7 @@ exports.getDocumentById = async (req, res) => {
 
     }
 };
+
 
 exports.verifyDocument = async (req, res) => {
 
@@ -136,6 +138,7 @@ exports.verifyDocument = async (req, res) => {
 
     }
 };
+
 
 exports.rejectDocument = async (req, res) => {
 
@@ -174,6 +177,7 @@ exports.rejectDocument = async (req, res) => {
     }
 };
 
+
 exports.getRequiredDocuments = async (req, res) => {
 
     try {
@@ -196,6 +200,7 @@ exports.getRequiredDocuments = async (req, res) => {
 
     }
 };
+
 
 exports.deleteDocument = async (req, res) => {
 
@@ -220,38 +225,3 @@ exports.deleteDocument = async (req, res) => {
 
     }
 };
-
-// const documentService = require("../services/document.service");
-
-// exports.uploadDocument = async (req, res) => {
-
-//     try {
-
-//         const user = req.user;
-//         const file = req.file;
-
-//         if (!file) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "No file uploaded"
-//             });
-//         }
-
-//         const documentType = req.body.documentType;
-
-//         const result = await documentService.uploadDocument(user, file, documentType);
-
-//         res.status(200).json({
-//             success: true,
-//             data: result
-//         });
-
-//     } catch (error) {
-
-//         res.status(500).json({
-//             success: false,
-//             message: error.message
-//         });
-
-//     }
-// };

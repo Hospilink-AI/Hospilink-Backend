@@ -18,16 +18,6 @@ const logger = require('../utils/logger');
  * Handles all activity logging operations with security and performance optimizations
  */
 class ActivityLogService {
-    /**
-     * Log an activity
-     * @param {Object} actorData - Actor information { userId, name, role, email }
-     * @param {string} action - Activity action
-     * @param {Object} targetData - Target information { type, id, name }
-     * @param {Object} details - Additional details
-     * @param {Object} req - Express request object (optional)
-     * @param {Object} options - Additional options { status, location, metadata }
-     * @returns {Promise<Object>} Created activity log
-     */
     async logActivity(actorData, action, targetData = {}, details = {}, req = null, options = {}) {
         try {
             // Validate required data
@@ -94,13 +84,8 @@ class ActivityLogService {
         }
     }
 
-    /**
-     * Log activity without request object (for system/cron jobs)
-     * @param {string} action - Activity action
-     * @param {Object} details - Activity details
-     * @param {Object} options - Additional options
-     * @returns {Promise<Object>} Created activity log
-     */
+
+    // Log activity without request object (for system/cron jobs)
     async logSystemActivity(action, details = {}, options = {}) {
         return this.logActivity(
             {
@@ -117,12 +102,8 @@ class ActivityLogService {
         );
     }
 
-    /**
-     * Get activity logs with filters and pagination
-     * @param {Object} filters - Filter parameters
-     * @param {Object} paginationOptions - Pagination options
-     * @returns {Promise<Object>} Activity logs with pagination
-     */
+
+    // Get activity logs with filters and pagination
     async getActivityLogs(filters = {}, paginationOptions = {}) {
         try {
             const query = buildActivityLogQuery(filters);
@@ -140,11 +121,8 @@ class ActivityLogService {
         }
     }
 
-    /**
-     * Get activity log by ID
-     * @param {string} logId - Activity log ID
-     * @returns {Promise<Object>} Activity log
-     */
+
+    // Get activity log by ID
     async getActivityLogById(logId) {
         try {
             const log = await ActivityLog.findById(logId).lean();
@@ -163,11 +141,8 @@ class ActivityLogService {
         }
     }
 
-    /**
-     * Get activity statistics
-     * @param {Object} filters - Filter parameters (date range, etc.)
-     * @returns {Promise<Object>} Activity statistics
-     */
+
+    // Get activity statistics
     async getActivityStats(filters = {}) {
         try {
             const stats = await ActivityLog.getStatistics(filters);
@@ -182,12 +157,8 @@ class ActivityLogService {
         }
     }
 
-    /**
-     * Get user activity history
-     * @param {string} userId - User ID
-     * @param {Object} paginationOptions - Pagination options
-     * @returns {Promise<Object>} User activity logs
-     */
+
+    // Get user activity history
     async getUserActivityHistory(userId, paginationOptions = {}) {
         try {
             const filters = { actorId: userId };
@@ -198,11 +169,8 @@ class ActivityLogService {
         }
     }
 
-    /**
-     * Get duty activity history
-     * @param {string} dutyId - Duty ID
-     * @returns {Promise<Object>} Duty activity logs
-     */
+
+    // Get duty activity history
     async getDutyActivityHistory(dutyId) {
         try {
             const logs = await ActivityLog.find({
@@ -225,13 +193,8 @@ class ActivityLogService {
         }
     }
 
-    /**
-     * Search activity logs
-     * @param {string} searchTerm - Search term
-     * @param {Object} filters - Additional filters
-     * @param {Object} paginationOptions - Pagination options
-     * @returns {Promise<Object>} Search results
-     */
+
+    // Search activity logs
     async searchActivityLogs(searchTerm, filters = {}, paginationOptions = {}) {
         try {
             const options = parsePaginationOptions(paginationOptions);
@@ -275,11 +238,8 @@ class ActivityLogService {
         }
     }
 
-    /**
-     * Get recent critical activities
-     * @param {number} limit - Number of activities to fetch
-     * @returns {Promise<Object>} Critical activities
-     */
+
+    // Get recent critical activities 
     async getRecentCriticalActivities(limit = 10) {
         try {
             const logs = await ActivityLog.find({
@@ -303,11 +263,8 @@ class ActivityLogService {
         }
     }
 
-    /**
-     * Get activity timeline (hourly breakdown)
-     * @param {Object} filters - Filter parameters
-     * @returns {Promise<Object>} Timeline data
-     */
+
+    // Get activity timeline (hourly breakdown)
     async getActivityTimeline(filters = {}) {
         try {
             const query = buildActivityLogQuery(filters);
@@ -350,11 +307,8 @@ class ActivityLogService {
         }
     }
 
-    /**
-     * Bulk log activities (for batch operations)
-     * @param {Array} activities - Array of activity data
-     * @returns {Promise<Object>} Result
-     */
+    
+    // Bulk log activities (for batch operations)
     async bulkLogActivities(activities) {
         try {
             if (!Array.isArray(activities) || activities.length === 0) {
