@@ -8,10 +8,7 @@ class RedisConfig {
         this.connectionPromise = null; // Track existing connection attempts
     }
 
-    /**
-     * Initializes the connection. 
-     * Uses a promise guard to prevent multiple simultaneous connection attempts.
-     */
+    // Initializes the connection Uses a promise guard to prevent multiple simultaneous connection attempts.
     async connect() {
         // If already connected or connecting, return the existing promise/client
         if (this.isConnected && this.redis) return this.redis;

@@ -3,6 +3,10 @@ const websocketManager = require('./websocketManager');
 const notificationDelivery = require('./notificationDelivery.service');
 const geocodingService = require('./geocoding.service');
 const MedicalStaff = require('../models/MedicalStaff');
+const Hospital = require('../models/Hospital');
+const User = require('../models/User');
+
+
 
 /**
  * Notification Emitter
@@ -163,7 +167,6 @@ class NotificationEmitter {
             const staffName = staff.fullName || staff.user?.name || 'Staff Member';
             
             // Get hospital details
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalName = hospital?.hospitalLegalName || duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'Hospital';
             const hospitalLocation = hospital?.location || hospital?.currentAddress || 'the hospital';
@@ -284,7 +287,6 @@ class NotificationEmitter {
             const staffName = staff.fullName || staff.user?.name || 'Staff Member';
             
             // Get hospital details
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalName = hospital?.hospitalLegalName || duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'Hospital';
 
@@ -352,7 +354,6 @@ class NotificationEmitter {
             const staffName = staff.fullName || staff.user?.name || 'Staff Member';
             
             // Get hospital details
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalName = hospital?.hospitalLegalName || duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'Hospital';
 
@@ -414,7 +415,6 @@ class NotificationEmitter {
             }
 
             // Get hospital details
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalName = hospital?.hospitalLegalName || duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'Hospital';
 
@@ -465,7 +465,6 @@ class NotificationEmitter {
     async emitDutyCancelled(duty, cancelledByUser, reason, reasonText, recipientUserIds) {
         try {
             // Get hospital details
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalName = hospital?.hospitalLegalName || duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'Hospital';
             
@@ -584,6 +583,7 @@ class NotificationEmitter {
         }
     }
 
+
     async emitReviewReceived(duty, hospital, staff, rating, reviewText) {
         try {
             const payload = {
@@ -701,7 +701,6 @@ class NotificationEmitter {
             const staffName = staff.fullName || staff.user?.name || 'Staff Member';
             
             // Get hospital details for location/ward info
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalLocation = hospital?.location || hospital?.currentAddress || 'the hospital';
 
@@ -779,7 +778,6 @@ class NotificationEmitter {
             };
 
             // Get all admin users
-            const User = require('../models/User');
             const adminUsers = await User.find({ role: 'admin' }).select('_id');
 
             if (adminUsers.length === 0) {
@@ -841,7 +839,6 @@ class NotificationEmitter {
             };
 
             // Get all admin users
-            const User = require('../models/User');
             const adminUsers = await User.find({ role: 'admin' }).select('_id');
 
             if (adminUsers.length === 0) {

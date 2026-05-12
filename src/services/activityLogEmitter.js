@@ -1,19 +1,9 @@
 const activityLogService = require('./activityLog.service');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 
-/**
- * Activity Log Emitter
- * Provides convenient methods to emit activity logs from different parts of the application
- */
+
 class ActivityLogEmitter {
-    /**
-     * Emit duty activity
-     * @param {string} action - Activity action
-     * @param {Object} duty - Duty object
-     * @param {Object} actor - Actor information
-     * @param {Object} details - Additional details
-     * @param {Object} req - Express request object
-     */
+    // Emit duty activity
     async emitDutyActivity(action, duty, actor, details = {}, req = null) {
         try {
             // Validate inputs
@@ -70,14 +60,8 @@ class ActivityLogEmitter {
         }
     }
 
-    /**
-     * Emit user activity
-     * @param {string} action - Activity action
-     * @param {Object} user - User object
-     * @param {Object} actor - Actor information (can be same as user or admin)
-     * @param {Object} details - Additional details
-     * @param {Object} req - Express request object
-     */
+
+    // Emit user activity
     async emitUserActivity(action, user, actor, details = {}, req = null) {
         try {
             const targetData = {
@@ -106,14 +90,8 @@ class ActivityLogEmitter {
         }
     }
 
-    /**
-     * Emit document activity
-     * @param {string} action - Activity action
-     * @param {Object} document - Document object
-     * @param {Object} actor - Actor information
-     * @param {Object} details - Additional details
-     * @param {Object} req - Express request object
-     */
+
+    // Emit document activity
     async emitDocumentActivity(action, document, actor, details = {}, req = null) {
         try {
             const targetData = {
@@ -143,14 +121,8 @@ class ActivityLogEmitter {
         }
     }
 
-    /**
-     * Emit review activity
-     * @param {string} action - Activity action
-     * @param {Object} review - Review object
-     * @param {Object} actor - Actor information
-     * @param {Object} details - Additional details
-     * @param {Object} req - Express request object
-     */
+
+    // Emit review activity
     async emitReviewActivity(action, review, actor, details = {}, req = null) {
         try {
             const targetData = {
@@ -179,13 +151,8 @@ class ActivityLogEmitter {
         }
     }
 
-    /**
-     * Emit security activity
-     * @param {string} action - Activity action
-     * @param {Object} actor - Actor information
-     * @param {Object} details - Additional details
-     * @param {Object} req - Express request object
-     */
+
+    // Emit security activity
     async emitSecurityActivity(action, actor, details = {}, req = null) {
         try {
             const options = {
@@ -206,14 +173,8 @@ class ActivityLogEmitter {
         }
     }
 
-    /**
-     * Emit admin activity
-     * @param {string} action - Activity action
-     * @param {Object} target - Target object
-     * @param {Object} admin - Admin user information
-     * @param {Object} details - Additional details
-     * @param {Object} req - Express request object
-     */
+
+    // Emit admin activity
     async emitAdminActivity(action, target, admin, details = {}, req = null) {
         try {
             const targetData = target ? {
@@ -235,12 +196,8 @@ class ActivityLogEmitter {
         }
     }
 
-    /**
-     * Emit system activity (cron jobs, automated tasks)
-     * @param {string} action - Activity action
-     * @param {Object} details - Additional details
-     * @param {Object} options - Additional options
-     */
+
+    // Emit system activity (cron jobs, automated tasks)
     async emitSystemActivity(action, details = {}, options = {}) {
         try {
             return await activityLogService.logSystemActivity(action, details, options);
@@ -252,9 +209,7 @@ class ActivityLogEmitter {
 
     // Convenience methods for common activities
 
-    /**
-     * Log user login
-     */
+    // Log user login
     async logUserLogin(user, req, success = true) {
         const action = success ? ACTIVITY_ACTIONS.USER_LOGIN : ACTIVITY_ACTIONS.USER_LOGIN_FAILED;
         const actor = {
@@ -267,9 +222,8 @@ class ActivityLogEmitter {
         return this.emitUserActivity(action, user, actor, { success }, req);
     }
 
-    /**
-     * Log user logout
-     */
+    
+    // Log user logout
     async logUserLogout(user, req) {
         const actor = {
             userId: user._id || user.id,
@@ -281,9 +235,8 @@ class ActivityLogEmitter {
         return this.emitUserActivity(ACTIVITY_ACTIONS.USER_LOGOUT, user, actor, {}, req);
     }
 
-    /**
-     * Log duty creation
-     */
+    
+    // Log duty creation
     async logDutyCreated(duty, hospital, req, isEmergency = false) {
         const action = isEmergency ? ACTIVITY_ACTIONS.EMERGENCY_DUTY_CREATED : ACTIVITY_ACTIONS.DUTY_CREATED;
         const actor = {
@@ -296,9 +249,8 @@ class ActivityLogEmitter {
         return this.emitDutyActivity(action, duty, actor, { isEmergency }, req);
     }
 
-    /**
-     * Log duty acceptance
-     */
+    
+    // Log duty acceptance
     async logDutyAccepted(duty, staff, req) {
         const actor = {
             userId: staff.user?._id || staff.user,
@@ -310,9 +262,8 @@ class ActivityLogEmitter {
         return this.emitDutyActivity(ACTIVITY_ACTIONS.DUTY_ACCEPTED, duty, actor, {}, req);
     }
 
-    /**
-     * Log duty status change
-     */
+    
+    // Log duty status change
     async logDutyStatusChange(duty, staff, newStatus, req) {
         const actionMap = {
             'enroute': ACTIVITY_ACTIONS.DUTY_STARTED,
@@ -331,9 +282,8 @@ class ActivityLogEmitter {
         return this.emitDutyActivity(action, duty, actor, { newStatus }, req);
     }
 
-    /**
-     * Log document verification
-     */
+    
+    // Log document verification
     async logDocumentVerification(document, admin, verified, req) {
         const action = verified ? ACTIVITY_ACTIONS.DOCUMENT_VERIFIED_BY_ADMIN : ACTIVITY_ACTIONS.DOCUMENT_REJECTED_BY_ADMIN;
         const actor = {

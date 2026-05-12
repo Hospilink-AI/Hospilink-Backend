@@ -1,15 +1,17 @@
 const Hospital = require('../models/Hospital');
 const Duty = require('../models/Duty');
+const User = require('../models/User')
 const AdminAuthService = require('../services/adminAuth.service');
 const adminService = require('../services/admin.service');
 const DutyService = require('../services/duty.service');
+const documentService = require('../services/document.service');
 const { asyncHandler } = require('../middleware/error.middleware');
 const notificationEmitter = require('../services/notificationEmitter');
 const activityLogEmitter = require('../services/activityLogEmitter');
 const MedicalStaff = require('../models/MedicalStaff');
 const { normalizeRole } = require('../utils/helpers');
 const logger = require('../utils/logger');
-
+const cacheService = require('../services/cache.service');
 
 
 
@@ -145,7 +147,7 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
 
         // Notify all admins if this is an emergency duty
         if (urgency === 'emergency') {
-            const admins = await require('../models/User').find({ role: 'admin' }).select('_id');
+            const admins = await User.find({ role: 'admin' }).select('_id');
             if (admins.length) {
                 const adminIds = admins.map(a => a._id.toString());
                 await notificationEmitter.emitEmergencyAdminAlert(result.duty, hospital, adminIds, 'emergency_created');
@@ -182,6 +184,13 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
             message: error.message
         });
     }
+});
+
+
+// GET /api/admin/hospitals/stats — dashboard stats for hospital management
+exports.getHospitalStats = asyncHandler(async (req, res) => {
+    const result = await adminService.getHospitalStats();
+    res.status(200).json({ success: true, data: result });
 });
 
 
@@ -296,7 +305,6 @@ exports.getAdminProfile = asyncHandler(async (req, res) => {
 
 // POST /api/admin/flush-sessions
 exports.flushUserSessions = asyncHandler(async (req, res) => {
-    const cacheService = require('../services/cache.service');
     const count = await cacheService.invalidatePattern('session:*');
     res.status(200).json({ success: true, message: `Flushed ${count} cached sessions.` });
 });
@@ -319,7 +327,6 @@ exports.getDocumentStats = asyncHandler(async (req, res) => {
 
 // PUT /api/admin/documents/:documentId/verify
 exports.verifyDocument = asyncHandler(async (req, res) => {
-    const documentService = require('../services/document.service');
     const result = await documentService.verifyDocument(req.params.documentId, req.user._id || req.user.id);
     res.status(200).json({ success: true, message: 'Document verified successfully', data: result });
 });
@@ -329,7 +336,6 @@ exports.verifyDocument = asyncHandler(async (req, res) => {
 exports.rejectDocument = asyncHandler(async (req, res) => {
     const { reason } = req.body;
     if (!reason) return res.status(400).json({ success: false, message: 'Rejection reason is required' });
-    const documentService = require('../services/document.service');
     const result = await documentService.rejectDocument(req.params.documentId, req.user._id || req.user.id, reason);
     res.status(200).json({ success: true, message: 'Document rejected', data: result });
 });
@@ -494,6 +500,7 @@ exports.getDutyHistory = asyncHandler(async (req, res) => {
     }
 });
 
+
 // GET /api/admin/emergency-dashboard - Consolidated Critical + High priority duties list
 exports.getEmergencyDashboard = asyncHandler(async (req, res) => {
     const page = parseInt(req.query.page) || 1;
@@ -507,6 +514,8 @@ exports.getEmergencyDashboard = asyncHandler(async (req, res) => {
         pagination: result.pagination
     });
 });
+
+
 // POST /api/admin/assign-duty
 exports.assignDutyToStaff = asyncHandler(async (req, res) => {
     const { hospital_id, duty_id, staff_id } = req.body;

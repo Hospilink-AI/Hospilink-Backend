@@ -19,6 +19,7 @@ const logger = require('../utils/logger');
 
 
 
+
 class AdminService {
     // Parse DD-MM-YYYY format to Date object
     parseDDMMYYYY(dateString) {
@@ -89,22 +90,6 @@ class AdminService {
 
         return dateFilter;
     }
-
-
-
-    // Helper function to format duration using existing calculateDutyDuration
-    // formatDuration(startTime, endTime, date, isOvernightDuty, endDate) {
-    //     const durationHours = calculateDutyDuration(date, startTime, endTime, isOvernightDuty, endDate);
-    //     const totalMinutes = Math.floor(durationHours * 60);
-
-    //     if (totalMinutes < 60) {
-    //         return `${totalMinutes} min`;
-    //     } else {
-    //         const hours = Math.floor(totalMinutes / 60);
-    //         const minutes = totalMinutes % 60;
-    //         return `${hours}h ${minutes}m`;
-    //     }
-    // }
 
 
 
@@ -699,6 +684,7 @@ class AdminService {
         };
     }
 
+
     // GET /api/admin/hospitals/:id — preview modal
     async getHospitalDetail(hospitalId) {
         const hospital = await Hospital.findById(hospitalId)
@@ -952,6 +938,54 @@ class AdminService {
         };
     }
 
+
+
+    // GET /api/admin/hospitals/stats — dashboard stats for hospital management
+    async getHospitalStats() {
+        const pipeline = [
+            {
+                $facet: {
+                    // Total hospital count
+                    totalHospitals: [{ $count: 'count' }],
+                    
+                    // Pending verification count
+                    pendingVerification: [
+                        {
+                            $match: {
+                                verificationStatus: 'pending'
+                            }
+                        },
+                        { $count: 'count' }
+                    ],
+                    
+                    // Verified hospitals count
+                    verifiedHospitals: [
+                        {
+                            $match: {
+                                verificationStatus: 'verified'
+                            }
+                        },
+                        { $count: 'count' }
+                    ]
+                }
+            }
+        ];
+ 
+        const [result] = await Hospital.aggregate(pipeline);
+ 
+        const totalHospitals = result.totalHospitals[0]?.count || 0;
+        const pendingVerification = result.pendingVerification[0]?.count || 0;
+        const verifiedHospitals = result.verifiedHospitals[0]?.count || 0;
+ 
+        return {
+            totalHospitals,
+            pendingVerification,
+            verifiedHospitals
+        };
+    }
+
+    
+
     // GET /api/admin/medical-staff — paginated list with filters (search, role, availability)
     async getMedicalStaffListWithFilters({ search, role, availability, page = 1, limit = 10 }) {
         const { skip } = getPaginationParams(page, limit);
@@ -1048,6 +1082,8 @@ class AdminService {
         };
     }
 
+
+
     // GET /api/admin/medical-staff/:staffId — detailed view for review modal
     async getMedicalStaffDetail(staffId) {
         const staff = await MedicalStaff.findById(staffId)
@@ -1119,6 +1155,8 @@ class AdminService {
             documents
         };
     }
+
+
 
     // PATCH /api/admin/medical-staff/:staffId/verify — verify medical staff account
     async verifyMedicalStaff(staffId) {
@@ -1317,6 +1355,8 @@ class AdminService {
         };
     }
 
+
+
     // GET /api/admin/documents/stats — verification stats for the dashboard donut + recent actions
     async getDocumentStats() {
         const statsPipeline = [
@@ -1386,6 +1426,8 @@ class AdminService {
             recentActions
         };
     }
+
+
 
     // Get active duties with filtering capabilities
     async getActiveDuties(filters) {
@@ -1565,7 +1607,6 @@ class AdminService {
             const hospital = duty.hospital;
 
             // Get current staff location with fallback
-            const locationTrackingService = require('./locationTracking.service');
             let currentLocation = await locationTrackingService.getStaffLocation(staff.user._id);
             
             // Fallback to staff's registered coordinates if real-time location unavailable
@@ -1580,7 +1621,6 @@ class AdminService {
             }
 
             // Enhanced route information with detailed steps
-            const geocodingService = require('./geocoding.service');
             let routeInfo = null;
 
             try {

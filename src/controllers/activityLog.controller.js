@@ -3,15 +3,9 @@ const { asyncHandler } = require('../middleware/error.middleware');
 const { generateActivityLogsPDF } = require('../utils/pdf.puppeteer');
 const logger = require('../utils/logger');
 
-/**
- * Activity Log Controller
- * Handles HTTP requests for activity logs (admin only)
- */
 
-/**
- * Get activity logs with filters and pagination
- * GET /api/admin/activity-logs
- */
+// Get activity logs with filters and pagination
+// GET /api/admin/activity-logs
 exports.getActivityLogs = asyncHandler(async (req, res) => {
     const filters = {
         startDate: req.query.startDate,
@@ -52,6 +46,7 @@ exports.getActivityLogs = asyncHandler(async (req, res) => {
     });
 });
 
+
 /**
  * Get activity log by ID
  * GET /api/admin/activity-logs/:id
@@ -66,6 +61,7 @@ exports.getActivityLogById = asyncHandler(async (req, res) => {
         data: result.data
     });
 });
+
 
 /**
  * Get activity statistics
@@ -93,6 +89,7 @@ exports.getActivityStats = asyncHandler(async (req, res) => {
     });
 });
 
+
 /**
  * Get user activity history
  * GET /api/admin/users/:userId/activity-logs
@@ -116,6 +113,7 @@ exports.getUserActivityHistory = asyncHandler(async (req, res) => {
     });
 });
 
+
 /**
  * Get duty activity history
  * GET /api/admin/duties/:dutyId/activity-logs
@@ -131,6 +129,7 @@ exports.getDutyActivityHistory = asyncHandler(async (req, res) => {
         count: result.data.count
     });
 });
+
 
 /**
  * Search activity logs
@@ -177,6 +176,7 @@ exports.searchActivityLogs = asyncHandler(async (req, res) => {
     });
 });
 
+
 /**
  * Get recent critical activities
  * GET /api/admin/activity-logs/critical
@@ -192,6 +192,7 @@ exports.getRecentCriticalActivities = asyncHandler(async (req, res) => {
         count: result.data.count
     });
 });
+
 
 /**
  * Get activity timeline
@@ -219,6 +220,7 @@ exports.getActivityTimeline = asyncHandler(async (req, res) => {
         data: result.data
     });
 });
+
 
 /**
  * Export activity logs
