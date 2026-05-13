@@ -21,8 +21,8 @@ const validateSignup = (req, res, next) => {
     // Name validation
     if (!name || name.trim().length === 0) {
         errors.push('Name is required');
-    } else if (name.length > 50) {
-        errors.push('Name cannot exceed 50 characters');
+    } else if (name.length > 100) {
+        errors.push('Name cannot exceed 100 characters');
     }
 
     // Email validation
