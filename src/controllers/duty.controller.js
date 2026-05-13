@@ -39,11 +39,15 @@ exports.createDuty = asyncHandler(async (req, res) => {
         urgency,
         description,
         offered_rate,
-        is_overnight_duty
+        is_overnight_duty,
+        staff_count
     } = req.body;
 
     // Use hospital user ID from the authenticated user (JWT)
     const userId = req.user.id;
+
+    // Determine number of duties to create (default to 1 if staff_count not provided)
+    const numberOfDuties = staff_count ? parseInt(staff_count) : 1;
 
     const dutyData = {
         staffRole: staff_role,
@@ -57,7 +61,12 @@ exports.createDuty = asyncHandler(async (req, res) => {
         isOvernightDuty: is_overnight_duty || false
     };
 
-    const result = await DutyService.createDuty(dutyData, userId);
+    // Create multiple duties based on staff_count
+    const createdDuties = [];
+    for (let i = 0; i < numberOfDuties; i++) {
+        const result = await DutyService.createDuty(dutyData, userId);
+        createdDuties.push(result.duty);
+    }
 
     // Emit WebSocket notification to matching available staff AND hospital
     try {
@@ -97,33 +106,35 @@ exports.createDuty = asyncHandler(async (req, res) => {
             throw new Error('Hospital profile not found');
         }
 
-        // Emit notification to both hospital and matching staff
-        await notificationEmitter.emitDutyCreated(result.duty, hospital, staffUserIds, userId);
-        
-        // Log duty creation activity
-        const isEmergency = result.duty.urgency === 'emergency';
-        activityLogEmitter.logDutyCreated(result.duty, hospital, req, isEmergency)
-            .catch(err => logger.error('Error logging duty creation:', err));
+        // Emit notification to both hospital and matching staff for all created duties
+        for (const duty of createdDuties) {
+            await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, userId);
+            
+            // Log duty creation activity
+            const isEmergency = duty.urgency === 'emergency';
+            activityLogEmitter.logDutyCreated(duty, hospital, req, isEmergency)
+                .catch(err => logger.error('Error logging duty creation:', err));
 
-        // Notify all admins if this is an emergency duty
-        if (isEmergency) {
-            User.find({ role: 'admin' }).select('_id').then(async (admins) => {
-                if (!admins.length) return;
-                const adminIds = admins.map(a => a._id.toString());
-                await notificationEmitterModule.emitEmergencyAdminAlert(result.duty, hospital, adminIds, 'emergency_created');
+            // Notify all admins if this is an emergency duty
+            if (isEmergency) {
+                User.find({ role: 'admin' }).select('_id').then(async (admins) => {
+                    if (!admins.length) return;
+                    const adminIds = admins.map(a => a._id.toString());
+                    await notificationEmitterModule.emitEmergencyAdminAlert(duty, hospital, adminIds, 'emergency_created');
 
-                // Email only to the configured alert address
-                const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
-                if (alertEmail) {
-                    EmailService.sendEmergencyAdminAlertEmail(alertEmail, 'Admin', result.duty, hospital, 'emergency_created')
-                        .catch(err => logger.error(`Error sending emergency alert email: ${err.message}`));
-                }
+                    // Email only to the configured alert address
+                    const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+                    if (alertEmail) {
+                        EmailService.sendEmergencyAdminAlertEmail(alertEmail, 'Admin', duty, hospital, 'emergency_created')
+                            .catch(err => logger.error(`Error sending emergency alert email: ${err.message}`));
+                    }
 
-                activityLogEmitter.emitSystemActivity(
-                    AA.EMERGENCY_DUTY_ADMIN_NOTIFIED,
-                    { dutyId: result.duty._id?.toString(), reason: 'emergency_created', adminCount: admins.length }
-                ).catch(err => logger.error('Error logging emergency admin notification:', err));
-            }).catch(err => logger.error('Error fetching admins for emergency notification:', err));
+                    activityLogEmitter.emitSystemActivity(
+                        AA.EMERGENCY_DUTY_ADMIN_NOTIFIED,
+                        { dutyId: duty._id?.toString(), reason: 'emergency_created', adminCount: admins.length }
+                    ).catch(err => logger.error('Error logging emergency admin notification:', err));
+                }).catch(err => logger.error('Error fetching admins for emergency notification:', err));
+            }
         }
     } catch (error) {
         logger.error('Error emitting duty created notification: ' + error.message);
@@ -132,7 +143,9 @@ exports.createDuty = asyncHandler(async (req, res) => {
 
     res.status(201).json({
         success: true,
-        duty: result.duty
+        duties: createdDuties,
+        count: createdDuties.length,
+        message: `Successfully created ${createdDuties.length} duty`
     });
 });
 
