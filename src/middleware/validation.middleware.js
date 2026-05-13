@@ -721,8 +721,16 @@ const validateNearbyStaff = (req, res, next) => {
 
 // Validation for duty creation to prevent past/invalid times
 const validateDutyCreation = (req, res, next) => {
-    const { date, start_time, urgency } = req.body;
+    const { date, start_time, urgency, staff_count } = req.body;
     const errors = [];
+    
+    // Validate staff_count if provided
+    if (staff_count !== undefined) {
+        const count = parseInt(staff_count);
+        if (isNaN(count) || count < 1 || count > 50) {
+            errors.push('staff_count must be a number between 1 and 50');
+        }
+    }
     
     if (date && start_time) {
         const now = getCurrentIST();
