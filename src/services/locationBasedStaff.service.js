@@ -95,11 +95,15 @@ class LocationBasedStaffService {
         // Get staff current location
         const staffLocation = await this.getStaffCurrentLocation(staffId);
         
+        // Get current date and time for filtering
+        const now = new Date();
+        const today = new Date(now.setHours(0, 0, 0, 0));
+        
         // Build base query for available duties matching staff role
         const query = {
             status: 'available',
             staffRole: medicalStaff.jobRole,
-            date: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) } // Include today's duties
+            date: { $gte: today } // Include today's duties and future
         };
 
         // Add additional filters
@@ -115,9 +119,42 @@ class LocationBasedStaffService {
             .limit(50);
 
         // Calculate distances and filter within 50km using Google Maps API
+        // Also filter out duties that have already started
+        const currentTime = new Date();
         const jobsWithDistance = [];
+        
         for (const duty of duties) {
             if (!duty.hospital?.coordinates?.coordinates) {
+                continue;
+            }
+
+            // Skip duties that have already started
+            // Compare duty date and start time with current date/time
+            const dutyDate = new Date(duty.date);
+            const dutyDateTime = new Date(dutyDate);
+            
+            // Parse start time (format: "HH:MM" or "HH:MM AM/PM")
+            const startTimeParts = duty.startTime.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+            if (startTimeParts) {
+                let hours = parseInt(startTimeParts[1]);
+                const minutes = parseInt(startTimeParts[2]);
+                const meridiem = startTimeParts[3];
+                
+                // Convert to 24-hour format if AM/PM is present
+                if (meridiem) {
+                    if (meridiem.toUpperCase() === 'PM' && hours !== 12) {
+                        hours += 12;
+                    } else if (meridiem.toUpperCase() === 'AM' && hours === 12) {
+                        hours = 0;
+                    }
+                }
+                
+                dutyDateTime.setHours(hours, minutes, 0, 0);
+            }
+            
+            // Skip if duty has already started
+            if (dutyDateTime <= currentTime) {
+                console.log(`Skipping duty ${duty._id} - already started at ${duty.startTime} on ${duty.date}`);
                 continue;
             }
 
