@@ -613,7 +613,7 @@ class AdminService {
 
         const pipeline = [
             { $match: match },
-            { $sort: { createdAt: -1 } },
+            { $sort: { hospitalLegalName: 1 } },
             {
                 $lookup: {
                     from: 'duties',
@@ -654,6 +654,7 @@ class AdminService {
                                 verificationStatus: '$verificationStatus',
                                 rejectionReason: '$rejectionReason',
                                 createdAt: 1,
+                                profilePicture: 1,
                                 totalDuties: { $ifNull: [{ $arrayElemAt: ['$dutyStats.total', 0] }, 0] },
                                 occupiedDuties: { $ifNull: [{ $arrayElemAt: ['$dutyStats.occupied', 0] }, 0] },
                                 totalDocuments: { $size: { $ifNull: [{ $arrayElemAt: ['$docRecord.documents', 0] }, []] } },
@@ -1062,6 +1063,7 @@ class AdminService {
                                 pincode: '$pincode',
                                 email: '$userInfo.email',
                                 phoneNumber: 1,
+                                profilePicture: 1,
                                 completedDuties: { $ifNull: [{ $arrayElemAt: ['$completedDuties.count', 0] }, 0] },
                                 isAvailable: 1,
                                 verificationStatus: { $ifNull: ['$verificationStatus', 'pending'] },
