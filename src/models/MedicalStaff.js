@@ -178,11 +178,13 @@ const medicalStaffSchema = new mongoose.Schema({
         trim: true,
         maxlength: [500, 'Rejection reason cannot exceed 500 characters']
     },
-    totalExperience: {
-        type: Number,
-        min: 0,
-        max: 50,
-        default: 0
+    experience: {
+        type: String,
+        enum: {
+            values: ['0-1 year', '1-3 years', '3-5 years', '5-10 years', '10-15 years', '15-20 years', '20+ years'],
+            message: 'Invalid experience value. Must be one of: 0-1 year, 1-3 years, 3-5 years, 5-10 years, 10-15 years, 15-20 years, 20+ years'
+        },
+        required: [true, 'Experience is required']
     }
 }, {
     timestamps: true

@@ -1145,7 +1145,7 @@ class AdminService {
             isProfileComplete: staff.isProfileComplete,
             verificationStatus: staff.verificationStatus || 'pending',
             rejectionReason: staff.rejectionReason,
-            totalExperience: staff.totalExperience || 0,
+            experience: staff.experience,
             averageRating: staff.averageRating,
             totalRatings: staff.totalRatings,
             completedDuties,
@@ -1583,7 +1583,7 @@ class AdminService {
             const duty = await Duty.findById(dutyId)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience currentAddress city state pincode email verificationStatus education profileSummary',
+                    select: 'fullName user coordinates phoneNumber skills averageRating experience currentAddress city state pincode email verificationStatus education profileSummary',
                     populate: {
                         path: 'user',
                         select: 'name email'
@@ -1673,7 +1673,7 @@ class AdminService {
                         accuracy: currentLocation.accuracy || null,
                         source: currentLocation.source || 'realtime'
                     },
-                    totalExperience: staff.totalExperience || 0,
+                    experience: staff.experience,
                     verificationStatus: staff.verificationStatus,
                     education: staff.education || [],
                     profileSummary: staff.profileSummary || null
