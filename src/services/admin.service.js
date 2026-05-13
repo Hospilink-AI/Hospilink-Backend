@@ -613,7 +613,7 @@ class AdminService {
 
         const pipeline = [
             { $match: match },
-            { $sort: { createdAt: -1 } },
+            { $sort: { hospitalLegalName: 1 } },
             {
                 $lookup: {
                     from: 'duties',
