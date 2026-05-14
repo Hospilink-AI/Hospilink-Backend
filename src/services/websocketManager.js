@@ -50,7 +50,7 @@ class WebSocketManager {
      */
     isUserOnline(userId) {
         try {
-            if (!this.io) {
+            if (!this.io || !this.io.sockets || !this.io.sockets.adapter) {
                 return false;
             }
             

@@ -864,6 +864,308 @@ class NotificationEmitter {
         }
     }
 
+
+
+    /**
+     * Emit hospital profile verified notification
+     * @param {Object} hospital - Hospital object
+     * @param {string} hospitalUserId - Hospital user ID
+     */
+    async emitHospitalVerified(hospital, hospitalUserId) {
+        try {
+            console.log(`[NOTIFICATION] Starting hospital verified notification process for hospital: ${hospitalUserId}`);
+            
+            // Get all admin users
+            const admins = await User.find({ role: 'admin' }).select('_id');
+            const adminIds = admins.map(a => a._id.toString());
+            console.log(`[NOTIFICATION] Found ${adminIds.length} admins to notify`);
+
+            const hospitalName = hospital.hospitalLegalName || hospital.user?.name || 'Hospital';
+
+            // Payload for hospital user
+            const hospitalPayload = {
+                type: 'HOSPITAL_VERIFIED',
+                hospital: {
+                    id: hospital._id.toString(),
+                    name: hospitalName
+                },
+                message: `Your hospital profile "${hospitalName}" has been verified. You can now post duties and access all features.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Payload for admins
+            const adminPayload = {
+                type: 'HOSPITAL_VERIFIED_ADMIN',
+                hospital: {
+                    id: hospital._id.toString(),
+                    name: hospitalName
+                },
+                message: `Hospital "${hospitalName}" has been verified by admin.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Send notification to hospital user
+            try {
+                console.log(`[NOTIFICATION] Sending verification notification to hospital user: ${hospitalUserId}`);
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    hospitalUserId, 
+                    'HOSPITAL_VERIFIED', 
+                    hospitalPayload
+                );
+                await notificationDelivery.deliverToUser(hospitalUserId, 'HOSPITAL_VERIFIED', hospitalPayload, unreadCount);
+                console.log(`[NOTIFICATION] ✓ Successfully sent verification notification to hospital user: ${hospitalUserId}`);
+            } catch (error) {
+                console.error(`[NOTIFICATION] ✗ Error sending verification notification to hospital ${hospitalUserId}:`, error);
+            }
+
+            // Send notifications to all admins
+            if (adminIds.length > 0) {
+                try {
+                    console.log(`[NOTIFICATION] Sending verification notification to ${adminIds.length} admins`);
+                    await notificationService.createBulkNotifications(adminIds, 'HOSPITAL_VERIFIED_ADMIN', adminPayload);
+                    await notificationDelivery.deliverToUsers(adminIds, 'HOSPITAL_VERIFIED_ADMIN', adminPayload);
+                    console.log(`[NOTIFICATION] ✓ Successfully sent verification notification to ${adminIds.length} admins`);
+                } catch (error) {
+                    console.error('[NOTIFICATION] ✗ Error sending hospital verified notification to admins:', error);
+                }
+            } else {
+                console.log(`[NOTIFICATION] ⚠ No admins found to notify`);
+            }
+
+            console.log(`[NOTIFICATION] ✓ Hospital verified notification process completed: hospital=${hospitalUserId}, admins=${adminIds.length}`);
+        } catch (error) {
+            console.error('[NOTIFICATION] ✗ Error emitting hospital verified notification:', error);
+        }
+    }
+
+    /**
+     * Emit hospital profile rejected notification
+     * @param {Object} hospital - Hospital object
+     * @param {string} hospitalUserId - Hospital user ID
+     * @param {string} reason - Rejection reason
+     */
+    async emitHospitalRejected(hospital, hospitalUserId, reason) {
+        try {
+            console.log(`[NOTIFICATION] Starting hospital rejected notification process for hospital: ${hospitalUserId}, reason: ${reason}`);
+            
+            // Get all admin users
+            const admins = await User.find({ role: 'admin' }).select('_id');
+            const adminIds = admins.map(a => a._id.toString());
+            console.log(`[NOTIFICATION] Found ${adminIds.length} admins to notify`);
+
+            const hospitalName = hospital.hospitalLegalName || hospital.user?.name || 'Hospital';
+
+            // Payload for hospital user
+            const hospitalPayload = {
+                type: 'HOSPITAL_REJECTED',
+                hospital: {
+                    id: hospital._id.toString(),
+                    name: hospitalName
+                },
+                rejectionReason: reason,
+                message: `Your hospital profile "${hospitalName}" was rejected. Reason: ${reason}. Please update your profile and resubmit.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Payload for admins
+            const adminPayload = {
+                type: 'HOSPITAL_REJECTED_ADMIN',
+                hospital: {
+                    id: hospital._id.toString(),
+                    name: hospitalName
+                },
+                rejectionReason: reason,
+                message: `Hospital "${hospitalName}" has been rejected. Reason: ${reason}.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Send notification to hospital user
+            try {
+                console.log(`[NOTIFICATION] Sending rejection notification to hospital user: ${hospitalUserId}`);
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    hospitalUserId, 
+                    'HOSPITAL_REJECTED', 
+                    hospitalPayload
+                );
+                await notificationDelivery.deliverToUser(hospitalUserId, 'HOSPITAL_REJECTED', hospitalPayload, unreadCount);
+                console.log(`[NOTIFICATION] ✓ Successfully sent rejection notification to hospital user: ${hospitalUserId}`);
+            } catch (error) {
+                console.error(`[NOTIFICATION] ✗ Error sending rejection notification to hospital ${hospitalUserId}:`, error);
+            }
+
+            // Send notifications to all admins
+            if (adminIds.length > 0) {
+                try {
+                    console.log(`[NOTIFICATION] Sending rejection notification to ${adminIds.length} admins`);
+                    await notificationService.createBulkNotifications(adminIds, 'HOSPITAL_REJECTED_ADMIN', adminPayload);
+                    await notificationDelivery.deliverToUsers(adminIds, 'HOSPITAL_REJECTED_ADMIN', adminPayload);
+                    console.log(`[NOTIFICATION] ✓ Successfully sent rejection notification to ${adminIds.length} admins`);
+                } catch (error) {
+                    console.error('[NOTIFICATION] ✗ Error sending hospital rejected notification to admins:', error);
+                }
+            } else {
+                console.log(`[NOTIFICATION] ⚠ No admins found to notify`);
+            }
+
+            console.log(`[NOTIFICATION] ✓ Hospital rejected notification process completed: hospital=${hospitalUserId}, admins=${adminIds.length}`);
+        } catch (error) {
+            console.error('[NOTIFICATION] ✗ Error emitting hospital rejected notification:', error);
+        }
+    }
+
+    /**
+     * Emit staff profile verified notification
+     * @param {Object} staff - Medical staff object
+     * @param {string} staffUserId - Staff user ID
+     */
+    async emitStaffVerified(staff, staffUserId) {
+        try {
+            console.log(`[NOTIFICATION] Starting staff verified notification process for staff: ${staffUserId}`);
+            
+            // Get all admin users
+            const admins = await User.find({ role: 'admin' }).select('_id');
+            const adminIds = admins.map(a => a._id.toString());
+            console.log(`[NOTIFICATION] Found ${adminIds.length} admins to notify`);
+
+            const staffName = staff.fullName || staff.user?.name || 'Staff Member';
+
+            // Payload for staff user
+            const staffPayload = {
+                type: 'STAFF_VERIFIED',
+                staff: {
+                    id: staff._id.toString(),
+                    name: staffName,
+                    role: staff.jobRole
+                },
+                message: `Your profile "${staffName}" has been verified. You can now apply for duties and access all features.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Payload for admins
+            const adminPayload = {
+                type: 'STAFF_VERIFIED_ADMIN',
+                staff: {
+                    id: staff._id.toString(),
+                    name: staffName,
+                    role: staff.jobRole
+                },
+                message: `Staff "${staffName}" (${staff.jobRole}) has been verified by admin.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Send notification to staff user
+            try {
+                console.log(`[NOTIFICATION] Sending verification notification to staff user: ${staffUserId}`);
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    staffUserId, 
+                    'STAFF_VERIFIED', 
+                    staffPayload
+                );
+                await notificationDelivery.deliverToUser(staffUserId, 'STAFF_VERIFIED', staffPayload, unreadCount);
+                console.log(`[NOTIFICATION] ✓ Successfully sent verification notification to staff user: ${staffUserId}`);
+            } catch (error) {
+                console.error(`[NOTIFICATION] ✗ Error sending verification notification to staff ${staffUserId}:`, error);
+            }
+
+            // Send notifications to all admins
+            if (adminIds.length > 0) {
+                try {
+                    console.log(`[NOTIFICATION] Sending verification notification to ${adminIds.length} admins`);
+                    await notificationService.createBulkNotifications(adminIds, 'STAFF_VERIFIED_ADMIN', adminPayload);
+                    await notificationDelivery.deliverToUsers(adminIds, 'STAFF_VERIFIED_ADMIN', adminPayload);
+                    console.log(`[NOTIFICATION] ✓ Successfully sent verification notification to ${adminIds.length} admins`);
+                } catch (error) {
+                    console.error('[NOTIFICATION] ✗ Error sending staff verified notification to admins:', error);
+                }
+            } else {
+                console.log(`[NOTIFICATION] ⚠ No admins found to notify`);
+            }
+
+            console.log(`[NOTIFICATION] ✓ Staff verified notification process completed: staff=${staffUserId}, admins=${adminIds.length}`);
+        } catch (error) {
+            console.error('[NOTIFICATION] ✗ Error emitting staff verified notification:', error);
+        }
+    }
+
+    /**
+     * Emit staff profile rejected notification
+     * @param {Object} staff - Medical staff object
+     * @param {string} staffUserId - Staff user ID
+     * @param {string} reason - Rejection reason
+     */
+    async emitStaffRejected(staff, staffUserId, reason) {
+        try {
+            console.log(`[NOTIFICATION] Starting staff rejected notification process for staff: ${staffUserId}, reason: ${reason}`);
+            
+            // Get all admin users
+            const admins = await User.find({ role: 'admin' }).select('_id');
+            const adminIds = admins.map(a => a._id.toString());
+            console.log(`[NOTIFICATION] Found ${adminIds.length} admins to notify`);
+
+            const staffName = staff.fullName || staff.user?.name || 'Staff Member';
+
+            // Payload for staff user
+            const staffPayload = {
+                type: 'STAFF_REJECTED',
+                staff: {
+                    id: staff._id.toString(),
+                    name: staffName,
+                    role: staff.jobRole
+                },
+                rejectionReason: reason,
+                message: `Your profile "${staffName}" was rejected. Reason: ${reason}. Please update your profile and resubmit.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Payload for admins
+            const adminPayload = {
+                type: 'STAFF_REJECTED_ADMIN',
+                staff: {
+                    id: staff._id.toString(),
+                    name: staffName,
+                    role: staff.jobRole
+                },
+                rejectionReason: reason,
+                message: `Staff "${staffName}" (${staff.jobRole}) has been rejected. Reason: ${reason}.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Send notification to staff user
+            try {
+                console.log(`[NOTIFICATION] Sending rejection notification to staff user: ${staffUserId}`);
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    staffUserId, 
+                    'STAFF_REJECTED', 
+                    staffPayload
+                );
+                await notificationDelivery.deliverToUser(staffUserId, 'STAFF_REJECTED', staffPayload, unreadCount);
+                console.log(`[NOTIFICATION] ✓ Successfully sent rejection notification to staff user: ${staffUserId}`);
+            } catch (error) {
+                console.error(`[NOTIFICATION] ✗ Error sending rejection notification to staff ${staffUserId}:`, error);
+            }
+
+            // Send notifications to all admins
+            if (adminIds.length > 0) {
+                try {
+                    console.log(`[NOTIFICATION] Sending rejection notification to ${adminIds.length} admins`);
+                    await notificationService.createBulkNotifications(adminIds, 'STAFF_REJECTED_ADMIN', adminPayload);
+                    await notificationDelivery.deliverToUsers(adminIds, 'STAFF_REJECTED_ADMIN', adminPayload);
+                    console.log(`[NOTIFICATION] ✓ Successfully sent rejection notification to ${adminIds.length} admins`);
+                } catch (error) {
+                    console.error('[NOTIFICATION] ✗ Error sending staff rejected notification to admins:', error);
+                }
+            } else {
+                console.log(`[NOTIFICATION] ⚠ No admins found to notify`);
+            }
+
+            console.log(`[NOTIFICATION] ✓ Staff rejected notification process completed: staff=${staffUserId}, admins=${adminIds.length}`);
+        } catch (error) {
+            console.error('[NOTIFICATION] ✗ Error emitting staff rejected notification:', error);
+        }
+    }
+
+
+
     // Document verification notifications
     async emitDocumentVerified(document, userRole) {
         try {

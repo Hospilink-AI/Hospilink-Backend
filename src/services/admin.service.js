@@ -16,6 +16,7 @@ const EmailService = require('./email.service');
 const CacheInvalidationService = require('./cacheInvalidation.service');
 const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
+const notificationEmitter = require('./notificationEmitter');
 
 
 
@@ -784,8 +785,13 @@ class AdminService {
 
         logger.info(`Hospital ${hospitalId} verified: ${previousStatus} → verified`);
 
+        // Send email to hospital
         EmailService.sendHospitalVerifiedEmail(hospital.user.email, hospital.hospitalLegalName)
             .catch(err => logger.error('Verify email error:', err.message));
+
+        // Send notifications to hospital and admins
+        notificationEmitter.emitHospitalVerified(hospital, hospital.user._id.toString())
+            .catch(err => logger.error('Verification notification error:', err.message));
 
         return { 
             id: hospital._id, 
@@ -842,8 +848,13 @@ class AdminService {
 
         logger.info(`Hospital ${hospitalId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
 
+        // Send email to hospital
         EmailService.sendHospitalRejectedEmail(hospital.user.email, hospital.hospitalLegalName, reason)
             .catch(err => logger.error('Reject email error:', err.message));
+
+        // Send notifications to hospital and admins
+        notificationEmitter.emitHospitalRejected(hospital, hospital.user._id.toString(), reason)
+            .catch(err => logger.error('Rejection notification error:', err.message));
 
         return { 
             id: hospital._id, 
@@ -1193,13 +1204,18 @@ class AdminService {
             logger.error(`Failed to refresh cache for staff ${staffId} after verification`);
         }
 
-        // NEW: Invalidate availability cache after enabling
+        // Invalidate availability cache after enabling
         await cacheService.del(`staff_availability:${staff.user._id}`);
 
         logger.info(`Medical staff ${staffId} verified: ${previousStatus} → verified`);
 
+        // Send email to staff
         EmailService.sendMedicalStaffVerifiedEmail(staff.user.email, staff.fullName)
             .catch(err => logger.error('Verify email error:', err.message));
+
+        // Send notifications to staff and admins
+        notificationEmitter.emitStaffVerified(staff, staff.user._id.toString())
+            .catch(err => logger.error('Verification notification error:', err.message));
 
         return { 
             id: staff._id, 
@@ -1249,8 +1265,13 @@ class AdminService {
 
         logger.info(`Medical staff ${staffId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
 
+        // Send email to staff
         EmailService.sendMedicalStaffRejectedEmail(staff.user.email, staff.fullName, reason)
             .catch(err => logger.error('Reject email error:', err.message));
+
+        // Send notifications to staff and admins
+        notificationEmitter.emitStaffRejected(staff, staff.user._id.toString(), reason)
+            .catch(err => logger.error('Rejection notification error:', err.message));
 
         return { 
             id: staff._id, 
