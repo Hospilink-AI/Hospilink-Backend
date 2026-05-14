@@ -680,8 +680,25 @@ class AdminService {
         ];
 
         const [result] = await Hospital.aggregate(pipeline);
+
+        // Generate pre-signed URLs for profile pictures
+        const hospitalsWithUrls = await Promise.all((result.data || []).map(async (hospital) => {
+            let profilePictureUrl = null;
+            if (hospital.profilePicture?.s3Key) {
+                try {
+                    profilePictureUrl = await generatePreSignedURL(hospital.profilePicture.s3Key);
+                } catch (error) {
+                    console.error('Error generating profile picture URL:', error);
+                }
+            }
+            return {
+                ...hospital,
+                profilePicture: profilePictureUrl
+            };
+        }));
+
         return {
-            hospitals: result.data || [],
+            hospitals: hospitalsWithUrls,
             pagination: getPaginationMeta(result.totalCount[0]?.count || 0, parseInt(page), parseInt(limit))
         };
     }
@@ -1089,8 +1106,24 @@ class AdminService {
 
         const [result] = await MedicalStaff.aggregate(pipeline);
 
+        // Generate pre-signed URLs for profile pictures
+        const staffWithUrls = await Promise.all((result.data || []).map(async (staff) => {
+            let profilePictureUrl = null;
+            if (staff.profilePicture?.s3Key) {
+                try {
+                    profilePictureUrl = await generatePreSignedURL(staff.profilePicture.s3Key);
+                } catch (error) {
+                    console.error('Error generating profile picture URL:', error);
+                }
+            }
+            return {
+                ...staff,
+                profilePicture: profilePictureUrl
+            };
+        }));
+
         return {
-            staff: result.data || [],
+            staff: staffWithUrls,
             pagination: getPaginationMeta(result.totalCount[0]?.count || 0, parseInt(page), parseInt(limit))
         };
     }
