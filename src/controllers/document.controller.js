@@ -1,5 +1,7 @@
 const documentService = require("../services/document.service");
 const { deleteFromS3 } = require("../services/s3.service");
+const activityLogEmitter = require('../services/activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 
 exports.uploadDocument = async (req, res) => {
     try {
@@ -17,7 +19,6 @@ exports.uploadDocument = async (req, res) => {
 
         const uploadedKeys = []; // Track S3 keys for rollback
         const results = [];
-        // console.log("USER:", req.user);
 
         try {
             // Upload files sequentially to enable proper rollback
@@ -33,6 +34,15 @@ exports.uploadDocument = async (req, res) => {
                 // Track the S3 key for potential rollback
                 uploadedKeys.push(result.s3Key);
                 results.push(result);
+
+                // Log each uploaded document
+                activityLogEmitter.emitDocumentActivity(
+                    replace ? ACTIVITY_ACTIONS.DOCUMENT_RESUBMITTED : ACTIVITY_ACTIONS.DOCUMENT_UPLOADED,
+                    { documentType, fileName: file.originalname, verificationStatus: result.verificationStatus },
+                    { userId: user._id || user.id, name: user.name, role: user.role, email: user.email },
+                    {},
+                    req
+                ).catch(() => {});
             }
 
             res.status(200).json({
@@ -120,8 +130,15 @@ exports.verifyDocument = async (req, res) => {
         const adminId = req.user._id;
         const { documentId } = req.params;
 
-        const result =
-            await documentService.verifyDocument(documentId, adminId);
+        const result = await documentService.verifyDocument(documentId, adminId);
+
+        activityLogEmitter.emitDocumentActivity(
+            ACTIVITY_ACTIONS.DOCUMENT_VERIFIED_BY_ADMIN,
+            { _id: documentId, documentType: result.documentType, fileName: result.fileName, verificationStatus: 'verified' },
+            { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+            { targetUserId: result.userId, targetUserName: result.userName },
+            req
+        ).catch(() => {});
 
         res.json({
             success: true,
@@ -155,12 +172,15 @@ exports.rejectDocument = async (req, res) => {
             });
         }
 
-        const result =
-            await documentService.rejectDocument(
-                documentId,
-                adminId,
-                reason
-            );
+        const result = await documentService.rejectDocument(documentId, adminId, reason);
+
+        activityLogEmitter.emitDocumentActivity(
+            ACTIVITY_ACTIONS.DOCUMENT_REJECTED_BY_ADMIN,
+            { _id: documentId, documentType: result.documentType, fileName: result.fileName, verificationStatus: 'rejected' },
+            { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+            { targetUserId: result.userId, targetUserName: result.userName, reason },
+            req
+        ).catch(() => {});
 
         res.json({
             success: true,
@@ -210,6 +230,14 @@ exports.deleteDocument = async (req, res) => {
             req.user,
             req.params.documentId
         );
+
+        activityLogEmitter.emitDocumentActivity(
+            ACTIVITY_ACTIONS.DOCUMENT_DELETED,
+            { _id: req.params.documentId, documentType: 'document' },
+            { userId: req.user._id || req.user.id, name: req.user.name, role: req.user.role, email: req.user.email },
+            {},
+            req
+        ).catch(() => {});
 
         res.json({
             success: true,

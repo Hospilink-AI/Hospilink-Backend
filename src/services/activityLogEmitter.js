@@ -1,5 +1,52 @@
 const activityLogService = require('./activityLog.service');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
+const MedicalStaff = require('../models/MedicalStaff');
+const Hospital = require('../models/Hospital');
+
+// Build a human-readable location string from a profile document
+function buildLocationString(profile) {
+    if (!profile) return null;
+    const parts = [];
+    if (profile.currentAddress) parts.push(profile.currentAddress.trim());
+    if (profile.city)           parts.push(profile.city.trim());
+    if (profile.state)          parts.push(profile.state.trim());
+    let location = parts.join(', ');
+    if (profile.pincode)        location += ` - ${profile.pincode.trim()}`;
+    return location || null;
+}
+
+// Resolve location string for a given userId + role (non-blocking — returns null on any failure)
+async function resolveUserLocation(userId, role) {
+    try {
+        if (!userId) return null;
+
+        // Normalize to string then back to ObjectId to handle both string and ObjectId inputs
+        const mongoose = require('mongoose');
+        const userObjectId = mongoose.Types.ObjectId.isValid(userId)
+            ? new mongoose.Types.ObjectId(userId.toString())
+            : null;
+
+        if (!userObjectId) return null;
+
+        if (role === 'staff') {
+            const staff = await MedicalStaff.findOne({ user: userObjectId })
+                .select('currentAddress city state pincode')
+                .lean();
+            return buildLocationString(staff);
+        }
+        if (role === 'hospital') {
+            const hospital = await Hospital.findOne({ user: userObjectId })
+                .select('currentAddress city state pincode')
+                .lean();
+            return buildLocationString(hospital);
+        }
+        return null;
+    } catch (err) {
+        // Log silently so we can debug without breaking the log flow
+        console.error(`[resolveUserLocation] failed userId=${userId} role=${role}:`, err.message);
+        return null;
+    }
+}
 
 
 class ActivityLogEmitter {
@@ -40,8 +87,20 @@ class ActivityLogEmitter {
             };
             
             const options = {
-                location: duty.hospital?.hospitalLegalName || duty.hospital?.name || details.location
+                location: details.location || null
             };
+
+            // For staff actors, use their profile address
+            if (actor.role === 'staff' && actor.userId) {
+                const staffLocation = await resolveUserLocation(actor.userId, 'staff');
+                if (staffLocation) options.location = staffLocation;
+            }
+
+            // For hospital actors, use their profile address
+            if (actor.role === 'hospital' && actor.userId) {
+                const hospitalLocation = await resolveUserLocation(actor.userId, 'hospital');
+                if (hospitalLocation) options.location = hospitalLocation;
+            }
             
             return await activityLogService.logActivity(
                 actor,
@@ -76,13 +135,20 @@ class ActivityLogEmitter {
                 email: user.email,
                 ...details
             };
+
+            // Resolve location from staff/hospital profile
+            const location = await resolveUserLocation(
+                actor.userId || user._id || user.id,
+                actor.role || user.role
+            );
             
             return await activityLogService.logActivity(
                 actor,
                 action,
                 targetData,
                 activityDetails,
-                req
+                req,
+                { location }
             );
         } catch (error) {
             console.error('Error emitting user activity:', error);
@@ -107,13 +173,16 @@ class ActivityLogEmitter {
                 verificationStatus: document.verificationStatus,
                 ...details
             };
+
+            const location = await resolveUserLocation(actor.userId, actor.role);
             
             return await activityLogService.logActivity(
                 actor,
                 action,
                 targetData,
                 activityDetails,
-                req
+                req,
+                { location }
             );
         } catch (error) {
             console.error('Error emitting document activity:', error);
@@ -212,27 +281,29 @@ class ActivityLogEmitter {
     // Log user login
     async logUserLogin(user, req, success = true) {
         const action = success ? ACTIVITY_ACTIONS.USER_LOGIN : ACTIVITY_ACTIONS.USER_LOGIN_FAILED;
+        // signin returns { id } not { _id }, normalise here
+        const userId = user._id || user.id;
         const actor = {
-            userId: user._id || user.id,
+            userId,
             name: user.name,
             role: user.role,
             email: user.email
         };
-        
-        return this.emitUserActivity(action, user, actor, { success }, req);
+        // Pass a normalised user object so emitUserActivity can resolve location
+        return this.emitUserActivity(action, { ...user, _id: userId }, actor, { success }, req);
     }
 
     
     // Log user logout
     async logUserLogout(user, req) {
+        const userId = user._id || user.id;
         const actor = {
-            userId: user._id || user.id,
+            userId,
             name: user.name,
             role: user.role,
             email: user.email
         };
-        
-        return this.emitUserActivity(ACTIVITY_ACTIONS.USER_LOGOUT, user, actor, {}, req);
+        return this.emitUserActivity(ACTIVITY_ACTIONS.USER_LOGOUT, { ...user, _id: userId }, actor, {}, req);
     }
 
     

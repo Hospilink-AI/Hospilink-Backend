@@ -67,6 +67,7 @@ router.patch('/medical-staff/:staffId/reject', validateObjectId('staffId'), vali
 
 router.get('/nearby-staff', validateNearbyStaffQuery, adminController.getNearbyAvailableStaff);
 
+router.get('/active-duties/export', adminController.exportActiveDuties);
 router.get('/active-duties', validateActiveDutiesQuery, adminController.getActiveDuties);
 
 router.get('/emergency-dashboard', adminController.getEmergencyDashboard);
