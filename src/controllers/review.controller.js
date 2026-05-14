@@ -2,6 +2,8 @@ const ReviewService = require("../services/review.service");
 const { asyncHandler } = require("../middleware/error.middleware");
 const Review = require("../models/Review");
 const Notification = require("../models/Notification");
+const activityLogEmitter = require('../services/activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 
 //Submit Review (Hospital → Staff)
 exports.submitReview = asyncHandler(async (req, res) => {
@@ -15,7 +17,6 @@ exports.submitReview = asyncHandler(async (req, res) => {
         });
     }
 
-    // Validate rating
     if (rating < 1 || rating > 5) {
         return res.status(400).json({
             success: false,
@@ -30,6 +31,24 @@ exports.submitReview = asyncHandler(async (req, res) => {
         review
     );
 
+    // Log review submitted (by hospital)
+    activityLogEmitter.emitReviewActivity(
+        ACTIVITY_ACTIONS.REVIEW_SUBMITTED,
+        { _id: result._id, rating: result.rating, duty: result.duty },
+        { userId: req.user._id || req.user.id, name: req.user.name, role: req.user.role, email: req.user.email },
+        { staffName: result.medicalStaff?.fullName, hospitalName: result.hospital?.hospitalLegalName },
+        req
+    ).catch(() => {});
+
+    // Log review received (by staff — system actor)
+    activityLogEmitter.emitReviewActivity(
+        ACTIVITY_ACTIONS.REVIEW_RECEIVED,
+        { _id: result._id, rating: result.rating, duty: result.duty },
+        { userId: result.medicalStaff?._id, name: result.medicalStaff?.fullName, role: 'staff', email: null },
+        { hospitalName: result.hospital?.hospitalLegalName, rating: result.rating },
+        null  // no req — staff is not the requester
+    ).catch(() => {});
+
     res.status(201).json({
         success: true,
         message: "Review submitted successfully",
@@ -39,7 +58,6 @@ exports.submitReview = asyncHandler(async (req, res) => {
             rating: result.rating,
             review: result.review,
             createdAt: result.createdAt,
-            // clean medical staff
             medicalStaff: {
                 _id: result.medicalStaff._id,
                 fullName: result.medicalStaff.fullName,
