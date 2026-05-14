@@ -16,6 +16,7 @@ const EmailService = require('./email.service');
 const CacheInvalidationService = require('./cacheInvalidation.service');
 const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
+const notificationEmitter = require('./notificationEmitter');
 
 
 
@@ -654,6 +655,7 @@ class AdminService {
                                 verificationStatus: '$verificationStatus',
                                 rejectionReason: '$rejectionReason',
                                 createdAt: 1,
+                                profilePicture: 1,
                                 totalDuties: { $ifNull: [{ $arrayElemAt: ['$dutyStats.total', 0] }, 0] },
                                 occupiedDuties: { $ifNull: [{ $arrayElemAt: ['$dutyStats.occupied', 0] }, 0] },
                                 totalDocuments: { $size: { $ifNull: [{ $arrayElemAt: ['$docRecord.documents', 0] }, []] } },
@@ -783,8 +785,13 @@ class AdminService {
 
         logger.info(`Hospital ${hospitalId} verified: ${previousStatus} → verified`);
 
+        // Send email to hospital
         EmailService.sendHospitalVerifiedEmail(hospital.user.email, hospital.hospitalLegalName)
             .catch(err => logger.error('Verify email error:', err.message));
+
+        // Send notifications to hospital and admins
+        notificationEmitter.emitHospitalVerified(hospital, hospital.user._id.toString())
+            .catch(err => logger.error('Verification notification error:', err.message));
 
         return { 
             id: hospital._id, 
@@ -841,8 +848,13 @@ class AdminService {
 
         logger.info(`Hospital ${hospitalId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
 
+        // Send email to hospital
         EmailService.sendHospitalRejectedEmail(hospital.user.email, hospital.hospitalLegalName, reason)
             .catch(err => logger.error('Reject email error:', err.message));
+
+        // Send notifications to hospital and admins
+        notificationEmitter.emitHospitalRejected(hospital, hospital.user._id.toString(), reason)
+            .catch(err => logger.error('Rejection notification error:', err.message));
 
         return { 
             id: hospital._id, 
@@ -1062,6 +1074,7 @@ class AdminService {
                                 pincode: '$pincode',
                                 email: '$userInfo.email',
                                 phoneNumber: 1,
+                                profilePicture: 1,
                                 completedDuties: { $ifNull: [{ $arrayElemAt: ['$completedDuties.count', 0] }, 0] },
                                 isAvailable: 1,
                                 verificationStatus: { $ifNull: ['$verificationStatus', 'pending'] },
@@ -1143,7 +1156,7 @@ class AdminService {
             isProfileComplete: staff.isProfileComplete,
             verificationStatus: staff.verificationStatus || 'pending',
             rejectionReason: staff.rejectionReason,
-            totalExperience: staff.totalExperience || 0,
+            experience: staff.experience,
             averageRating: staff.averageRating,
             totalRatings: staff.totalRatings,
             completedDuties,
@@ -1191,13 +1204,18 @@ class AdminService {
             logger.error(`Failed to refresh cache for staff ${staffId} after verification`);
         }
 
-        // NEW: Invalidate availability cache after enabling
+        // Invalidate availability cache after enabling
         await cacheService.del(`staff_availability:${staff.user._id}`);
 
         logger.info(`Medical staff ${staffId} verified: ${previousStatus} → verified`);
 
+        // Send email to staff
         EmailService.sendMedicalStaffVerifiedEmail(staff.user.email, staff.fullName)
             .catch(err => logger.error('Verify email error:', err.message));
+
+        // Send notifications to staff and admins
+        notificationEmitter.emitStaffVerified(staff, staff.user._id.toString())
+            .catch(err => logger.error('Verification notification error:', err.message));
 
         return { 
             id: staff._id, 
@@ -1247,8 +1265,13 @@ class AdminService {
 
         logger.info(`Medical staff ${staffId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
 
+        // Send email to staff
         EmailService.sendMedicalStaffRejectedEmail(staff.user.email, staff.fullName, reason)
             .catch(err => logger.error('Reject email error:', err.message));
+
+        // Send notifications to staff and admins
+        notificationEmitter.emitStaffRejected(staff, staff.user._id.toString(), reason)
+            .catch(err => logger.error('Rejection notification error:', err.message));
 
         return { 
             id: staff._id, 
@@ -1581,7 +1604,7 @@ class AdminService {
             const duty = await Duty.findById(dutyId)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience currentAddress city state pincode email verificationStatus education profileSummary',
+                    select: 'fullName user coordinates phoneNumber skills averageRating experience currentAddress city state pincode email verificationStatus education profileSummary',
                     populate: {
                         path: 'user',
                         select: 'name email'
@@ -1671,7 +1694,7 @@ class AdminService {
                         accuracy: currentLocation.accuracy || null,
                         source: currentLocation.source || 'realtime'
                     },
-                    totalExperience: staff.totalExperience || 0,
+                    experience: staff.experience,
                     verificationStatus: staff.verificationStatus,
                     education: staff.education || [],
                     profileSummary: staff.profileSummary || null

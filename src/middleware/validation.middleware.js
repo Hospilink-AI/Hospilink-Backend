@@ -21,8 +21,8 @@ const validateSignup = (req, res, next) => {
     // Name validation
     if (!name || name.trim().length === 0) {
         errors.push('Name is required');
-    } else if (name.length > 50) {
-        errors.push('Name cannot exceed 50 characters');
+    } else if (name.length > 100) {
+        errors.push('Name cannot exceed 100 characters');
     }
 
     // Email validation
@@ -217,7 +217,7 @@ const validateResetPassword = (req, res, next) => {
 
 
 const validateMedicalStaffProfile = (req, res, next) => {
-    const { fullName, jobRole, currentAddress, city, state, pincode, phoneNumber, email, profileSummary, education, skills } = req.body;
+    const { fullName, jobRole, currentAddress, city, state, pincode, phoneNumber, email, profileSummary, education, skills, experience } = req.body;
     const errors = [];
 
     // Check for unexpected fields
@@ -232,7 +232,8 @@ const validateMedicalStaffProfile = (req, res, next) => {
         'email',
         'profileSummary',
         'education',
-        'skills'
+        'skills',
+        'experience'
     ];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
@@ -329,6 +330,12 @@ const validateMedicalStaffProfile = (req, res, next) => {
     // Skills validation
     if (req.body.skills && !Array.isArray(req.body.skills)) {
         errors.push('Skills must be an array');
+    }
+
+    // Experience validation
+    const validExperienceValues = ['0-1 year', '1-3 years', '3-5 years', '5-10 years', '10-15 years', '15-20 years', '20+ years'];
+    if (!experience || !validExperienceValues.includes(experience)) {
+        errors.push(`Experience is required and must be one of: ${validExperienceValues.join(', ')}`);
     }
 
     if (errors.length > 0) {
@@ -555,7 +562,7 @@ const validateProfileUpdate = (req, res, next) => {
     
     // Dynamic validation based on user role
     if (role === 'staff') {
-        const { fullName, jobRole, currentAddress, city, state, pincode, coordinates } = req.body;
+        const { fullName, jobRole, currentAddress, city, state, pincode, coordinates, experience } = req.body;
         
         // Prevent email changes (read-only after creation)
         if (req.body.email && req.body.email !== req.user.email) {
@@ -588,6 +595,14 @@ const validateProfileUpdate = (req, res, next) => {
             errors.push('Pincode must be a valid 6-digit Indian postal code');
         }
         
+        // Experience validation
+        if (experience) {
+            const validExperienceValues = ['0-1 year', '1-3 years', '3-5 years', '5-10 years', '10-15 years', '15-20 years', '20+ years'];
+            if (!validExperienceValues.includes(experience)) {
+                errors.push(`Experience must be one of: ${validExperienceValues.join(', ')}`);
+            }
+        }
+        
         if (coordinates) {
             if (typeof coordinates.latitude !== 'number' || Math.abs(coordinates.latitude) > 90) {
                 errors.push('Invalid latitude value');
@@ -596,6 +611,7 @@ const validateProfileUpdate = (req, res, next) => {
                 errors.push('Invalid longitude value');
             }
         }
+        
         
     } else if (role === 'hospital') {
         const { hospitalLegalName, currentAddress, servicesAvailable, city, state, pincode, staffCount, phoneNumber, email, description } = req.body;
@@ -721,8 +737,16 @@ const validateNearbyStaff = (req, res, next) => {
 
 // Validation for duty creation to prevent past/invalid times
 const validateDutyCreation = (req, res, next) => {
-    const { date, start_time, urgency } = req.body;
+    const { date, start_time, urgency, staff_count } = req.body;
     const errors = [];
+    
+    // Validate staff_count if provided
+    if (staff_count !== undefined) {
+        const count = parseInt(staff_count);
+        if (isNaN(count) || count < 1 || count > 50) {
+            errors.push('staff_count must be a number between 1 and 50');
+        }
+    }
     
     if (date && start_time) {
         const now = getCurrentIST();

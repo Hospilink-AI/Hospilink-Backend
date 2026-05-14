@@ -86,6 +86,7 @@ class ProfileService {
                 profileSummary: profileData.profileSummary || '',
                 education: profileData.education || [],
                 skills: profileData.skills || [],
+                experience: profileData.experience,
                 isAvailable: false
             });
 
@@ -362,6 +363,7 @@ class ProfileService {
                         profileSummary: raw.profileSummary || '',
                         education: raw.education || [],
                         skills: raw.skills || [],
+                        experience: raw.experience,
                         isAvailable: raw.isAvailable,
                         isProfileComplete: raw.isProfileComplete,
                         isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
@@ -369,7 +371,6 @@ class ProfileService {
                         profileCompletion,
                         activeApplications,
                         verifiedDocs,
-                        totalExperience: raw.totalExperience || 0,
                         averageRating: raw.averageRating,
                         totalRatings: raw.totalRatings,
                         location: {
@@ -509,6 +510,10 @@ class ProfileService {
 
                 if (Array.isArray(updateData.skills)) {
                     finalUpdateData.skills = updateData.skills;
+                }
+
+                if (updateData.experience !== undefined) {
+                    finalUpdateData.experience = updateData.experience;
                 }
 
                 // Only geocode if location fields actually changed
