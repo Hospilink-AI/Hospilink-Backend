@@ -158,6 +158,7 @@ class DutyService {
             throw new Error('Medical staff profile not found. Please complete your profile first.');
         }
 
+        // Read duty first for validation (role check, time check, overlap check)
         const duty = await Duty.findById(dutyId)
             .populate({
                 path: 'hospital',
@@ -171,11 +172,10 @@ class DutyService {
             throw new Error('Duty not found');
         }
 
-        // Normalize roles for comparison (convert both to lowercase and replace spaces with underscores)
+        // Normalize roles for comparison
         const normalizedStaffRole = normalizeRole(medicalStaff.jobRole);
         const normalizedDutyRole = normalizeRole(duty.staffRole);
 
-        // Validate staff role matches duty role
         if (normalizedStaffRole !== normalizedDutyRole) {
             throw new Error(`Role mismatch: This duty requires a ${duty.staffRole}, but your profile shows ${medicalStaff.jobRole}`);
         }
@@ -189,12 +189,10 @@ class DutyService {
         const dutyDate = new Date(duty.date);
         const [startHours, startMinutes] = duty.startTime.split(':');
 
-        // Convert duty date to IST first, then set time
         const istDutyDate = toIST(dutyDate);
         const dutyStartTime = new Date(istDutyDate);
         dutyStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
 
-        // Prevent acceptance after start time
         if (now >= dutyStartTime) {
             throw new Error('Cannot accept duty after start time.');
         }
@@ -215,30 +213,51 @@ class DutyService {
             }
         }
 
-        duty.status = 'assigned';
-        duty.assignedTo = medicalStaff._id;
-        duty.assignedAt = getCurrentIST();
-
-        // Add status history entry for assignment
-        duty.statusHistory.push({
-            status: 'assigned',
-            timestamp: getCurrentIST(),
-            changedBy: medicalStaff.user,
-            reason: 'Duty accepted by staff'
-        });
-
-        await duty.save();
-
-        // Populate the staff information
-        await duty.populate({
-            path: 'assignedTo',
-            populate: {
-                path: 'user',
-                select: 'name email'
+        // ─── ATOMIC CLAIM ────────────────────────────────────────────────────────
+        // findOneAndUpdate with status: 'available' as a condition ensures only ONE
+        // concurrent request can succeed. All others get null → "no longer available".
+        const assignedAt = getCurrentIST();
+        const claimedDuty = await Duty.findOneAndUpdate(
+            {
+                _id: dutyId,
+                status: 'available'   // ← atomic guard: only matches if still available
+            },
+            {
+                $set: {
+                    status: 'assigned',
+                    assignedTo: medicalStaff._id,
+                    assignedAt
+                },
+                $push: {
+                    statusHistory: {
+                        status: 'assigned',
+                        timestamp: assignedAt,
+                        changedBy: medicalStaff.user,
+                        reason: 'Duty accepted by staff'
+                    }
+                }
+            },
+            {
+                new: true,            // return updated document
+                runValidators: true
             }
+        ).populate({
+            path: 'hospital',
+            populate: { path: 'user', select: 'name email' }
         });
 
-        return duty;
+        // If null, another request won the race — duty is already taken
+        if (!claimedDuty) {
+            throw new Error('Duty is no longer available');
+        }
+
+        // Populate assignedTo for downstream use (emails, notifications)
+        await claimedDuty.populate({
+            path: 'assignedTo',
+            populate: { path: 'user', select: 'name email' }
+        });
+
+        return claimedDuty;
     }
 
 
