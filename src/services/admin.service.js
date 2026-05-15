@@ -17,7 +17,7 @@ const CacheInvalidationService = require('./cacheInvalidation.service');
 const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
 const notificationEmitter = require('./notificationEmitter');
-
+const DashboardService = require('./dashboard.service');
 
 
 
@@ -409,9 +409,9 @@ class AdminService {
             const hospitalLat = hospital.coordinates.coordinates.latitude;
             const hospitalLng = hospital.coordinates.coordinates.longitude;
 
-            console.log(`Admin: Searching for staff within ${radiusKm}km radius`);
+            console.log(`Admin: Searching for staff within ${radiusKm}km radius using hybrid approach (bounding box + real-time location)`);
 
-            // Optimized bounding box query
+            // Bounding box query with profile coordinates (MongoDB indexed query)
             const latDelta = radiusKm / 111;
             const lngDelta = radiusKm / (111 * Math.cos(hospitalLat * Math.PI / 180));
 
@@ -431,25 +431,41 @@ class AdminService {
                 query.jobRole = role;
             }
 
-            // Optimized query without pagination
+            // Get staff within bounding box (reduces dataset significantly)
             const nearbyStaff = await MedicalStaff.find(query)
                 .populate('user', 'name email')
-                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating verificationStatus')
+                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating verificationStatus user')
                 .sort({ 'coordinates.coordinates.latitude': 1, 'coordinates.coordinates.longitude': 1 })
                 .lean();
 
-            console.log(`Admin: Found ${nearbyStaff.length} candidates via bounding box`);
+            console.log(`Admin: Found ${nearbyStaff.length} staff within bounding box (profile coordinates)`);
 
-            // Batch Google Maps API calls with Promise.allSettled for reliability
-            const staffWithDistance = await Promise.allSettled(
+            // Initialize Google Maps API call counters
+            let googleMapsApiCalls = 0;
+            let realTimeLocationCalls = 0;
+            let fallbackLocationCalls = 0;
+
+            // Get real-time location for bounding box subset
+            const staffWithRealTimeLocation = await Promise.allSettled(
                 nearbyStaff.map(async (staffMember) => {
                     try {
+                        // Get real-time location from dashboard cache (falls back to profile location)
+                        const locationData = await DashboardService.getStaffLocationForDuties(staffMember.user._id.toString());
+                        
+                        const staffLat = locationData.location.latitude;
+                        const staffLng = locationData.location.longitude;
+                        const locationSource = locationData.source; // 'browser' or 'profile'
+
+                        // Calculate distance using real-time location
                         const distanceResult = await geocodingService.calculateDistanceAndETA(
                             hospitalLat,
                             hospitalLng,
-                            staffMember.coordinates.coordinates.latitude,
-                            staffMember.coordinates.coordinates.longitude
+                            staffLat,
+                            staffLng
                         );
+
+                        googleMapsApiCalls++;
+                        realTimeLocationCalls++;
 
                         if (distanceResult.distance > radiusKm) {
                             return null; // Filter out based on exact distance
@@ -464,7 +480,7 @@ class AdminService {
                             rating: staffMember.averageRating || 0,
                             isAvailable: staffMember.isAvailable,
                             verificationStatus: staffMember.verificationStatus,
-                            distance: distanceResult.distance,
+                            distance: parseFloat(distanceResult.distance.toFixed(2)),
                             distanceText: distanceResult.distanceText,
                             estimatedTime: distanceResult.duration,
                             estimatedTimeText: distanceResult.durationText,
@@ -475,24 +491,72 @@ class AdminService {
                                 pincode: staffMember.pincode
                             },
                             location: {
-                                latitude: staffMember.coordinates.coordinates.latitude,
-                                longitude: staffMember.coordinates.coordinates.longitude
+                                latitude: staffLat,
+                                longitude: staffLng,
+                                source: locationSource
                             }
                         };
-                    } catch (apiError) {
-                        console.error(`Google Maps API failed for staff ${staffMember._id}:`, apiError.message);
-                        return null;
+                    } catch (error) {
+                        console.error(`Error getting real-time location for staff ${staffMember._id}:`, error.message);
+                        // Fallback to profile coordinates if real-time location fails
+                        try {
+                            const distanceResult = await geocodingService.calculateDistanceAndETA(
+                                hospitalLat,
+                                hospitalLng,
+                                staffMember.coordinates.coordinates.latitude,
+                                staffMember.coordinates.coordinates.longitude
+                            );
+
+                            googleMapsApiCalls++;
+                            fallbackLocationCalls++;
+    
+                            if (distanceResult.distance > radiusKm) {
+                                return null;
+                            }
+
+                            return {
+                                id: staffMember._id,
+                                name: staffMember.fullName,
+                                email: staffMember.user?.email || null,
+                                role: staffMember.jobRole,
+                                phone: staffMember.phoneNumber,
+                                rating: staffMember.averageRating || 0,
+                                isAvailable: staffMember.isAvailable,
+                                verificationStatus: staffMember.verificationStatus,
+                                distance: parseFloat(distanceResult.distance.toFixed(2)),
+                                distanceText: distanceResult.distanceText,
+                                estimatedTime: distanceResult.duration,
+                                estimatedTimeText: distanceResult.durationText,
+                                address: {
+                                    currentAddress: staffMember.currentAddress,
+                                    city: staffMember.city,
+                                    state: staffMember.state,
+                                    pincode: staffMember.pincode
+                                },
+                                location: {
+                                    latitude: staffMember.coordinates.coordinates.latitude,
+                                    longitude: staffMember.coordinates.coordinates.longitude,
+                                    source: 'profile_fallback'
+                                }
+                            };
+                        } catch (fallbackError) {
+                            console.error(`Fallback distance calculation failed for staff ${staffMember._id}:`, fallbackError.message);
+                            return null;
+                        }
                     }
                 })
             );
 
             // Filter successful results
-            const validStaff = staffWithDistance
+            const validStaff = staffWithRealTimeLocation
                 .filter(result => result.status === 'fulfilled' && result.value)
                 .map(result => result.value)
                 .sort((a, b) => a.distance - b.distance);
 
-            console.log(`Admin: Found ${validStaff.length} staff within exact distance`);
+            console.log(`Admin: Found ${validStaff.length} staff within exact distance using real-time location`);
+            console.log(`[Admin Google Maps API] Total calls: ${googleMapsApiCalls} (Real-time: ${realTimeLocationCalls}, Fallback: ${fallbackLocationCalls})`);
+
+            
 
             // Get duty status for all valid staff (batch optimized)
             const staffIds = validStaff.map(staff => staff.id);
@@ -505,7 +569,7 @@ class AdminService {
                 
                 return {
                     ...staff,
-                    // NEW: Duty status fields
+                    // Duty status fields
                     availabilityStatus: dutyStatus.status,
                     hasActiveDuty: dutyStatus.hasActiveDuty,
                     hasUpcomingDuty: dutyStatus.hasUpcomingDuty,
@@ -536,8 +600,9 @@ class AdminService {
                     },
                     search: {
                         radius: radiusKm,
-                        role: role || 'all',
-                        totalFound: staffWithDutyStatus.length
+                        roleFilter: role || 'all',
+                        totalFound: staffWithDutyStatus.length,
+                        locationSource: 'real_time' // Indicates using real-time location
                     },
                     staff: staffWithDutyStatus,
                     summary: {
@@ -550,15 +615,19 @@ class AdminService {
                             verified: staffWithDutyStatus.filter(s => s.verificationStatus === 'verified').length,
                             pending: staffWithDutyStatus.filter(s => s.verificationStatus === 'pending').length,
                             rejected: staffWithDutyStatus.filter(s => s.verificationStatus === 'rejected').length
-                        }
-                    },
+                        },
+                        
+                        // Location source statistics
+                        usingRealTimeLocation: staffWithDutyStatus.filter(s => s.location.source === 'browser').length,
+                        usingProfileLocation: staffWithDutyStatus.filter(s => s.location.source === 'profile' || s.location.source === 'profile_fallback').length
+                    }
                 },
-                message: `Found ${staffWithDutyStatus.length} available staff within ${radiusKm}km radius${role ? ` for role: ${role}` : ''}`,
+                message: `Found ${staffWithDutyStatus.length} available staff within ${radiusKm}km radius${role ? ` for role: ${role}` : ''} using real-time location`,
                 queryInfo: {
                     hospitalCoords: [hospitalLng, hospitalLat],
                     radiusMeters: radiusKm * 1000,
                     hasRoleFilter: !!role,
-                    queryMethod: 'optimized_google_maps_with_duty_status',
+                    queryMethod: 'real_time_location_with_duty_status',
                     cached: false
                 },
                 timestamp: new Date().toISOString()

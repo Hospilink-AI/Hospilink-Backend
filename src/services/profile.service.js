@@ -14,7 +14,7 @@ const notificationEmitter = require('./notificationEmitter');
 const emailService = require('./email.service');
 const requiredDocsConfig = require('../config/requiredDocs');
 const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');            
-
+const DashboardService = require('./dashboard.service');
 
 class ProfileService {
     // Create medical staff profile
@@ -1062,15 +1062,16 @@ class ProfileService {
             const hospitalLat = hospital.coordinates.coordinates.latitude;
             const hospitalLng = hospital.coordinates.coordinates.longitude;
 
-            console.log(`Searching for staff within ${radiusKm}km radius`);
+            
+            console.log(`Searching for staff within ${radiusKm}km radius using hybrid approach (bounding box + real-time location)`);
 
-            // Optimized bounding box query with compound index
+            // Bounding box query with profile coordinates (MongoDB indexed query)
             const latDelta = radiusKm / 111;
             const lngDelta = radiusKm / (111 * Math.cos(hospitalLat * Math.PI / 180));
 
             const query = {
                 isAvailable: true,
-                verificationStatus: 'verified', // Only verified staff
+                verificationStatus: 'verified',
                 'coordinates.coordinates.latitude': {
                     $gte: hospitalLat - latDelta,
                     $lte: hospitalLat + latDelta
@@ -1085,46 +1086,97 @@ class ProfileService {
                 query.jobRole = role;
             }
 
-            // Optimized query without pagination
+            // Get staff within bounding box 
             const nearbyStaff = await MedicalStaff.find(query)
                 .populate('user', 'name email')
-                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating verificationStatus') 
+                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating verificationStatus user')
                 .sort({ 'coordinates.coordinates.latitude': 1, 'coordinates.coordinates.longitude': 1 })
                 .lean();
 
-            console.log(`Found ${nearbyStaff.length} candidates via bounding box`);
+            console.log(`Found ${nearbyStaff.length} available/verified staff candidates`);
+            
+            // Initialize Google Maps API call counters for monitoring purpose
+            let googleMapsApiCalls = 0;
+            let realTimeLocationCalls = 0;
+            let fallbackLocationCalls = 0;
 
-            // Batch Google Maps API calls (optimized for performance)
-            const staffWithDistance = await Promise.allSettled(
+
+            // Get real-time location for bounding box subset
+            const staffWithRealTimeLocation = await Promise.allSettled(
                 nearbyStaff.map(async (staff) => {
                     try {
+                        // Get real-time location from dashboard cache (falls back to profile location)
+                        const locationData = await DashboardService.getStaffLocationForDuties(staff.user._id.toString());
+                        
+                        const staffLat = locationData.location.latitude;
+                        const staffLng = locationData.location.longitude;
+                        const locationSource = locationData.source; // 'browser' or 'profile'
+
+                        // Calculate distance using real-time location
                         const distanceResult = await geocodingService.calculateDistanceAndETA(
                             hospitalLat,
                             hospitalLng,
-                            staff.coordinates.coordinates.latitude,
-                            staff.coordinates.coordinates.longitude
+                            staffLat,
+                            staffLng
                         );
+
+                        googleMapsApiCalls++;
+                        realTimeLocationCalls++;
 
                         return {
                             ...staff,
+                            realTimeLocation: {
+                                latitude: staffLat,
+                                longitude: staffLng,
+                                source: locationSource
+                            },
                             distance: parseFloat(distanceResult.distance.toFixed(2)),
                             distanceText: distanceResult.distanceText,
                             estimatedTime: distanceResult.duration,
                             estimatedTimeText: distanceResult.durationText
                         };
                     } catch (error) {
-                        console.error(`Google Maps API failed for staff ${staff._id}:`, error.message);
-                        return null;
+                        console.error(`Error getting real-time location for staff ${staff._id}:`, error.message);
+                        // Fallback to profile coordinates if real-time location fails
+                        try {
+                            const distanceResult = await geocodingService.calculateDistanceAndETA(
+                                hospitalLat,
+                                hospitalLng,
+                                staff.coordinates.coordinates.latitude,
+                                staff.coordinates.coordinates.longitude
+                            );
+
+                            googleMapsApiCalls++;
+                            fallbackLocationCalls++;
+    
+                            return {
+                                ...staff,
+                                realTimeLocation: {
+                                    latitude: staff.coordinates.coordinates.latitude,
+                                    longitude: staff.coordinates.coordinates.longitude,
+                                    source: 'profile_fallback'
+                                },
+                                distance: parseFloat(distanceResult.distance.toFixed(2)),
+                                distanceText: distanceResult.distanceText,
+                                estimatedTime: distanceResult.duration,
+                                estimatedTimeText: distanceResult.durationText
+                            };
+                        } catch (fallbackError) {
+                            console.error(`Fallback distance calculation failed for staff ${staff._id}:`, fallbackError.message);
+                            return null;
+                        }
                     }
                 })
             );
 
-            // Filter successful results and apply exact distance filter
-            const validStaff = staffWithDistance
+            // Third pass: Filter by exact radius
+            const validStaff = staffWithRealTimeLocation
                 .filter(result => result.status === 'fulfilled' && result.value && result.value.distance <= radiusKm)
                 .map(result => result.value);
 
-            console.log(`Found ${validStaff.length} staff within exact distance`);
+            console.log(`Found ${validStaff.length} staff within exact distance using real-time location`);
+            console.log(`[Google Maps API] Total calls: ${googleMapsApiCalls} (Real-time: ${realTimeLocationCalls}, Fallback: ${fallbackLocationCalls})`);
+            
 
             // Get duty status for all valid staff (batch optimized)
             const staffIds = validStaff.map(staff => staff._id);
@@ -1161,8 +1213,9 @@ class ProfileService {
                         pincode: staff.pincode
                     },
                     location: {
-                        latitude: staff.coordinates.coordinates.latitude,
-                        longitude: staff.coordinates.coordinates.longitude
+                        latitude: staff.realTimeLocation.latitude,
+                        longitude: staff.realTimeLocation.longitude,
+                        source: staff.realTimeLocation.source // 'browser', 'profile', or 'profile_fallback'
                     }
                 };
             });
@@ -1191,21 +1244,24 @@ class ProfileService {
                     search: {
                         radius: radiusKm,
                         roleFilter: role || 'all',
-                        totalFound: staffWithDutyStatus.length
+                        totalFound: staffWithDutyStatus.length,
+                        locationSource: 'real_time' // Indicates using real-time location
                     },
                     staff: staffWithDutyStatus,
                     summary: {
                         totalStaff: staffWithDutyStatus.length,
                         fullyAvailable: staffWithDutyStatus.filter(s => s.availabilityStatus === 'fully_available').length,
                         hasUpcomingDuties: staffWithDutyStatus.filter(s => s.availabilityStatus === 'has_upcoming_duties').length,
-                        hasActiveDuties: staffWithDutyStatus.filter(s => s.availabilityStatus === 'has_active_duties').length
+                        hasActiveDuties: staffWithDutyStatus.filter(s => s.availabilityStatus === 'has_active_duties').length,
+                        usingRealTimeLocation: staffWithDutyStatus.filter(s => s.location.source === 'browser').length,
+                        usingProfileLocation: staffWithDutyStatus.filter(s => s.location.source === 'profile' || s.location.source === 'profile_fallback').length
                     }
                 },
-                message: `Found ${staffWithDutyStatus.length} available staff within ${radiusKm}km radius${role ? ` for role: ${role}` : ''}`,
+                message: `Found ${staffWithDutyStatus.length} available staff within ${radiusKm}km radius${role ? ` for role: ${role}` : ''} using real-time location`,
                 timestamp: new Date().toISOString()
             };
 
-            // Cache result for 2 minutes
+            // Cache result for 2 minutes (reduced cache time for real-time location)
             await cacheService.set(cacheKey, result, 120);
             return result;
         } catch (error) {
