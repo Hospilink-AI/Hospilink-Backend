@@ -1,15 +1,19 @@
 const Hospital = require('../models/Hospital');
 const Duty = require('../models/Duty');
+const User = require('../models/User')
 const AdminAuthService = require('../services/adminAuth.service');
 const adminService = require('../services/admin.service');
 const DutyService = require('../services/duty.service');
+const documentService = require('../services/document.service');
 const { asyncHandler } = require('../middleware/error.middleware');
 const notificationEmitter = require('../services/notificationEmitter');
 const activityLogEmitter = require('../services/activityLogEmitter');
 const MedicalStaff = require('../models/MedicalStaff');
 const { normalizeRole } = require('../utils/helpers');
 const logger = require('../utils/logger');
-
+const cacheService = require('../services/cache.service');
+const { generateActiveDutiesPDF } = require('../utils/pdf.puppeteer');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 
 
 
@@ -17,6 +21,18 @@ const logger = require('../utils/logger');
 exports.adminSignin = asyncHandler(async (req, res) => {
     const { email, password } = req.body;
     const result = await AdminAuthService.signin(email, password);
+
+    // Log admin login
+    if (result.admin || result.user) {
+        const admin = result.admin || result.user;
+        activityLogEmitter.emitAdminActivity(
+            ACTIVITY_ACTIONS.ADMIN_LOGIN,
+            null,
+            { userId: admin._id || admin.id, name: admin.name, role: 'admin', email: admin.email },
+            { email: admin.email },
+            req
+        ).catch(() => {});
+    }
 
     res.status(200).json({
         success: true,
@@ -98,7 +114,8 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
         urgency,
         description,
         offered_rate,
-        is_overnight_duty
+        is_overnight_duty,
+        staff_count
     } = req.body;
 
     if (!hospital_id) {
@@ -112,6 +129,9 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
         return res.status(404).json({ success: false, message: 'Hospital not found' });
     }
 
+    // Determine number of duties to create (default to 1 if staff_count not provided)
+    const numberOfDuties = staff_count ? parseInt(staff_count) : 1;
+
     const dutyData = {
         staffRole: staff_role,
         date,
@@ -124,8 +144,13 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
         isOvernightDuty: is_overnight_duty || false
     };
 
-    // Use the hospital's own user ID so existing service logic works unchanged
-    const result = await DutyService.createDuty(dutyData, hospital.user._id);
+    // Create multiple duties based on staff_count
+    const createdDuties = [];
+    for (let i = 0; i < numberOfDuties; i++) {
+        // Use the hospital's own user ID so existing service logic works unchanged
+        const result = await DutyService.createDuty(dutyData, hospital.user._id);
+        createdDuties.push(result.duty);
+    }
 
     // Notify matching staff + hospital (same as hospital flow)
     try {
@@ -141,20 +166,27 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
 
         const hospitalUserId = hospital.user._id.toString();
 
-        await notificationEmitter.emitDutyCreated(result.duty, hospital, staffUserIds, hospitalUserId);
+        // Send notifications for all created duties
+        for (const duty of createdDuties) {
+            await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, hospitalUserId);
+        }
 
         // Notify all admins if this is an emergency duty
         if (urgency === 'emergency') {
-            const admins = await require('../models/User').find({ role: 'admin' }).select('_id');
+            const admins = await User.find({ role: 'admin' }).select('_id');
             if (admins.length) {
                 const adminIds = admins.map(a => a._id.toString());
-                await notificationEmitter.emitEmergencyAdminAlert(result.duty, hospital, adminIds, 'emergency_created');
+                
+                // Send emergency alerts for all created duties
+                for (const duty of createdDuties) {
+                    await notificationEmitter.emitEmergencyAdminAlert(duty, hospital, adminIds, 'emergency_created');
 
-                const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
-                if (alertEmail) {
-                    require('../services/email.service').sendEmergencyAdminAlertEmail(
-                        alertEmail, 'Admin', result.duty, hospital, 'emergency_created'
-                    ).catch(err => logger.error(`Error sending emergency alert email: ${err.message}`));
+                    const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+                    if (alertEmail) {
+                        require('../services/email.service').sendEmergencyAdminAlertEmail(
+                            alertEmail, 'Admin', duty, hospital, 'emergency_created'
+                        ).catch(err => logger.error(`Error sending emergency alert email: ${err.message}`));
+                    }
                 }
             }
         }
@@ -162,7 +194,12 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
         logger.error('Admin createDuty: notification error - ' + err.message);
     }
 
-    res.status(201).json({ success: true, duty: result.duty });
+    res.status(201).json({ 
+        success: true, 
+        duties: createdDuties,
+        count: createdDuties.length,
+        message: `Successfully created ${createdDuties.length} duty`
+    });
 });
 
 
@@ -182,6 +219,13 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
             message: error.message
         });
     }
+});
+
+
+// GET /api/admin/hospitals/stats — dashboard stats for hospital management
+exports.getHospitalStats = asyncHandler(async (req, res) => {
+    const result = await adminService.getHospitalStats();
+    res.status(200).json({ success: true, data: result });
 });
 
 
@@ -239,6 +283,15 @@ exports.getMedicalStaffDetail = asyncHandler(async (req, res) => {
 // PATCH /api/admin/medical-staff/:staffId/verify
 exports.verifyMedicalStaff = asyncHandler(async (req, res) => {
     const result = await adminService.verifyMedicalStaff(req.params.staffId);
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.USER_APPROVED,
+        { type: 'staff', id: req.params.staffId, name: result.staff?.fullName || req.params.staffId },
+        { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+        { staffId: req.params.staffId },
+        req
+    ).catch(() => {});
+
     res.status(200).json({ success: true, message: result.message, data: result });
 });
 
@@ -248,19 +301,28 @@ exports.rejectMedicalStaff = asyncHandler(async (req, res) => {
     const { reason } = req.body;
     if (!reason) return res.status(400).json({ success: false, message: 'Rejection reason is required' });
     const result = await adminService.rejectMedicalStaff(req.params.staffId, reason);
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.USER_REJECTED,
+        { type: 'staff', id: req.params.staffId, name: result.staff?.fullName || req.params.staffId },
+        { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+        { staffId: req.params.staffId, reason },
+        req
+    ).catch(() => {});
+
     res.status(200).json({ success: true, message: result.message, data: result });
 });
 
 
 
-// GET /api/admin/nearby-staff - Get ALL available staff within distance from hospital
+// GET /api/admin/nearby-staff - Get ALL available staff within radius from hospital
 exports.getNearbyAvailableStaff = asyncHandler(async (req, res) => {
     // Extract from validated query object (set by middleware)
-    const { hospital_id, distance, role } = req.validatedQuery;
+    const { hospital_id, radius, role } = req.validatedQuery;
 
     const result = await adminService.getNearbyAvailableStaff(
         hospital_id,
-        distance,
+        radius,
         role
     );
 
@@ -296,7 +358,6 @@ exports.getAdminProfile = asyncHandler(async (req, res) => {
 
 // POST /api/admin/flush-sessions
 exports.flushUserSessions = asyncHandler(async (req, res) => {
-    const cacheService = require('../services/cache.service');
     const count = await cacheService.invalidatePattern('session:*');
     res.status(200).json({ success: true, message: `Flushed ${count} cached sessions.` });
 });
@@ -319,8 +380,16 @@ exports.getDocumentStats = asyncHandler(async (req, res) => {
 
 // PUT /api/admin/documents/:documentId/verify
 exports.verifyDocument = asyncHandler(async (req, res) => {
-    const documentService = require('../services/document.service');
     const result = await documentService.verifyDocument(req.params.documentId, req.user._id || req.user.id);
+
+    activityLogEmitter.emitDocumentActivity(
+        ACTIVITY_ACTIONS.DOCUMENT_VERIFIED_BY_ADMIN,
+        { _id: req.params.documentId, documentType: result.documentType, verificationStatus: 'verified' },
+        { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+        { targetUserId: result.userId, targetUserName: result.userName },
+        req
+    ).catch(() => {});
+
     res.status(200).json({ success: true, message: 'Document verified successfully', data: result });
 });
 
@@ -329,8 +398,16 @@ exports.verifyDocument = asyncHandler(async (req, res) => {
 exports.rejectDocument = asyncHandler(async (req, res) => {
     const { reason } = req.body;
     if (!reason) return res.status(400).json({ success: false, message: 'Rejection reason is required' });
-    const documentService = require('../services/document.service');
     const result = await documentService.rejectDocument(req.params.documentId, req.user._id || req.user.id, reason);
+
+    activityLogEmitter.emitDocumentActivity(
+        ACTIVITY_ACTIONS.DOCUMENT_REJECTED_BY_ADMIN,
+        { _id: req.params.documentId, documentType: result.documentType, verificationStatus: 'rejected' },
+        { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+        { targetUserId: result.userId, targetUserName: result.userName, reason },
+        req
+    ).catch(() => {});
+
     res.status(200).json({ success: true, message: 'Document rejected', data: result });
 });
 
@@ -362,6 +439,93 @@ exports.getActiveDuties = asyncHandler(async (req, res) => {
             message: error.message
         });
     }
+});
+
+
+// GET /api/admin/active-duties/export - Export active duties as CSV or PDF
+exports.exportActiveDuties = asyncHandler(async (req, res) => {
+    const format = (req.query.format || 'csv').toLowerCase();
+
+    if (!['csv', 'pdf'].includes(format)) {
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid format. Supported: csv, pdf'
+        });
+    }
+
+    const { role, location, status } = req.query;
+
+    // Fetch all matching duties without pagination
+    const result = await adminService.getActiveDuties({
+        role:     role     || null,
+        location: location || null,
+        status:   status   || null,
+        page:  1,
+        limit: 10000
+    });
+
+    const duties = result.duties || [];
+
+    if (duties.length === 0) {
+        return res.status(404).json({
+            success: false,
+            message: 'No active duties found to export'
+        });
+    }
+
+    const exportedAt = new Date().toISOString();
+
+    // ── CSV ──────────────────────────────────────────────────────────────────
+    if (format === 'csv') {
+        const headers = [
+            'Hospital',
+            'City',
+            'Role',
+            'Staff Name',
+            'Staff Email',
+            'Date',
+            'Start Time',
+            'End Time',
+            'Status',
+            'Urgency',
+            'Distance',
+            'ETA',
+            'Offered Rate'
+        ];
+
+        const rows = duties.map(d => [
+            d.hospital?.name        || '',
+            d.hospital?.city        || '',
+            (d.role || '').replace(/_/g, ' ').toUpperCase(),
+            d.staff?.name           || '',
+            d.staff?.email          || '',
+            d.timing?.date ? new Date(d.timing.date).toLocaleDateString('en-IN') : '',
+            d.timing?.startTime     || '',
+            d.timing?.endTime       || '',
+            (d.status?.status       || '').toUpperCase(),
+            (d.timing?.urgency      || '').toUpperCase(),
+            d.distance?.distanceText        || '',
+            d.distance?.estimatedTimeText   || '',
+            d.offeredRate ? `₹${d.offeredRate}` : ''
+        ]);
+
+        const csvContent = [
+            headers.join(','),
+            ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+        ].join('\n');
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=active-duties-${Date.now()}.csv`);
+        return res.status(200).send(csvContent);
+    }
+
+    // ── PDF ──────────────────────────────────────────────────────────────────
+    return generateActiveDutiesPDF(res, {
+        duties,
+        filters: result.filters,
+        summary: result.summary,
+        exportedAt
+    });
 });
 
 
@@ -434,6 +598,15 @@ exports.getHospitalDetail = asyncHandler(async (req, res) => {
 // PATCH /api/admin/hospitals/:hospitalId/verify
 exports.verifyHospital = asyncHandler(async (req, res) => {
     const result = await adminService.verifyHospital(req.params.hospitalId);
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.USER_APPROVED,
+        { type: 'hospital', id: req.params.hospitalId, name: result.hospital?.hospitalLegalName || req.params.hospitalId },
+        { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+        { hospitalId: req.params.hospitalId },
+        req
+    ).catch(() => {});
+
     res.status(200).json({ success: true, message: 'Hospital verified', data: result });
 });
 
@@ -443,6 +616,15 @@ exports.rejectHospital = asyncHandler(async (req, res) => {
     const { reason } = req.body;
     if (!reason) return res.status(400).json({ success: false, message: 'Rejection reason is required' });
     const result = await adminService.rejectHospital(req.params.hospitalId, reason);
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.USER_REJECTED,
+        { type: 'hospital', id: req.params.hospitalId, name: result.hospital?.hospitalLegalName || req.params.hospitalId },
+        { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+        { hospitalId: req.params.hospitalId, reason },
+        req
+    ).catch(() => {});
+
     res.status(200).json({ success: true, message: 'Hospital rejected', data: result });
 });
 
@@ -494,6 +676,7 @@ exports.getDutyHistory = asyncHandler(async (req, res) => {
     }
 });
 
+
 // GET /api/admin/emergency-dashboard - Consolidated Critical + High priority duties list
 exports.getEmergencyDashboard = asyncHandler(async (req, res) => {
     const page = parseInt(req.query.page) || 1;
@@ -507,6 +690,8 @@ exports.getEmergencyDashboard = asyncHandler(async (req, res) => {
         pagination: result.pagination
     });
 });
+
+
 // POST /api/admin/assign-duty
 exports.assignDutyToStaff = asyncHandler(async (req, res) => {
     const { hospital_id, duty_id, staff_id } = req.body;

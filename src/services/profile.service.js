@@ -1,6 +1,8 @@
 const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
 const User = require('../models/User');
+const Duty = require('../models/Duty');
+const Document = require('../models/Document');
 const geocodingService = require('../services/geocoding.service');
 const cacheService = require('./cache.service');
 // const { toRadians } = require('../utils/helpers');
@@ -8,6 +10,10 @@ const documentService = require('./document.service');
 const Review = require('../models/Review');
 const path = require('path');
 const { uploadToS3, deleteFromS3, generatePreSignedURL } = require('./s3.service');
+const notificationEmitter = require('./notificationEmitter');
+const emailService = require('./email.service');
+const requiredDocsConfig = require('../config/requiredDocs');
+const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');            
 
 
 class ProfileService {
@@ -80,6 +86,7 @@ class ProfileService {
                 profileSummary: profileData.profileSummary || '',
                 education: profileData.education || [],
                 skills: profileData.skills || [],
+                experience: profileData.experience,
                 isAvailable: false
             });
 
@@ -98,12 +105,23 @@ class ProfileService {
 
             // Emit notification to admins about new staff registration
             try {
-                const notificationEmitter = require('./notificationEmitter');
                 const user = await User.findById(userId);
                 await notificationEmitter.emitNewStaffRegistration(medicalStaffProfile, user);
             } catch (notifError) {
                 console.error('Error sending staff registration notification:', notifError);
                 // Don't fail the registration if notification fails
+            }
+
+            // Send profile creation confirmation email
+            try {
+                await emailService.sendProfileCreatedConfirmationEmail(
+                    user.email,
+                    medicalStaffProfile.fullName || user.name,
+                    'staff'
+                );
+            } catch (emailError) {
+                console.error('Error sending profile creation email:', emailError);
+                // Don't fail the registration if email fails
             }
 
             return {
@@ -247,12 +265,23 @@ class ProfileService {
 
             // Emit notification to admins about new hospital registration
             try {
-                const notificationEmitter = require('./notificationEmitter');
                 const user = await User.findById(userId);
                 await notificationEmitter.emitNewHospitalRegistration(hospitalProfile, user);
             } catch (notifError) {
                 console.error('Error sending hospital registration notification:', notifError);
                 // Don't fail the registration if notification fails
+            }
+
+            // Send profile creation confirmation email
+            try {
+                await emailService.sendProfileCreatedConfirmationEmail(
+                    user.email,
+                    hospitalProfile.hospitalLegalName || user.name,
+                    'hospital'
+                );
+            } catch (emailError) {
+                console.error('Error sending profile creation email:', emailError);
+                // Don't fail the registration if email fails
             }
 
             return {
@@ -283,8 +312,6 @@ class ProfileService {
             if (user.role === 'staff') {
                 const raw = await MedicalStaff.findOne({ user: userId }).lean();
                 if (raw) {
-                    const Duty = require('../models/Duty');
-                    const Document = require('../models/Document');
                     let profilePictureUrl = null;
 
                     // Generate presigned URL for profile picture
@@ -336,13 +363,14 @@ class ProfileService {
                         profileSummary: raw.profileSummary || '',
                         education: raw.education || [],
                         skills: raw.skills || [],
+                        experience: raw.experience,
                         isAvailable: raw.isAvailable,
                         isProfileComplete: raw.isProfileComplete,
                         isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
+                        verificationStatus: raw.verificationStatus,
                         profileCompletion,
                         activeApplications,
                         verifiedDocs,
-                        totalExperience: raw.totalExperience || 0,
                         averageRating: raw.averageRating,
                         totalRatings: raw.totalRatings,
                         location: {
@@ -379,6 +407,7 @@ class ProfileService {
                         servicesAvailable: raw.servicesAvailable,
                         isProfileComplete: raw.isProfileComplete,
                         isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
+                        verificationStatus: raw.verificationStatus,
                         staffCount: raw.staffCount,
                         description: raw.description || '',
                         coordinates: {
@@ -431,8 +460,6 @@ class ProfileService {
     // Update user profile with location handling
     async updateUserProfile(userId, updateData) {
         try {
-            const cacheService = require('./cache.service');
-
             // Get user with lean query
             const user = await User.findById(userId).select('name email role').lean();
             if (!user) {
@@ -486,6 +513,10 @@ class ProfileService {
                     finalUpdateData.skills = updateData.skills;
                 }
 
+                if (updateData.experience !== undefined) {
+                    finalUpdateData.experience = updateData.experience;
+                }
+
                 // Only geocode if location fields actually changed
                 if (cityChanged || currentAddressChanged || stateChanged || pincodeChanged) {
                     if (!updateData.coordinates || !updateData.coordinates.latitude || !updateData.coordinates.longitude) {
@@ -503,7 +534,6 @@ class ProfileService {
                             };
                         } else {
                             // Geocode and cache result
-                            const geocodingService = require('../services/geocoding.service');
                             const geocoded = await geocodingService.geocodeAddress(address);
                             finalUpdateData.coordinates = {
                                 type: 'Point',
@@ -593,8 +623,7 @@ class ProfileService {
                                 }
                             };
                         } else {
-                            // Geocode and cache
-                            const geocodingService = require('../services/geocoding.service');
+                            // Geocode and cache              
                             const geocoded = await geocodingService.geocodeAddress(locationToGeocode);
                             finalUpdateData.coordinates = {
                                 type: 'Point',
@@ -710,8 +739,6 @@ class ProfileService {
 
             if (!user) throw new Error('User not found');
 
-            const requiredDocsConfig = require('../config/requiredDocs');
-            const Document = require('../models/Document');
 
             // Run profile + document checks in parallel
             let profileDoc = null;
@@ -936,7 +963,6 @@ class ProfileService {
 
                 if (!upcomingDuties) {
                     // Use lean query with minimal fields
-                    const Duty = require('../models/Duty');
                     upcomingDuties = await Duty.find({
                         assignedTo: medicalStaff._id,
                         status: 'assigned',
@@ -1003,37 +1029,49 @@ class ProfileService {
 
 
     // Get nearby available staff for hospital map dashboard
-    async getNearbyAvailableStaff(hospitalUserId, radiusKm = 5) {
+    async getNearbyAvailableStaff(hospitalUserId, radiusKm = 5, role = null) {
         try {
-            // Get hospital profile
-            const hospital = await Hospital.findOne({ user: hospitalUserId });
+            // Input validation
+            if (radiusKm < 1 || radiusKm > 100) {
+                throw new Error('Radius must be between 1km and 100km');
+            }
+
+            // Check cache first (2 minutes for location-based queries)
+            const cacheKey = `nearby:staff:${hospitalUserId}:${radiusKm}:${role || 'all'}`;
+            const cached = await cacheService.get(cacheKey);
+            if (cached) {
+                return {
+                    ...cached,
+                    cached: true,
+                    timestamp: new Date().toISOString()
+                };
+            }
+
+            // Get hospital profile with minimal fields
+            const hospital = await Hospital.findOne({ user: hospitalUserId })
+                .select('_id hospitalLegalName coordinates currentAddress city state pincode')
+                .lean();
+
             if (!hospital) {
                 throw new Error('Hospital profile not found');
             }
 
-            // Validate hospital has coordinates
-            if (!hospital.coordinates || !hospital.coordinates.coordinates || 
-                !hospital.coordinates.coordinates.latitude || 
-                !hospital.coordinates.coordinates.longitude) {
-                throw new Error('Hospital location coordinates not found. Please update your hospital profile with valid location information.');
-            }
-
-            // Validate radius 
-            if (radiusKm < 1 || radiusKm > 100) {
-                throw new Error('Radius must be between 1km and 100km');
+            if (!hospital.coordinates || !hospital.coordinates.coordinates) {
+                throw new Error('Hospital location coordinates not found');
             }
 
             const hospitalLat = hospital.coordinates.coordinates.latitude;
             const hospitalLng = hospital.coordinates.coordinates.longitude;
 
-            console.log('Searching for staff within', radiusKm, 'km radius');
+            console.log(`Searching for staff within ${radiusKm}km radius`);
 
-            // Use MongoDB's $geoWithin with bounding box first
-            const latDelta = radiusKm / 111; // Approximate km to degrees
+            // Optimized bounding box query with compound index
+            const latDelta = radiusKm / 111;
             const lngDelta = radiusKm / (111 * Math.cos(hospitalLat * Math.PI / 180));
 
-            const nearbyStaff = await MedicalStaff.find({
+            const query = {
                 isAvailable: true,
+                verificationStatus: 'verified', // Only verified staff
                 'coordinates.coordinates.latitude': {
                     $gte: hospitalLat - latDelta,
                     $lte: hospitalLat + latDelta
@@ -1042,78 +1080,144 @@ class ProfileService {
                     $gte: hospitalLng - lngDelta,
                     $lte: hospitalLng + lngDelta
                 }
-            })
-                .populate('user', 'name email role isEmailVerified')         // populate minimal user data fields only
-                .select('fullName jobRole currentAddress city state pincode phoneNumber email coordinates isAvailable averageRating')         // select only required fields
-                .lean();    // return plain JavaScript objects instead of Mongoose documents
+            };
 
-            console.log('Found', nearbyStaff.length, 'candidates via bounding box');
-
-            // Filter by exact distance using Google Maps API only
-            const exactNearbyStaff = [];
-            for (const staff of nearbyStaff) {
-                try {
-                    const distanceResult = await geocodingService.calculateDistanceAndETA(
-                        hospitalLat,
-                        hospitalLng,
-                        staff.coordinates.coordinates.latitude,
-                        staff.coordinates.coordinates.longitude
-                    );
-
-                    staff.distance = parseFloat(distanceResult.distance.toFixed(2));
-                    if (distanceResult.distance <= radiusKm) {
-                        exactNearbyStaff.push(staff);
-                    }
-                } catch (error) {
-                    console.error(`Google Maps API failed for staff ${staff._id}:`, error.message);
-                    // Skip staff if Google Maps API fails
-                    continue;
-                }
+            if (role) {
+                query.jobRole = role;
             }
 
-            // Format response
-            const staffWithDistance = exactNearbyStaff.map(staff => ({
-                ...staff,
-                address: {
-                    currentAddress: staff.currentAddress,
-                    city: staff.city,
-                    state: staff.state,
-                    pincode: staff.pincode
-                },
-                location: {
-                    latitude: staff.coordinates.coordinates.latitude,
-                    longitude: staff.coordinates.coordinates.longitude
-                }
-            }));
+            // Optimized query without pagination
+            const nearbyStaff = await MedicalStaff.find(query)
+                .populate('user', 'name email')
+                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating verificationStatus') 
+                .sort({ 'coordinates.coordinates.latitude': 1, 'coordinates.coordinates.longitude': 1 })
+                .lean();
 
-            // Sort by distance
-            staffWithDistance.sort((a, b) => a.distance - b.distance);
+            console.log(`Found ${nearbyStaff.length} candidates via bounding box`);
 
-            return {
-                success: true,
-                hospital: {
-                    name: hospital.hospitalLegalName,
+            // Batch Google Maps API calls (optimized for performance)
+            const staffWithDistance = await Promise.allSettled(
+                nearbyStaff.map(async (staff) => {
+                    try {
+                        const distanceResult = await geocodingService.calculateDistanceAndETA(
+                            hospitalLat,
+                            hospitalLng,
+                            staff.coordinates.coordinates.latitude,
+                            staff.coordinates.coordinates.longitude
+                        );
+
+                        return {
+                            ...staff,
+                            distance: parseFloat(distanceResult.distance.toFixed(2)),
+                            distanceText: distanceResult.distanceText,
+                            estimatedTime: distanceResult.duration,
+                            estimatedTimeText: distanceResult.durationText
+                        };
+                    } catch (error) {
+                        console.error(`Google Maps API failed for staff ${staff._id}:`, error.message);
+                        return null;
+                    }
+                })
+            );
+
+            // Filter successful results and apply exact distance filter
+            const validStaff = staffWithDistance
+                .filter(result => result.status === 'fulfilled' && result.value && result.value.distance <= radiusKm)
+                .map(result => result.value);
+
+            console.log(`Found ${validStaff.length} staff within exact distance`);
+
+            // Get duty status for all valid staff (batch optimized)
+            const staffIds = validStaff.map(staff => staff._id);
+            const dutyStatusMap = await getBatchStaffDutyStatus(staffIds);
+
+            // Format response with duty status
+            const staffWithDutyStatus = validStaff.map(staff => {
+                const dutyStatus = dutyStatusMap.get(staff._id.toString());
+                
+                return {
+                    id: staff._id,
+                    name: staff.fullName,
+                    email: staff.user?.email || staff.email,
+                    role: staff.jobRole,
+                    phone: staff.phoneNumber,
+                    rating: staff.averageRating || 0,
+                    isAvailable: staff.isAvailable,
+                    verificationStatus: staff.verificationStatus, 
+                    distance: staff.distance,
+                    distanceText: staff.distanceText,
+                    estimatedTime: staff.estimatedTime,
+                    estimatedTimeText: staff.estimatedTimeText,
+                    availabilityStatus: dutyStatus.status,
+                    hasActiveDuty: dutyStatus.hasActiveDuty,
+                    hasUpcomingDuty: dutyStatus.hasUpcomingDuty,
+                    currentDuty: dutyStatus.currentDuty,
+                    nextDuty: dutyStatus.nextDuty,
+                    activeDutyCount: dutyStatus.activeDutyCount,
+                    upcomingDutyCount: dutyStatus.upcomingDutyCount,
                     address: {
-                        currentAddress: hospital.currentAddress,
-                        city: hospital.city,
-                        state: hospital.state,
-                        pincode: hospital.pincode
+                        currentAddress: staff.currentAddress,
+                        city: staff.city,
+                        state: staff.state,
+                        pincode: staff.pincode
                     },
                     location: {
-                        latitude: hospitalLat,
-                        longitude: hospitalLng
+                        latitude: staff.coordinates.coordinates.latitude,
+                        longitude: staff.coordinates.coordinates.longitude
+                    }
+                };
+            });
+
+            // Sort by distance
+            staffWithDutyStatus.sort((a, b) => a.distance - b.distance);
+
+            const result = {
+                success: true,
+                cached: false,
+                data: {
+                    hospital: {
+                        id: hospital._id,
+                        name: hospital.hospitalLegalName,
+                        address: {
+                            currentAddress: hospital.currentAddress,
+                            city: hospital.city,
+                            state: hospital.state,
+                            pincode: hospital.pincode
+                        },
+                        location: {
+                            latitude: hospitalLat,
+                            longitude: hospitalLng
+                        }
+                    },
+                    search: {
+                        radius: radiusKm,
+                        roleFilter: role || 'all',
+                        totalFound: staffWithDutyStatus.length
+                    },
+                    staff: staffWithDutyStatus,
+                    summary: {
+                        totalStaff: staffWithDutyStatus.length,
+                        fullyAvailable: staffWithDutyStatus.filter(s => s.availabilityStatus === 'fully_available').length,
+                        hasUpcomingDuties: staffWithDutyStatus.filter(s => s.availabilityStatus === 'has_upcoming_duties').length,
+                        hasActiveDuties: staffWithDutyStatus.filter(s => s.availabilityStatus === 'has_active_duties').length
                     }
                 },
-                searchRadius: radiusKm,
-                totalStaffFound: staffWithDistance.length,
-                staff: staffWithDistance,
-                message: `Found ${staffWithDistance.length} available staff within ${radiusKm}km radius`
+                message: `Found ${staffWithDutyStatus.length} available staff within ${radiusKm}km radius${role ? ` for role: ${role}` : ''}`,
+                timestamp: new Date().toISOString()
             };
+
+            // Cache result for 2 minutes
+            await cacheService.set(cacheKey, result, 120);
+            return result;
         } catch (error) {
             console.error('Error in getNearbyAvailableStaff:', error);
             throw new Error(error.message);
         }
     }
+
+
+
+
     async uploadProfilePicture(userId, file) {
         try {
             // Validate file exists
@@ -1235,6 +1339,8 @@ class ProfileService {
         }
     }
 
+
+
     async deleteProfilePicture(userId) {
         try {
             const user = await User.findById(userId).lean();
@@ -1285,6 +1391,9 @@ class ProfileService {
             throw new Error(error.message);
         }
     }
+
+
+
     // Add skills (append unique)
     async addSkills(userId, skills = []) {
         if (!Array.isArray(skills) || skills.length === 0) {

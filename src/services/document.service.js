@@ -84,6 +84,8 @@ const syncDocumentsUploadedFlag = async (userId, userRole) => {
         if (!config) return;
 
         const mongoose = require('mongoose');
+        const cacheService = require('./cache.service');
+
         const userObjectId = typeof userId === 'string'
             ? new mongoose.Types.ObjectId(userId)
             : userId;
@@ -107,9 +109,13 @@ const syncDocumentsUploadedFlag = async (userId, userRole) => {
             await Hospital.updateOne({ user: userObjectId }, { isDocumentsUploaded });
         }
 
+        // Invalidate profile cache so next GET /profile/me returns fresh data
+        await cacheService.invalidateProfile(userObjectId.toString(), userRole);
+
         console.log(`[syncDocumentsUploadedFlag] userId=${userId} role=${userRole} uploaded=${uploadedTypes} flag=${isDocumentsUploaded}`);
     } catch (err) {
-        console.error('syncDocumentsUploadedFlag error:', err.message);
+        const logger = require('../utils/logger');
+        logger.error(`syncDocumentsUploadedFlag failed userId=${userId} role=${userRole}: ${err.message}`);
     }
 };
 

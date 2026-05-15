@@ -13,7 +13,9 @@ const notificationSchema = new mongoose.Schema({
             'STAFF_ON_SITE', 'DUTY_IN_PROGRESS', 'DUTY_CANCELLED_BY_HOSPITAL', 'DUTY_CANCELLED_BY_STAFF', 
             'DUTY_EDITED', 'DUTY_COMPLETED', 'REVIEW_RECEIVED', 'DOCUMENT_VERIFIED', 'DOCUMENT_REJECTED', 
             'NEW_HOSPITAL_REGISTRATION', 'NEW_STAFF_REGISTRATION',
-            'DUTY_UNASSIGNED_15MIN', 'DUTY_UNFILLED_CRITICAL', 'EMERGENCY_ADMIN_ALERT'],
+            'DUTY_UNASSIGNED_15MIN', 'DUTY_UNFILLED_CRITICAL', 'EMERGENCY_ADMIN_ALERT',
+            'HOSPITAL_VERIFIED', 'HOSPITAL_VERIFIED_ADMIN', 'HOSPITAL_REJECTED', 'HOSPITAL_REJECTED_ADMIN',
+            'STAFF_VERIFIED', 'STAFF_VERIFIED_ADMIN', 'STAFF_REJECTED', 'STAFF_REJECTED_ADMIN'],
         required: [true, 'Notification type is required']
     },
     payload: {
@@ -23,6 +25,11 @@ const notificationSchema = new mongoose.Schema({
     isRead: {
         type: Boolean,
         default: false,
+        index: true
+    },
+    deliveredAt: {
+        type: Date,
+        default: null,
         index: true
     },
     createdAt: {
@@ -37,6 +44,17 @@ const notificationSchema = new mongoose.Schema({
 // Compound indexes for efficient queries
 notificationSchema.index({ recipient: 1, createdAt: -1 });
 notificationSchema.index({ recipient: 1, isRead: 1 });
+notificationSchema.index({ recipient: 1, deliveredAt: 1 }); // For undelivered queries
+
+// TTL index - automatically delete notifications older than 90 days
+// This prevents the notifications collection from growing indefinitely
+notificationSchema.index(
+    { createdAt: 1 }, 
+    { 
+        expireAfterSeconds: 90 * 24 * 60 * 60, // 90 days in seconds
+        name: 'notification_ttl_index'
+    }
+);
 
 const Notification = mongoose.model('Notification', notificationSchema);
 

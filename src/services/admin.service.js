@@ -16,6 +16,8 @@ const EmailService = require('./email.service');
 const CacheInvalidationService = require('./cacheInvalidation.service');
 const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
+const notificationEmitter = require('./notificationEmitter');
+
 
 
 
@@ -89,22 +91,6 @@ class AdminService {
 
         return dateFilter;
     }
-
-
-
-    // Helper function to format duration using existing calculateDutyDuration
-    // formatDuration(startTime, endTime, date, isOvernightDuty, endDate) {
-    //     const durationHours = calculateDutyDuration(date, startTime, endTime, isOvernightDuty, endDate);
-    //     const totalMinutes = Math.floor(durationHours * 60);
-
-    //     if (totalMinutes < 60) {
-    //         return `${totalMinutes} min`;
-    //     } else {
-    //         const hours = Math.floor(totalMinutes / 60);
-    //         const minutes = totalMinutes % 60;
-    //         return `${hours}h ${minutes}m`;
-    //     }
-    // }
 
 
 
@@ -392,12 +378,28 @@ class AdminService {
     }
 
 
-    // Get nearby available staff using bounding box query (same as working profile service)
-    async getNearbyAvailableStaff(hospitalId, distanceKm, role = null) {
+    // Get nearby available staff using bounding box query 
+    async getNearbyAvailableStaff(hospitalId, radiusKm, role = null) {
         try {
-            // Get hospital coordinates first
+            // Input validation
+            if (radiusKm < 1 || radiusKm > 100) {
+                throw new Error('Radius must be between 1km and 100km');
+            }
+
+            // Check cache first (1 minute for admin queries)
+            const cacheKey = `admin:nearby:staff:${hospitalId}:${radiusKm}:${role || 'all'}`;
+            const cached = await cacheService.get(cacheKey);
+            if (cached) {
+                return {
+                    ...cached,
+                    cached: true,
+                    timestamp: new Date().toISOString()
+                };
+            }
+
+            // Get hospital coordinates with minimal fields
             const hospital = await Hospital.findById(hospitalId)
-                .select('coordinates coordinatesArray hospitalLegalName')
+                .select('_id hospitalLegalName coordinates currentAddress city state pincode')
                 .lean();
 
             if (!hospital) {
@@ -407,13 +409,12 @@ class AdminService {
             const hospitalLat = hospital.coordinates.coordinates.latitude;
             const hospitalLng = hospital.coordinates.coordinates.longitude;
 
-            console.log('Searching for staff within', distanceKm, 'km radius using Google Maps API only');
+            console.log(`Admin: Searching for staff within ${radiusKm}km radius`);
 
-            // Use bounding box query 
-            const latDelta = distanceKm / 111; // Approximate km to degrees
-            const lngDelta = distanceKm / (111 * Math.cos(hospitalLat * Math.PI / 180));
+            // Optimized bounding box query
+            const latDelta = radiusKm / 111;
+            const lngDelta = radiusKm / (111 * Math.cos(hospitalLat * Math.PI / 180));
 
-            // Build query with bounding box
             const query = {
                 isAvailable: true,
                 'coordinates.coordinates.latitude': {
@@ -426,100 +427,153 @@ class AdminService {
                 }
             };
 
-            // Add role filter if specified
             if (role) {
                 query.jobRole = role;
             }
 
+            // Optimized query without pagination
             const nearbyStaff = await MedicalStaff.find(query)
                 .populate('user', 'name email')
-                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating user');
+                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating verificationStatus')
+                .sort({ 'coordinates.coordinates.latitude': 1, 'coordinates.coordinates.longitude': 1 })
+                .lean();
 
-            console.log('Found', nearbyStaff.length, 'candidates via bounding box');
+            console.log(`Admin: Found ${nearbyStaff.length} candidates via bounding box`);
 
-            // Filter by Google Maps API distance only
-            const staffWithDistance = await Promise.all(
+            // Batch Google Maps API calls with Promise.allSettled for reliability
+            const staffWithDistance = await Promise.allSettled(
                 nearbyStaff.map(async (staffMember) => {
                     try {
-                        // Use Google Maps API only for distance calculation
-                        let distanceResult;
-                        try {
-                            distanceResult = await geocodingService.calculateDistanceAndETA(
-                                hospitalLat,
-                                hospitalLng,
-                                staffMember.coordinates.coordinates.latitude,
-                                staffMember.coordinates.coordinates.longitude
-                            );
-                            
-                            // Only include staff within Google Maps distance
-                            if (distanceResult.distance > distanceKm) {
-                                return null; // Filter out based on Google Maps distance
-                            }
-                            
-                        } catch (apiError) {
-                            console.error(`Google Maps API failed for staff ${staffMember._id}:`, apiError.message);
-                            return null; // Skip staff if Google Maps API fails
+                        const distanceResult = await geocodingService.calculateDistanceAndETA(
+                            hospitalLat,
+                            hospitalLng,
+                            staffMember.coordinates.coordinates.latitude,
+                            staffMember.coordinates.coordinates.longitude
+                        );
+
+                        if (distanceResult.distance > radiusKm) {
+                            return null; // Filter out based on exact distance
                         }
 
                         return {
-                            _id: staffMember._id,
-                            staffName: staffMember.fullName,
-                            location: staffMember.currentAddress ? 
-                                `${staffMember.currentAddress}, ${staffMember.city}, ${staffMember.state} - ${staffMember.pincode}` : 
-                                `${staffMember.city}, ${staffMember.state} - ${staffMember.pincode}`,
-                            currentAddress: staffMember.currentAddress,
-                            city: staffMember.city,
-                            state: staffMember.state,
-                            pincode: staffMember.pincode,
-                            role: staffMember.jobRole,
-                            mobileNumber: staffMember.phoneNumber,
+                            id: staffMember._id,
+                            name: staffMember.fullName,
                             email: staffMember.user?.email || null,
+                            role: staffMember.jobRole,
+                            phone: staffMember.phoneNumber,
+                            rating: staffMember.averageRating || 0,
+                            isAvailable: staffMember.isAvailable,
+                            verificationStatus: staffMember.verificationStatus,
                             distance: distanceResult.distance,
                             distanceText: distanceResult.distanceText,
                             estimatedTime: distanceResult.duration,
                             estimatedTimeText: distanceResult.durationText,
-                            coordinates: staffMember.coordinates,
-                            source: distanceResult.source
+                            address: {
+                                currentAddress: staffMember.currentAddress,
+                                city: staffMember.city,
+                                state: staffMember.state,
+                                pincode: staffMember.pincode
+                            },
+                            location: {
+                                latitude: staffMember.coordinates.coordinates.latitude,
+                                longitude: staffMember.coordinates.coordinates.longitude
+                            }
                         };
-                    } catch (error) {
-                        console.error(`Error processing staff ${staffMember._id}:`, error.message);
+                    } catch (apiError) {
+                        console.error(`Google Maps API failed for staff ${staffMember._id}:`, apiError.message);
                         return null;
                     }
                 })
             );
 
-            // Filter out null results and sort by distance
+            // Filter successful results
             const validStaff = staffWithDistance
-                .filter(staff => staff !== null)
+                .filter(result => result.status === 'fulfilled' && result.value)
+                .map(result => result.value)
                 .sort((a, b) => a.distance - b.distance);
 
-            console.log('Found', validStaff.length, 'staff within Google Maps API distance');
+            console.log(`Admin: Found ${validStaff.length} staff within exact distance`);
 
-            // Return complete result
-            return {
-                hospital: {
-                    _id: hospital._id,
-                    name: hospital.hospitalLegalName,
-                    coordinates: hospital.coordinates
+            // Get duty status for all valid staff (batch optimized)
+            const staffIds = validStaff.map(staff => staff.id);
+            const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');
+            const dutyStatusMap = await getBatchStaffDutyStatus(staffIds);
+
+            // Add duty status to staff data
+            const staffWithDutyStatus = validStaff.map(staff => {
+                const dutyStatus = dutyStatusMap.get(staff.id.toString());
+                
+                return {
+                    ...staff,
+                    // NEW: Duty status fields
+                    availabilityStatus: dutyStatus.status,
+                    hasActiveDuty: dutyStatus.hasActiveDuty,
+                    hasUpcomingDuty: dutyStatus.hasUpcomingDuty,
+                    currentDuty: dutyStatus.currentDuty,
+                    nextDuty: dutyStatus.nextDuty,
+                    activeDutyCount: dutyStatus.activeDutyCount,
+                    upcomingDutyCount: dutyStatus.upcomingDutyCount
+                };
+            });
+
+            const result = {
+                success: true,
+                cached: false,
+                data: {
+                    hospital: {
+                        id: hospital._id,
+                        name: hospital.hospitalLegalName,
+                        address: {
+                            currentAddress: hospital.currentAddress ,
+                            city: hospital.city,
+                            state: hospital.state,
+                            pincode: hospital.pincode
+                        },
+                        location: {
+                            latitude: hospital.coordinates.coordinates.latitude,
+                            longitude: hospital.coordinates.coordinates.longitude
+                        }
+                    },
+                    search: {
+                        radius: radiusKm,
+                        role: role || 'all',
+                        totalFound: staffWithDutyStatus.length
+                    },
+                    staff: staffWithDutyStatus,
+                    summary: {
+                        totalStaff: staffWithDutyStatus.length,
+                        fullyAvailable: staffWithDutyStatus.filter(s => s.availabilityStatus === 'fully_available').length,
+                        hasUpcomingDuties: staffWithDutyStatus.filter(s => s.availabilityStatus === 'has_upcoming_duties').length,
+                        hasActiveDuties: staffWithDutyStatus.filter(s => s.availabilityStatus === 'has_active_duties').length,
+                        
+                        verificationStats: {
+                            verified: staffWithDutyStatus.filter(s => s.verificationStatus === 'verified').length,
+                            pending: staffWithDutyStatus.filter(s => s.verificationStatus === 'pending').length,
+                            rejected: staffWithDutyStatus.filter(s => s.verificationStatus === 'rejected').length
+                        }
+                    },
                 },
-                staff: validStaff,
-                filters: {
-                    distance: distanceKm,
-                    role: role || 'all'
-                },
-                totalStaffInRange: validStaff.length,
+                message: `Found ${staffWithDutyStatus.length} available staff within ${radiusKm}km radius${role ? ` for role: ${role}` : ''}`,
                 queryInfo: {
                     hospitalCoords: [hospitalLng, hospitalLat],
-                    radiusMeters: distanceKm * 1000,
+                    radiusMeters: radiusKm * 1000,
                     hasRoleFilter: !!role,
-                    queryMethod: 'google_maps_api'
-                }
+                    queryMethod: 'optimized_google_maps_with_duty_status',
+                    cached: false
+                },
+                timestamp: new Date().toISOString()
             };
+
+            // Cache the result for 1 minute (admin data changes frequently)
+            await cacheService.set(cacheKey, result, 60);
+            return result;
         } catch (error) {
             console.error('Error in getNearbyAvailableStaff:', error);
             throw error;
         }
     }
+
+
 
     // GET /api/admin/hospitals-list — simple list with id, name, location (for dropdowns)
     async getHospitalSimpleList(nameFilter = null) {
@@ -560,7 +614,7 @@ class AdminService {
 
         const pipeline = [
             { $match: match },
-            { $sort: { createdAt: -1 } },
+            { $sort: { hospitalLegalName: 1 } },
             {
                 $lookup: {
                     from: 'duties',
@@ -601,6 +655,7 @@ class AdminService {
                                 verificationStatus: '$verificationStatus',
                                 rejectionReason: '$rejectionReason',
                                 createdAt: 1,
+                                profilePicture: 1,
                                 totalDuties: { $ifNull: [{ $arrayElemAt: ['$dutyStats.total', 0] }, 0] },
                                 occupiedDuties: { $ifNull: [{ $arrayElemAt: ['$dutyStats.occupied', 0] }, 0] },
                                 totalDocuments: { $size: { $ifNull: [{ $arrayElemAt: ['$docRecord.documents', 0] }, []] } },
@@ -625,11 +680,29 @@ class AdminService {
         ];
 
         const [result] = await Hospital.aggregate(pipeline);
+
+        // Generate pre-signed URLs for profile pictures
+        const hospitalsWithUrls = await Promise.all((result.data || []).map(async (hospital) => {
+            let profilePictureUrl = null;
+            if (hospital.profilePicture?.s3Key) {
+                try {
+                    profilePictureUrl = await generatePreSignedURL(hospital.profilePicture.s3Key);
+                } catch (error) {
+                    console.error('Error generating profile picture URL:', error);
+                }
+            }
+            return {
+                ...hospital,
+                profilePicture: profilePictureUrl
+            };
+        }));
+
         return {
-            hospitals: result.data || [],
+            hospitals: hospitalsWithUrls,
             pagination: getPaginationMeta(result.totalCount[0]?.count || 0, parseInt(page), parseInt(limit))
         };
     }
+
 
     // GET /api/admin/hospitals/:id — preview modal
     async getHospitalDetail(hospitalId) {
@@ -729,8 +802,13 @@ class AdminService {
 
         logger.info(`Hospital ${hospitalId} verified: ${previousStatus} → verified`);
 
+        // Send email to hospital
         EmailService.sendHospitalVerifiedEmail(hospital.user.email, hospital.hospitalLegalName)
             .catch(err => logger.error('Verify email error:', err.message));
+
+        // Send notifications to hospital and admins
+        notificationEmitter.emitHospitalVerified(hospital, hospital.user._id.toString())
+            .catch(err => logger.error('Verification notification error:', err.message));
 
         return { 
             id: hospital._id, 
@@ -787,8 +865,13 @@ class AdminService {
 
         logger.info(`Hospital ${hospitalId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
 
+        // Send email to hospital
         EmailService.sendHospitalRejectedEmail(hospital.user.email, hospital.hospitalLegalName, reason)
             .catch(err => logger.error('Reject email error:', err.message));
+
+        // Send notifications to hospital and admins
+        notificationEmitter.emitHospitalRejected(hospital, hospital.user._id.toString(), reason)
+            .catch(err => logger.error('Rejection notification error:', err.message));
 
         return { 
             id: hospital._id, 
@@ -884,6 +967,54 @@ class AdminService {
         };
     }
 
+
+
+    // GET /api/admin/hospitals/stats — dashboard stats for hospital management
+    async getHospitalStats() {
+        const pipeline = [
+            {
+                $facet: {
+                    // Total hospital count
+                    totalHospitals: [{ $count: 'count' }],
+                    
+                    // Pending verification count
+                    pendingVerification: [
+                        {
+                            $match: {
+                                verificationStatus: 'pending'
+                            }
+                        },
+                        { $count: 'count' }
+                    ],
+                    
+                    // Verified hospitals count
+                    verifiedHospitals: [
+                        {
+                            $match: {
+                                verificationStatus: 'verified'
+                            }
+                        },
+                        { $count: 'count' }
+                    ]
+                }
+            }
+        ];
+ 
+        const [result] = await Hospital.aggregate(pipeline);
+ 
+        const totalHospitals = result.totalHospitals[0]?.count || 0;
+        const pendingVerification = result.pendingVerification[0]?.count || 0;
+        const verifiedHospitals = result.verifiedHospitals[0]?.count || 0;
+ 
+        return {
+            totalHospitals,
+            pendingVerification,
+            verifiedHospitals
+        };
+    }
+
+    
+
     // GET /api/admin/medical-staff — paginated list with filters (search, role, availability)
     async getMedicalStaffListWithFilters({ search, role, availability, page = 1, limit = 10 }) {
         const { skip } = getPaginationParams(page, limit);
@@ -960,6 +1091,7 @@ class AdminService {
                                 pincode: '$pincode',
                                 email: '$userInfo.email',
                                 phoneNumber: 1,
+                                profilePicture: 1,
                                 completedDuties: { $ifNull: [{ $arrayElemAt: ['$completedDuties.count', 0] }, 0] },
                                 isAvailable: 1,
                                 verificationStatus: { $ifNull: ['$verificationStatus', 'pending'] },
@@ -974,11 +1106,29 @@ class AdminService {
 
         const [result] = await MedicalStaff.aggregate(pipeline);
 
+        // Generate pre-signed URLs for profile pictures
+        const staffWithUrls = await Promise.all((result.data || []).map(async (staff) => {
+            let profilePictureUrl = null;
+            if (staff.profilePicture?.s3Key) {
+                try {
+                    profilePictureUrl = await generatePreSignedURL(staff.profilePicture.s3Key);
+                } catch (error) {
+                    console.error('Error generating profile picture URL:', error);
+                }
+            }
+            return {
+                ...staff,
+                profilePicture: profilePictureUrl
+            };
+        }));
+
         return {
-            staff: result.data || [],
+            staff: staffWithUrls,
             pagination: getPaginationMeta(result.totalCount[0]?.count || 0, parseInt(page), parseInt(limit))
         };
     }
+
+
 
     // GET /api/admin/medical-staff/:staffId — detailed view for review modal
     async getMedicalStaffDetail(staffId) {
@@ -1039,7 +1189,7 @@ class AdminService {
             isProfileComplete: staff.isProfileComplete,
             verificationStatus: staff.verificationStatus || 'pending',
             rejectionReason: staff.rejectionReason,
-            totalExperience: staff.totalExperience || 0,
+            experience: staff.experience,
             averageRating: staff.averageRating,
             totalRatings: staff.totalRatings,
             completedDuties,
@@ -1051,6 +1201,8 @@ class AdminService {
             documents
         };
     }
+
+
 
     // PATCH /api/admin/medical-staff/:staffId/verify — verify medical staff account
     async verifyMedicalStaff(staffId) {
@@ -1085,13 +1237,18 @@ class AdminService {
             logger.error(`Failed to refresh cache for staff ${staffId} after verification`);
         }
 
-        // NEW: Invalidate availability cache after enabling
+        // Invalidate availability cache after enabling
         await cacheService.del(`staff_availability:${staff.user._id}`);
 
         logger.info(`Medical staff ${staffId} verified: ${previousStatus} → verified`);
 
+        // Send email to staff
         EmailService.sendMedicalStaffVerifiedEmail(staff.user.email, staff.fullName)
             .catch(err => logger.error('Verify email error:', err.message));
+
+        // Send notifications to staff and admins
+        notificationEmitter.emitStaffVerified(staff, staff.user._id.toString())
+            .catch(err => logger.error('Verification notification error:', err.message));
 
         return { 
             id: staff._id, 
@@ -1141,8 +1298,13 @@ class AdminService {
 
         logger.info(`Medical staff ${staffId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
 
+        // Send email to staff
         EmailService.sendMedicalStaffRejectedEmail(staff.user.email, staff.fullName, reason)
             .catch(err => logger.error('Reject email error:', err.message));
+
+        // Send notifications to staff and admins
+        notificationEmitter.emitStaffRejected(staff, staff.user._id.toString(), reason)
+            .catch(err => logger.error('Rejection notification error:', err.message));
 
         return { 
             id: staff._id, 
@@ -1249,6 +1411,8 @@ class AdminService {
         };
     }
 
+
+
     // GET /api/admin/documents/stats — verification stats for the dashboard donut + recent actions
     async getDocumentStats() {
         const statsPipeline = [
@@ -1318,6 +1482,8 @@ class AdminService {
             recentActions
         };
     }
+
+
 
     // Get active duties with filtering capabilities
     async getActiveDuties(filters) {
@@ -1471,7 +1637,7 @@ class AdminService {
             const duty = await Duty.findById(dutyId)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience currentAddress city state pincode email verificationStatus education profileSummary',
+                    select: 'fullName user coordinates phoneNumber skills averageRating experience currentAddress city state pincode email verificationStatus education profileSummary',
                     populate: {
                         path: 'user',
                         select: 'name email'
@@ -1497,7 +1663,6 @@ class AdminService {
             const hospital = duty.hospital;
 
             // Get current staff location with fallback
-            const locationTrackingService = require('./locationTracking.service');
             let currentLocation = await locationTrackingService.getStaffLocation(staff.user._id);
             
             // Fallback to staff's registered coordinates if real-time location unavailable
@@ -1512,7 +1677,6 @@ class AdminService {
             }
 
             // Enhanced route information with detailed steps
-            const geocodingService = require('./geocoding.service');
             let routeInfo = null;
 
             try {
@@ -1563,7 +1727,7 @@ class AdminService {
                         accuracy: currentLocation.accuracy || null,
                         source: currentLocation.source || 'realtime'
                     },
-                    totalExperience: staff.totalExperience || 0,
+                    experience: staff.experience,
                     verificationStatus: staff.verificationStatus,
                     education: staff.education || [],
                     profileSummary: staff.profileSummary || null

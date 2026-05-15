@@ -47,6 +47,7 @@ router.get('/profile', adminController.getAdminProfile);
 //Hospital Management endpoints
 router.get('/hospitals-list', validateHospitalSimpleListQuery, adminController.getHospitalSimpleList);
 router.get('/hospitals', validateHospitalListQuery, adminController.listHospitals);
+router.get('/hospitals/stats', adminController.getHospitalStats);
 router.get('/hospitals/:hospitalId', validateObjectId('hospitalId'), adminController.getHospitalDetail);
 router.patch('/hospitals/:hospitalId/verify', validateObjectId('hospitalId'), adminController.verifyHospital);
 router.patch('/hospitals/:hospitalId/reject', validateObjectId('hospitalId'), validateRejectionReason, adminController.rejectHospital);
@@ -66,6 +67,7 @@ router.patch('/medical-staff/:staffId/reject', validateObjectId('staffId'), vali
 
 router.get('/nearby-staff', validateNearbyStaffQuery, adminController.getNearbyAvailableStaff);
 
+router.get('/active-duties/export', adminController.exportActiveDuties);
 router.get('/active-duties', validateActiveDutiesQuery, adminController.getActiveDuties);
 
 router.get('/emergency-dashboard', adminController.getEmergencyDashboard);

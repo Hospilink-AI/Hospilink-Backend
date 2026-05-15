@@ -1,7 +1,12 @@
 const notificationService = require('./notificationService');
 const websocketManager = require('./websocketManager');
+const notificationDelivery = require('./notificationDelivery.service');
 const geocodingService = require('./geocoding.service');
 const MedicalStaff = require('../models/MedicalStaff');
+const Hospital = require('../models/Hospital');
+const User = require('../models/User');
+
+
 
 /**
  * Notification Emitter
@@ -64,8 +69,9 @@ class NotificationEmitter {
             try {
                 const hospitalNotificationType = isEmergency ? 'EMERGENCY_REQUEST_ACKNOWLEDGED' : 'DUTY_CREATED';
                 const { unreadCount } = await notificationService.createNotificationWithCount(hospitalUserId, hospitalNotificationType, hospitalPayload);
-                websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-                websocketManager.emitToUser(hospitalUserId, 'notification', hospitalPayload);
+                
+                // Phase 3: Use delivery service for smart routing (WebSocket or FCM)
+                await notificationDelivery.deliverToUser(hospitalUserId, hospitalNotificationType, hospitalPayload, unreadCount);
             } catch (error) {
                 console.error(`Error creating notification for hospital ${hospitalUserId}:`, error);
             }
@@ -118,17 +124,25 @@ class NotificationEmitter {
                     // Persist notifications in bulk for all matching staff
                     await notificationService.createBulkNotifications(matchingStaffUserIds, notificationType, staffPayload);
                     
-                    // Batch fetch unread counts for all staff
-                    const unreadCounts = await notificationService.getBulkUnreadCounts(matchingStaffUserIds);
-                    
-                    // Send unread counts to each staff member
-                    for (const staffUserId of matchingStaffUserIds) {
-                        const count = unreadCounts[staffUserId] || 0;
-                        websocketManager.sendUnreadCount(staffUserId, count);
-                    }
-
-                    // Broadcast to role room for real-time notification
+                    // Broadcast to role room for real-time notification (online staff)
                     websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
+
+                    // Phase 3: Smart delivery - WebSocket (online) + FCM (offline)
+                    await notificationDelivery.deliverToUsers(matchingStaffUserIds, notificationType, staffPayload);
+
+                    // Phase 2: Mark notifications as delivered for online staff
+                    const onlineStaffIds = matchingStaffUserIds.filter(staffUserId => 
+                        websocketManager.isUserOnline(staffUserId)
+                    );
+                    
+                    if (onlineStaffIds.length > 0) {
+                        await notificationService.markDeliveredForUsers(
+                            onlineStaffIds, 
+                            notificationType, 
+                            duty._id.toString()
+                        );
+                        console.log(`Marked ${onlineStaffIds.length}/${matchingStaffUserIds.length} staff notifications as delivered (online)`);
+                    }
 
                     const notificationTypeLabel = isEmergency ? 'EMERGENCY_DUTY_REQUEST' : 'NEW_DUTY_OFFER';
                     console.log(`Duty created notification emitted to hospital and ${matchingStaffUserIds.length} staff members via role room (${notificationTypeLabel})`);
@@ -153,7 +167,6 @@ class NotificationEmitter {
             const staffName = staff.fullName || staff.user?.name || 'Staff Member';
             
             // Get hospital details
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalName = hospital?.hospitalLegalName || duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'Hospital';
             const hospitalLocation = hospital?.location || hospital?.currentAddress || 'the hospital';
@@ -235,8 +248,7 @@ class NotificationEmitter {
             // Persist notification for hospital (isolated try-catch)
             try {
                 const { unreadCount } = await notificationService.createNotificationWithCount(hospitalUserId, 'STAFF_ASSIGNED', hospitalPayload);
-                websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-                websocketManager.emitToUser(hospitalUserId, 'notification', hospitalPayload);
+                await notificationDelivery.deliverToUser(hospitalUserId, 'STAFF_ASSIGNED', hospitalPayload, unreadCount);
                 console.log(`Staff assigned notification sent to hospital ${hospitalUserId}`);
             } catch (error) {
                 console.error(`Error sending staff assigned notification to hospital ${hospitalUserId}:`, error);
@@ -247,8 +259,7 @@ class NotificationEmitter {
                 console.log(`Attempting to send DUTY_CONFIRMED to staff ${staffUserId}`);
                 const { unreadCount } = await notificationService.createNotificationWithCount(staffUserId, 'DUTY_CONFIRMED', staffPayload);
                 console.log(`DUTY_CONFIRMED notification created in DB for staff ${staffUserId}, unread count: ${unreadCount}`);
-                websocketManager.sendUnreadCount(staffUserId, unreadCount);
-                websocketManager.emitToUser(staffUserId, 'notification', staffPayload);
+                await notificationDelivery.deliverToUser(staffUserId, 'DUTY_CONFIRMED', staffPayload, unreadCount);
                 console.log(`Duty confirmed notification sent to staff ${staffUserId}`);
             } catch (error) {
                 console.error(`Error sending duty confirmed notification to staff ${staffUserId}:`, error);
@@ -276,7 +287,6 @@ class NotificationEmitter {
             const staffName = staff.fullName || staff.user?.name || 'Staff Member';
             
             // Get hospital details
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalName = hospital?.hospitalLegalName || duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'Hospital';
 
@@ -316,8 +326,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-                websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+                await notificationDelivery.deliverToUser(hospitalUserId, 'STAFF_EN_ROUTE', payload, unreadCount);
                 
                 console.log(`Staff en route notification sent to hospital ${hospitalUserId}`);
             } catch (error) {
@@ -345,7 +354,6 @@ class NotificationEmitter {
             const staffName = staff.fullName || staff.user?.name || 'Staff Member';
             
             // Get hospital details
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalName = hospital?.hospitalLegalName || duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'Hospital';
 
@@ -381,8 +389,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-                websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+                await notificationDelivery.deliverToUser(hospitalUserId, 'STAFF_ON_SITE', payload, unreadCount);
                 
                 console.log(`Staff on-site notification sent to hospital ${hospitalUserId}`);
             } catch (error) {
@@ -408,7 +415,6 @@ class NotificationEmitter {
             }
 
             // Get hospital details
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalName = hospital?.hospitalLegalName || duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'Hospital';
 
@@ -437,8 +443,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(staffUserId, unreadCount);
-                websocketManager.emitToUser(staffUserId, 'notification', payload);
+                await notificationDelivery.deliverToUser(staffUserId, 'NAVIGATE_TO_DUTY', payload, unreadCount);
                 
                 console.log(`Navigate to duty notification sent to staff ${staffUserId}`);
             } catch (error) {
@@ -460,7 +465,6 @@ class NotificationEmitter {
     async emitDutyCancelled(duty, cancelledByUser, reason, reasonText, recipientUserIds) {
         try {
             // Get hospital details
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalName = hospital?.hospitalLegalName || duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'Hospital';
             
@@ -530,11 +534,8 @@ class NotificationEmitter {
                         payload
                     );
                     
-                    // Send unread count
-                    websocketManager.sendUnreadCount(recipientUserId, unreadCount);
-                    
-                    // Emit real-time notification
-                    websocketManager.emitToUser(recipientUserId, 'notification', payload);
+                    // Deliver via smart routing (WebSocket or FCM)
+                    await notificationDelivery.deliverToUser(recipientUserId, notificationType, payload, unreadCount);
                     
                     console.log(`Duty cancelled notification (${notificationType}) sent to user ${recipientUserId}`);
                 } catch (error) {
@@ -572,16 +573,16 @@ class NotificationEmitter {
 
             // Persist notification for staff
             const { unreadCount } = await notificationService.createNotificationWithCount(staffUserId, 'DUTY_EDITED', payload);
-            websocketManager.sendUnreadCount(staffUserId, unreadCount);
 
-            // Emit to staff
-            websocketManager.emitToUser(staffUserId, 'notification', payload);
+            // Deliver via smart routing (WebSocket or FCM)
+            await notificationDelivery.deliverToUser(staffUserId, 'DUTY_EDITED', payload, unreadCount);
 
             console.log(`Duty edited notification emitted to staff ${staffUserId}`);
         } catch (error) {
             console.error('Error emitting duty edited notification:', error);
         }
     }
+
 
     async emitReviewReceived(duty, hospital, staff, rating, reviewText) {
         try {
@@ -608,18 +609,14 @@ class NotificationEmitter {
             const staffUserId = staff.user.toString();
 
             // Save notification
-            await notificationService.createNotification(
+            const { unreadCount } = await notificationService.createNotificationWithCount(
                 staffUserId,
                 'REVIEW_RECEIVED',
                 payload
             );
 
-            const unreadCount = await notificationService.getUnreadCount(staffUserId);
-
-            websocketManager.sendUnreadCount(staffUserId, unreadCount);
-
-            // Real-time emit
-            websocketManager.emitToUser(staffUserId, 'notification', payload);
+            // Deliver via smart routing (WebSocket or FCM)
+            await notificationDelivery.deliverToUser(staffUserId, 'REVIEW_RECEIVED', payload, unreadCount);
 
             console.log(`Review notification sent to staff ${staffUserId}`);
 
@@ -676,8 +673,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(staffUserId, unreadCount);
-                websocketManager.emitToUser(staffUserId, 'notification', payload);
+                await notificationDelivery.deliverToUser(staffUserId, 'DUTY_IN_PROGRESS', payload, unreadCount);
                 
                 console.log(`Duty in-progress notification sent to staff ${staffUserId}`);
             } catch (error) {
@@ -705,7 +701,6 @@ class NotificationEmitter {
             const staffName = staff.fullName || staff.user?.name || 'Staff Member';
             
             // Get hospital details for location/ward info
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
             const hospitalLocation = hospital?.location || hospital?.currentAddress || 'the hospital';
 
@@ -737,8 +732,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-                websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+                await notificationDelivery.deliverToUser(hospitalUserId, 'DUTY_COMPLETED', payload, unreadCount);
                 
                 console.log(`Duty completed notification sent to hospital ${hospitalUserId}`);
             } catch (error) {
@@ -784,7 +778,6 @@ class NotificationEmitter {
             };
 
             // Get all admin users
-            const User = require('../models/User');
             const adminUsers = await User.find({ role: 'admin' }).select('_id');
 
             if (adminUsers.length === 0) {
@@ -798,15 +791,8 @@ class NotificationEmitter {
             try {
                 await notificationService.createBulkNotifications(adminUserIds, 'NEW_HOSPITAL_REGISTRATION', payload);
                 
-                // Batch fetch unread counts
-                const unreadCounts = await notificationService.getBulkUnreadCounts(adminUserIds);
-                
-                // Send unread counts and emit to each admin
-                for (const adminUserId of adminUserIds) {
-                    const count = unreadCounts[adminUserId] || 0;
-                    websocketManager.sendUnreadCount(adminUserId, count);
-                    websocketManager.emitToUser(adminUserId, 'notification', payload);
-                }
+                // Deliver to all admins via smart routing (WebSocket or FCM)
+                await notificationDelivery.deliverToUsers(adminUserIds, 'NEW_HOSPITAL_REGISTRATION', payload);
 
                 console.log(`New hospital registration notification sent to ${adminUserIds.length} admins`);
             } catch (error) {
@@ -853,7 +839,6 @@ class NotificationEmitter {
             };
 
             // Get all admin users
-            const User = require('../models/User');
             const adminUsers = await User.find({ role: 'admin' }).select('_id');
 
             if (adminUsers.length === 0) {
@@ -867,15 +852,8 @@ class NotificationEmitter {
             try {
                 await notificationService.createBulkNotifications(adminUserIds, 'NEW_STAFF_REGISTRATION', payload);
                 
-                // Batch fetch unread counts
-                const unreadCounts = await notificationService.getBulkUnreadCounts(adminUserIds);
-                
-                // Send unread counts and emit to each admin
-                for (const adminUserId of adminUserIds) {
-                    const count = unreadCounts[adminUserId] || 0;
-                    websocketManager.sendUnreadCount(adminUserId, count);
-                    websocketManager.emitToUser(adminUserId, 'notification', payload);
-                }
+                // Deliver to all admins via smart routing (WebSocket or FCM)
+                await notificationDelivery.deliverToUsers(adminUserIds, 'NEW_STAFF_REGISTRATION', payload);
 
                 console.log(`New staff registration notification sent to ${adminUserIds.length} admins`);
             } catch (error) {
@@ -885,6 +863,308 @@ class NotificationEmitter {
             console.error('Error emitting new staff registration notification:', error);
         }
     }
+
+
+
+    /**
+     * Emit hospital profile verified notification
+     * @param {Object} hospital - Hospital object
+     * @param {string} hospitalUserId - Hospital user ID
+     */
+    async emitHospitalVerified(hospital, hospitalUserId) {
+        try {
+            console.log(`[NOTIFICATION] Starting hospital verified notification process for hospital: ${hospitalUserId}`);
+            
+            // Get all admin users
+            const admins = await User.find({ role: 'admin' }).select('_id');
+            const adminIds = admins.map(a => a._id.toString());
+            console.log(`[NOTIFICATION] Found ${adminIds.length} admins to notify`);
+
+            const hospitalName = hospital.hospitalLegalName || hospital.user?.name || 'Hospital';
+
+            // Payload for hospital user
+            const hospitalPayload = {
+                type: 'HOSPITAL_VERIFIED',
+                hospital: {
+                    id: hospital._id.toString(),
+                    name: hospitalName
+                },
+                message: `Your hospital profile "${hospitalName}" has been verified. You can now post duties and access all features.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Payload for admins
+            const adminPayload = {
+                type: 'HOSPITAL_VERIFIED_ADMIN',
+                hospital: {
+                    id: hospital._id.toString(),
+                    name: hospitalName
+                },
+                message: `Hospital "${hospitalName}" has been verified by admin.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Send notification to hospital user
+            try {
+                console.log(`[NOTIFICATION] Sending verification notification to hospital user: ${hospitalUserId}`);
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    hospitalUserId, 
+                    'HOSPITAL_VERIFIED', 
+                    hospitalPayload
+                );
+                await notificationDelivery.deliverToUser(hospitalUserId, 'HOSPITAL_VERIFIED', hospitalPayload, unreadCount);
+                console.log(`[NOTIFICATION] ✓ Successfully sent verification notification to hospital user: ${hospitalUserId}`);
+            } catch (error) {
+                console.error(`[NOTIFICATION] ✗ Error sending verification notification to hospital ${hospitalUserId}:`, error);
+            }
+
+            // Send notifications to all admins
+            if (adminIds.length > 0) {
+                try {
+                    console.log(`[NOTIFICATION] Sending verification notification to ${adminIds.length} admins`);
+                    await notificationService.createBulkNotifications(adminIds, 'HOSPITAL_VERIFIED_ADMIN', adminPayload);
+                    await notificationDelivery.deliverToUsers(adminIds, 'HOSPITAL_VERIFIED_ADMIN', adminPayload);
+                    console.log(`[NOTIFICATION] ✓ Successfully sent verification notification to ${adminIds.length} admins`);
+                } catch (error) {
+                    console.error('[NOTIFICATION] ✗ Error sending hospital verified notification to admins:', error);
+                }
+            } else {
+                console.log(`[NOTIFICATION] ⚠ No admins found to notify`);
+            }
+
+            console.log(`[NOTIFICATION] ✓ Hospital verified notification process completed: hospital=${hospitalUserId}, admins=${adminIds.length}`);
+        } catch (error) {
+            console.error('[NOTIFICATION] ✗ Error emitting hospital verified notification:', error);
+        }
+    }
+
+    /**
+     * Emit hospital profile rejected notification
+     * @param {Object} hospital - Hospital object
+     * @param {string} hospitalUserId - Hospital user ID
+     * @param {string} reason - Rejection reason
+     */
+    async emitHospitalRejected(hospital, hospitalUserId, reason) {
+        try {
+            console.log(`[NOTIFICATION] Starting hospital rejected notification process for hospital: ${hospitalUserId}, reason: ${reason}`);
+            
+            // Get all admin users
+            const admins = await User.find({ role: 'admin' }).select('_id');
+            const adminIds = admins.map(a => a._id.toString());
+            console.log(`[NOTIFICATION] Found ${adminIds.length} admins to notify`);
+
+            const hospitalName = hospital.hospitalLegalName || hospital.user?.name || 'Hospital';
+
+            // Payload for hospital user
+            const hospitalPayload = {
+                type: 'HOSPITAL_REJECTED',
+                hospital: {
+                    id: hospital._id.toString(),
+                    name: hospitalName
+                },
+                rejectionReason: reason,
+                message: `Your hospital profile "${hospitalName}" was rejected. Reason: ${reason}. Please update your profile and resubmit.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Payload for admins
+            const adminPayload = {
+                type: 'HOSPITAL_REJECTED_ADMIN',
+                hospital: {
+                    id: hospital._id.toString(),
+                    name: hospitalName
+                },
+                rejectionReason: reason,
+                message: `Hospital "${hospitalName}" has been rejected. Reason: ${reason}.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Send notification to hospital user
+            try {
+                console.log(`[NOTIFICATION] Sending rejection notification to hospital user: ${hospitalUserId}`);
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    hospitalUserId, 
+                    'HOSPITAL_REJECTED', 
+                    hospitalPayload
+                );
+                await notificationDelivery.deliverToUser(hospitalUserId, 'HOSPITAL_REJECTED', hospitalPayload, unreadCount);
+                console.log(`[NOTIFICATION] ✓ Successfully sent rejection notification to hospital user: ${hospitalUserId}`);
+            } catch (error) {
+                console.error(`[NOTIFICATION] ✗ Error sending rejection notification to hospital ${hospitalUserId}:`, error);
+            }
+
+            // Send notifications to all admins
+            if (adminIds.length > 0) {
+                try {
+                    console.log(`[NOTIFICATION] Sending rejection notification to ${adminIds.length} admins`);
+                    await notificationService.createBulkNotifications(adminIds, 'HOSPITAL_REJECTED_ADMIN', adminPayload);
+                    await notificationDelivery.deliverToUsers(adminIds, 'HOSPITAL_REJECTED_ADMIN', adminPayload);
+                    console.log(`[NOTIFICATION] ✓ Successfully sent rejection notification to ${adminIds.length} admins`);
+                } catch (error) {
+                    console.error('[NOTIFICATION] ✗ Error sending hospital rejected notification to admins:', error);
+                }
+            } else {
+                console.log(`[NOTIFICATION] ⚠ No admins found to notify`);
+            }
+
+            console.log(`[NOTIFICATION] ✓ Hospital rejected notification process completed: hospital=${hospitalUserId}, admins=${adminIds.length}`);
+        } catch (error) {
+            console.error('[NOTIFICATION] ✗ Error emitting hospital rejected notification:', error);
+        }
+    }
+
+    /**
+     * Emit staff profile verified notification
+     * @param {Object} staff - Medical staff object
+     * @param {string} staffUserId - Staff user ID
+     */
+    async emitStaffVerified(staff, staffUserId) {
+        try {
+            console.log(`[NOTIFICATION] Starting staff verified notification process for staff: ${staffUserId}`);
+            
+            // Get all admin users
+            const admins = await User.find({ role: 'admin' }).select('_id');
+            const adminIds = admins.map(a => a._id.toString());
+            console.log(`[NOTIFICATION] Found ${adminIds.length} admins to notify`);
+
+            const staffName = staff.fullName || staff.user?.name || 'Staff Member';
+
+            // Payload for staff user
+            const staffPayload = {
+                type: 'STAFF_VERIFIED',
+                staff: {
+                    id: staff._id.toString(),
+                    name: staffName,
+                    role: staff.jobRole
+                },
+                message: `Your profile "${staffName}" has been verified. You can now apply for duties and access all features.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Payload for admins
+            const adminPayload = {
+                type: 'STAFF_VERIFIED_ADMIN',
+                staff: {
+                    id: staff._id.toString(),
+                    name: staffName,
+                    role: staff.jobRole
+                },
+                message: `Staff "${staffName}" (${staff.jobRole}) has been verified by admin.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Send notification to staff user
+            try {
+                console.log(`[NOTIFICATION] Sending verification notification to staff user: ${staffUserId}`);
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    staffUserId, 
+                    'STAFF_VERIFIED', 
+                    staffPayload
+                );
+                await notificationDelivery.deliverToUser(staffUserId, 'STAFF_VERIFIED', staffPayload, unreadCount);
+                console.log(`[NOTIFICATION] ✓ Successfully sent verification notification to staff user: ${staffUserId}`);
+            } catch (error) {
+                console.error(`[NOTIFICATION] ✗ Error sending verification notification to staff ${staffUserId}:`, error);
+            }
+
+            // Send notifications to all admins
+            if (adminIds.length > 0) {
+                try {
+                    console.log(`[NOTIFICATION] Sending verification notification to ${adminIds.length} admins`);
+                    await notificationService.createBulkNotifications(adminIds, 'STAFF_VERIFIED_ADMIN', adminPayload);
+                    await notificationDelivery.deliverToUsers(adminIds, 'STAFF_VERIFIED_ADMIN', adminPayload);
+                    console.log(`[NOTIFICATION] ✓ Successfully sent verification notification to ${adminIds.length} admins`);
+                } catch (error) {
+                    console.error('[NOTIFICATION] ✗ Error sending staff verified notification to admins:', error);
+                }
+            } else {
+                console.log(`[NOTIFICATION] ⚠ No admins found to notify`);
+            }
+
+            console.log(`[NOTIFICATION] ✓ Staff verified notification process completed: staff=${staffUserId}, admins=${adminIds.length}`);
+        } catch (error) {
+            console.error('[NOTIFICATION] ✗ Error emitting staff verified notification:', error);
+        }
+    }
+
+    /**
+     * Emit staff profile rejected notification
+     * @param {Object} staff - Medical staff object
+     * @param {string} staffUserId - Staff user ID
+     * @param {string} reason - Rejection reason
+     */
+    async emitStaffRejected(staff, staffUserId, reason) {
+        try {
+            console.log(`[NOTIFICATION] Starting staff rejected notification process for staff: ${staffUserId}, reason: ${reason}`);
+            
+            // Get all admin users
+            const admins = await User.find({ role: 'admin' }).select('_id');
+            const adminIds = admins.map(a => a._id.toString());
+            console.log(`[NOTIFICATION] Found ${adminIds.length} admins to notify`);
+
+            const staffName = staff.fullName || staff.user?.name || 'Staff Member';
+
+            // Payload for staff user
+            const staffPayload = {
+                type: 'STAFF_REJECTED',
+                staff: {
+                    id: staff._id.toString(),
+                    name: staffName,
+                    role: staff.jobRole
+                },
+                rejectionReason: reason,
+                message: `Your profile "${staffName}" was rejected. Reason: ${reason}. Please update your profile and resubmit.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Payload for admins
+            const adminPayload = {
+                type: 'STAFF_REJECTED_ADMIN',
+                staff: {
+                    id: staff._id.toString(),
+                    name: staffName,
+                    role: staff.jobRole
+                },
+                rejectionReason: reason,
+                message: `Staff "${staffName}" (${staff.jobRole}) has been rejected. Reason: ${reason}.`,
+                timestamp: new Date().toISOString()
+            };
+
+            // Send notification to staff user
+            try {
+                console.log(`[NOTIFICATION] Sending rejection notification to staff user: ${staffUserId}`);
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    staffUserId, 
+                    'STAFF_REJECTED', 
+                    staffPayload
+                );
+                await notificationDelivery.deliverToUser(staffUserId, 'STAFF_REJECTED', staffPayload, unreadCount);
+                console.log(`[NOTIFICATION] ✓ Successfully sent rejection notification to staff user: ${staffUserId}`);
+            } catch (error) {
+                console.error(`[NOTIFICATION] ✗ Error sending rejection notification to staff ${staffUserId}:`, error);
+            }
+
+            // Send notifications to all admins
+            if (adminIds.length > 0) {
+                try {
+                    console.log(`[NOTIFICATION] Sending rejection notification to ${adminIds.length} admins`);
+                    await notificationService.createBulkNotifications(adminIds, 'STAFF_REJECTED_ADMIN', adminPayload);
+                    await notificationDelivery.deliverToUsers(adminIds, 'STAFF_REJECTED_ADMIN', adminPayload);
+                    console.log(`[NOTIFICATION] ✓ Successfully sent rejection notification to ${adminIds.length} admins`);
+                } catch (error) {
+                    console.error('[NOTIFICATION] ✗ Error sending staff rejected notification to admins:', error);
+                }
+            } else {
+                console.log(`[NOTIFICATION] ⚠ No admins found to notify`);
+            }
+
+            console.log(`[NOTIFICATION] ✓ Staff rejected notification process completed: staff=${staffUserId}, admins=${adminIds.length}`);
+        } catch (error) {
+            console.error('[NOTIFICATION] ✗ Error emitting staff rejected notification:', error);
+        }
+    }
+
+
 
     // Document verification notifications
     async emitDocumentVerified(document, userRole) {
@@ -916,8 +1196,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(document.userId, unreadCount);
-                websocketManager.emitToUser(document.userId, 'notification', payload);
+                await notificationDelivery.deliverToUser(document.userId, 'DOCUMENT_VERIFIED', payload, unreadCount);
                 
                 console.log(`Document verified notification sent to ${userRole} ${document.userId}`);
             } catch (error) {
@@ -962,8 +1241,7 @@ class NotificationEmitter {
                     payload
                 );
                 
-                websocketManager.sendUnreadCount(document.userId, unreadCount);
-                websocketManager.emitToUser(document.userId, 'notification', payload);
+                await notificationDelivery.deliverToUser(document.userId, 'DOCUMENT_REJECTED', payload, unreadCount);
                 
                 console.log(`Document rejected notification sent to ${userRole} ${document.userId}`);
             } catch (error) {
@@ -1011,8 +1289,7 @@ class NotificationEmitter {
                 payload
             );
 
-            websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-            websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+            await notificationDelivery.deliverToUser(hospitalUserId, 'DUTY_UNASSIGNED_15MIN', payload, unreadCount);
 
             console.log(`Duty unassigned 15-min notification sent to hospital ${hospitalUserId} for duty ${duty._id}`);
         } catch (error) {
@@ -1057,8 +1334,7 @@ class NotificationEmitter {
                 payload
             );
 
-            websocketManager.sendUnreadCount(hospitalUserId, unreadCount);
-            websocketManager.emitToUser(hospitalUserId, 'notification', payload);
+            await notificationDelivery.deliverToUser(hospitalUserId, 'DUTY_UNFILLED_CRITICAL', payload, unreadCount);
 
             console.log(`Duty unfilled CRITICAL notification sent to hospital ${hospitalUserId} for duty ${duty._id}`);
         } catch (error) {
@@ -1107,8 +1383,7 @@ class NotificationEmitter {
             for (const adminId of adminUserIds) {
                 try {
                     const { unreadCount } = await notificationService.createNotificationWithCount(adminId, 'EMERGENCY_ADMIN_ALERT', payload);
-                    websocketManager.sendUnreadCount(adminId, unreadCount);
-                    websocketManager.emitToUser(adminId, 'notification', payload);
+                    await notificationDelivery.deliverToUser(adminId, 'EMERGENCY_ADMIN_ALERT', payload, unreadCount);
                 } catch (err) {
                     console.error(`Error sending emergency alert to admin ${adminId}:`, err);
                 }

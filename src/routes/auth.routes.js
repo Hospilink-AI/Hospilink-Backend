@@ -61,5 +61,18 @@ router.post('/reset-password',
     authController.resetPassword
 );
 
+// FCM Push Notification Routes (Phase 3)
+router.post('/fcm-token',
+    generalRateLimit,
+    protect,
+    authController.registerFCMToken
+);
+
+router.delete('/fcm-token',
+    generalRateLimit,
+    protect,
+    authController.removeFCMToken
+);
+
 
 module.exports = router;

@@ -17,9 +17,9 @@ const connectDB = async () => {
   if (!cached.promise) {
     const opts = {
       dbName: "Hospilink",
-      serverSelectionTimeoutMS: 50000,
-      socketTimeoutMS: 60000,
-      connectTimeoutMS: 30000,
+      serverSelectionTimeoutMS: 10000,  // Reduced from 50s to 10s
+      socketTimeoutMS: 45000,            // Reduced from 60s to 45s
+      connectTimeoutMS: 10000,           // Reduced from 30s to 10s
 
       bufferCommands: false, // Disable mongoose buffering to fail fast if not connected
       family: 4, // Force IPv4 to avoid ENOTFOUND errors on some systems
@@ -52,19 +52,3 @@ const connectDB = async () => {
 
 module.exports = connectDB;
 
-// const mongoose = require('mongoose');
-// const logger = require('../utils/logger');
-
-// const connectDB = async () => {
-//     try {
-//         // Connect with no deprecated options
-//         const conn = await mongoose.connect(process.env.MONGODB_URI,{dbName:"Hospilink"});
-//         logger.info(`MongoDB Connected: ${conn.connection.host}`);
-//         return conn;
-//     } catch (error) {
-//         logger.error(`Error connecting to MongoDB: ${error.message}`);
-//         process.exit(1);
-//     }
-// };
-
-// module.exports = connectDB;

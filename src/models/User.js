@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: [true, 'Name is required'],
         trim: true,
-        maxlength: [50, 'Name cannot exceed 50 characters']
+        maxlength: [100, 'Name cannot exceed 100 characters']
     },
     role: {
         type: String,
@@ -65,7 +65,32 @@ const userSchema = new mongoose.Schema({
             default: Date.now
         }
     }],
+<<<<<<< HEAD
 
+=======
+    
+    // FCM tokens for push notifications (Phase 3)
+    fcmTokens: {
+        type: [{
+            token: {
+                type: String,
+                required: true
+            },
+            deviceId: String,
+            platform: {
+                type: String,
+                enum: ['android', 'ios', 'web'],
+                default: 'android'
+            },
+            updatedAt: {
+                type: Date,
+                default: Date.now
+            }
+        }],
+        default: []
+    },
+    
+>>>>>>> 058558da6f349bf7e2c7e245730295efd65b41d0
     createdAt: {
         type: Date,
         default: Date.now

@@ -20,6 +20,8 @@ const {
 const DashboardService = require('./dashboard.service');
 const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
+const notificationEmitter = require('./notificationEmitter');
+
 
 class DutyService {
     async createDuty(dutyData, userId) {
@@ -555,9 +557,6 @@ class DutyService {
 
             // Send notifications for auto-completed duties
             if (completedCount > 0 && dutiesForNotification.length > 0) {
-                const notificationEmitter = require('./notificationEmitter');
-                const MedicalStaff = require('../models/MedicalStaff');
-
                 for (const duty of dutiesForNotification) {
                     try {
                         // Get staff details
@@ -790,8 +789,6 @@ class DutyService {
 
         // Send notifications
         if (remindersToSend.length > 0) {
-            const notificationEmitter = require('./notificationEmitter');
-
             for (const reminder of remindersToSend) {
                 try {
                     await notificationEmitter.emitNavigateToDuty(
@@ -1642,7 +1639,6 @@ class DutyService {
 
         if (duties.length === 0) return 0;
 
-        const notificationEmitter = require('./notificationEmitter');
         let notified = 0;
 
         for (const duty of duties) {
@@ -1682,7 +1678,6 @@ class DutyService {
 
         if (duties.length === 0) return 0;
 
-        const notificationEmitter = require('./notificationEmitter');
         let notified = 0;
 
         for (const duty of duties) {
@@ -1834,7 +1829,7 @@ class DutyService {
             })
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating totalExperience currentAddress city state pincode email verificationStatus education profileSummary',
+                    select: 'fullName user coordinates phoneNumber skills averageRating experience currentAddress city state pincode email verificationStatus education profileSummary',
                     populate: {
                         path: 'user',
                         select: 'name email'
@@ -1959,7 +1954,7 @@ class DutyService {
                         accuracy: currentLocation.accuracy || null,
                         source: locationSource
                     },
-                    totalExperience: staff.totalExperience || 0,
+                    experience: staff.experience,
                     verificationStatus: staff.verificationStatus,
                     education: staff.education || [],
                     profileSummary: staff.profileSummary || null
@@ -2143,6 +2138,9 @@ class DutyService {
             pagination: getPaginationMeta(total, page, limit)
         };
     }
+
+
+    
     async assignDutyByAdmin({ hospitalId, dutyId, staffId, adminId }) {
 
         // 1. Hospital validation

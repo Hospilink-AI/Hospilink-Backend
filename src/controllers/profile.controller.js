@@ -203,9 +203,13 @@ class ProfileController {
     // Get nearby available staff for hospital map dashboard
     getNearbyStaff = asyncHandler(async (req, res) => {
         const hospitalUserId = req.user.id;
-        const { radius = 5 } = req.query; // Default 5km radius
+        const { radius = 5, role } = req.query; // Default 5km radius, optional role
 
-        const result = await ProfileService.getNearbyAvailableStaff(hospitalUserId, parseFloat(radius));
+        const result = await ProfileService.getNearbyAvailableStaff(
+            hospitalUserId, 
+            parseFloat(radius), 
+            role || null
+        );
 
         res.status(200).json({
             success: true,

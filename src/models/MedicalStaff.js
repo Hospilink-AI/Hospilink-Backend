@@ -178,29 +178,33 @@ const medicalStaffSchema = new mongoose.Schema({
         trim: true,
         maxlength: [500, 'Rejection reason cannot exceed 500 characters']
     },
-    totalExperience: {
-        type: Number,
-        min: 0,
-        max: 50,
-        default: 0
+    experience: {
+        type: String,
+        enum: {
+            values: ['0-1 year', '1-3 years', '3-5 years', '5-10 years', '10-15 years', '15-20 years', '20+ years'],
+            message: 'Invalid experience value. Must be one of: 0-1 year, 1-3 years, 3-5 years, 5-10 years, 10-15 years, 15-20 years, 20+ years'
+        },
+        required: [true, 'Experience is required']
     }
 }, {
     timestamps: true
 });
 
 
-// Basic indexes
+
+// Basic single-field indexes
 medicalStaffSchema.index({ user: 1 });
 medicalStaffSchema.index({ city: 1 });
 medicalStaffSchema.index({ state: 1 });
 medicalStaffSchema.index({ currentAddress: 1 });
 medicalStaffSchema.index({ jobRole: 1 });
+medicalStaffSchema.index({ assignedTo: 1 });
 
 // Individual coordinate indexes (for bounding box queries)
 medicalStaffSchema.index({ 'coordinates.coordinates.longitude': 1 });
 medicalStaffSchema.index({ 'coordinates.coordinates.latitude': 1 });
 
-// COMPOUND INDEX for role + location + availability queries
+// Essential compound indexes for performance
 medicalStaffSchema.index({
     isAvailable: 1,         // filter only available staff
     jobRole: 1,             // filter by job role
@@ -208,7 +212,7 @@ medicalStaffSchema.index({
     'coordinates.coordinates.longitude': 1      // filter longitude range
 }); // For location-based duty notifications
 
-// compound indexes for availability and updates
+// Compound indexes for availability and updates
 medicalStaffSchema.index({
     user: 1,
     isAvailable: 1,
@@ -246,11 +250,6 @@ medicalStaffSchema.index({
     'coordinates.coordinates.longitude': 1
 }); // For skill-based location queries
 
-medicalStaffSchema.index({
-    user: 1,
-    'updatedAt': -1
-}); // For recent updates
-
 // Compound indexes for verification status queries 
 medicalStaffSchema.index({ user: 1, verificationStatus: 1 });
 
@@ -263,13 +262,27 @@ medicalStaffSchema.index({ verificationStatus: 1, rejectionReason: 1 });
 // Index for cache invalidation queries 
 medicalStaffSchema.index({ user: 1, verificationStatus: 1, rejectionReason: 1 });
 
-// Compound index for availability + verification 
-medicalStaffSchema.index({ 
-    isAvailable: 1, 
-    verificationStatus: 1, 
-    'coordinates.coordinates.latitude': 1, 
-    'coordinates.coordinates.longitude': 1 
-}); // For verified staff location queries
+// compound index for nearby staff queries 
+medicalStaffSchema.index({
+    isAvailable: 1,
+    verificationStatus: 1,
+    'coordinates.coordinates.latitude': 1,
+    'coordinates.coordinates.longitude': 1,
+    jobRole: 1
+}); 
+
+// Additional optimized indexes 
+medicalStaffSchema.index({
+    isAvailable: 1,
+    'coordinates.coordinates.latitude': 1,
+    'coordinates.coordinates.longitude': 1
+}); // For bounding box queries
+
+medicalStaffSchema.index({
+    user: 1,
+    isAvailable: 1,
+    updatedAt: -1
+}); // For availability updates
 
 const MedicalStaff = mongoose.model('MedicalStaff', medicalStaffSchema);
 

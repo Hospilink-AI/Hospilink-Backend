@@ -2,6 +2,9 @@ const redisClient = require('../config/redis');
 const geocodingService = require('./geocoding.service');
 const logger = require('../utils/logger');
 const { getIO } = require('../socket/index');
+const Hospital = require('../models/Hospital');
+const MedicalStaff = require('../models/MedicalStaff');
+
 
 class LocationTrackingService {
     constructor() {
@@ -117,7 +120,6 @@ class LocationTrackingService {
     // Get hospital location from database
     async getHospitalLocation(hospitalId) {
         try {
-            const Hospital = require('../models/Hospital');
             const hospital = await Hospital.findById(hospitalId);
             if (!hospital || !hospital.coordinates || !hospital.coordinates.coordinates) {
                 return null;
@@ -139,7 +141,6 @@ class LocationTrackingService {
     async broadcastLocationUpdate(staffId, locationData) {
         try {
             const io = getIO();
-            const MedicalStaff = require('../models/MedicalStaff');
 
             // Get staff details
             const staff = await MedicalStaff.findOne({ user: staffId }).populate('user', 'name');
@@ -204,7 +205,6 @@ class LocationTrackingService {
         try {
             const redis = await redisClient.getClientAsync();
             const io = getIO();
-            const MedicalStaff = require('../models/MedicalStaff');
 
             // Update location status
             locationData.status = 'arrived';

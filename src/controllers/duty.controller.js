@@ -5,13 +5,19 @@ const { normalizeRole } = require('../utils/helpers');
 const notificationEmitter = require('../services/notificationEmitter');
 const activityLogEmitter = require('../services/activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
+const User = require('../models/User');
 const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
+const Duty = require('../models/Duty');
 const logger = require('../utils/logger');
 const dutyService = require('../services/duty.service');
 const locationTrackingService = require('../services/locationTracking.service');
 const DashboardService = require('../services/dashboard.service');
 const locationBasedStaffService = require('../services/locationBasedStaff.service');
+const notificationEmitterModule = require('../services/notificationEmitter');
+const { ACTIVITY_ACTIONS: AA } = require('../utils/activityLog.constants');
+const geocodingService = require('../services/geocoding.service');
+const CancellationService = require('../services/cancellation.service');                    
 
 // Extend logger with debug method
 logger.debug = (message) => {
@@ -33,11 +39,15 @@ exports.createDuty = asyncHandler(async (req, res) => {
         urgency,
         description,
         offered_rate,
-        is_overnight_duty
+        is_overnight_duty,
+        staff_count
     } = req.body;
 
     // Use hospital user ID from the authenticated user (JWT)
     const userId = req.user.id;
+
+    // Determine number of duties to create (default to 1 if staff_count not provided)
+    const numberOfDuties = staff_count ? parseInt(staff_count) : 1;
 
     const dutyData = {
         staffRole: staff_role,
@@ -51,7 +61,12 @@ exports.createDuty = asyncHandler(async (req, res) => {
         isOvernightDuty: is_overnight_duty || false
     };
 
-    const result = await DutyService.createDuty(dutyData, userId);
+    // Create multiple duties based on staff_count
+    const createdDuties = [];
+    for (let i = 0; i < numberOfDuties; i++) {
+        const result = await DutyService.createDuty(dutyData, userId);
+        createdDuties.push(result.duty);
+    }
 
     // Emit WebSocket notification to matching available staff AND hospital
     try {
@@ -91,38 +106,35 @@ exports.createDuty = asyncHandler(async (req, res) => {
             throw new Error('Hospital profile not found');
         }
 
-        // Emit notification to both hospital and matching staff
-        await notificationEmitter.emitDutyCreated(result.duty, hospital, staffUserIds, userId);
-        
-        // Log duty creation activity
-        const isEmergency = result.duty.urgency === 'emergency';
-        activityLogEmitter.logDutyCreated(result.duty, hospital, req, isEmergency)
-            .catch(err => logger.error('Error logging duty creation:', err));
+        // Emit notification to both hospital and matching staff for all created duties
+        for (const duty of createdDuties) {
+            await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, userId);
+            
+            // Log duty creation activity
+            const isEmergency = duty.urgency === 'emergency';
+            activityLogEmitter.logDutyCreated(duty, hospital, req, isEmergency)
+                .catch(err => logger.error('Error logging duty creation:', err));
 
-        // Notify all admins if this is an emergency duty
-        if (isEmergency) {
-            const User = require('../models/User');
-            const notificationEmitterModule = require('../services/notificationEmitter');
-            const EmailService = require('../services/email.service');
-            const { ACTIVITY_ACTIONS: AA } = require('../utils/activityLog.constants');
+            // Notify all admins if this is an emergency duty
+            if (isEmergency) {
+                User.find({ role: 'admin' }).select('_id').then(async (admins) => {
+                    if (!admins.length) return;
+                    const adminIds = admins.map(a => a._id.toString());
+                    await notificationEmitterModule.emitEmergencyAdminAlert(duty, hospital, adminIds, 'emergency_created');
 
-            User.find({ role: 'admin' }).select('_id').then(async (admins) => {
-                if (!admins.length) return;
-                const adminIds = admins.map(a => a._id.toString());
-                await notificationEmitterModule.emitEmergencyAdminAlert(result.duty, hospital, adminIds, 'emergency_created');
+                    // Email only to the configured alert address
+                    const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+                    if (alertEmail) {
+                        EmailService.sendEmergencyAdminAlertEmail(alertEmail, 'Admin', duty, hospital, 'emergency_created')
+                            .catch(err => logger.error(`Error sending emergency alert email: ${err.message}`));
+                    }
 
-                // Email only to the configured alert address
-                const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
-                if (alertEmail) {
-                    EmailService.sendEmergencyAdminAlertEmail(alertEmail, 'Admin', result.duty, hospital, 'emergency_created')
-                        .catch(err => logger.error(`Error sending emergency alert email: ${err.message}`));
-                }
-
-                activityLogEmitter.emitSystemActivity(
-                    AA.EMERGENCY_DUTY_ADMIN_NOTIFIED,
-                    { dutyId: result.duty._id?.toString(), reason: 'emergency_created', adminCount: admins.length }
-                ).catch(err => logger.error('Error logging emergency admin notification:', err));
-            }).catch(err => logger.error('Error fetching admins for emergency notification:', err));
+                    activityLogEmitter.emitSystemActivity(
+                        AA.EMERGENCY_DUTY_ADMIN_NOTIFIED,
+                        { dutyId: duty._id?.toString(), reason: 'emergency_created', adminCount: admins.length }
+                    ).catch(err => logger.error('Error logging emergency admin notification:', err));
+                }).catch(err => logger.error('Error fetching admins for emergency notification:', err));
+            }
         }
     } catch (error) {
         logger.error('Error emitting duty created notification: ' + error.message);
@@ -131,7 +143,9 @@ exports.createDuty = asyncHandler(async (req, res) => {
 
     res.status(201).json({
         success: true,
-        duty: result.duty
+        duties: createdDuties,
+        count: createdDuties.length,
+        message: `Successfully created ${createdDuties.length} duty`
     });
 });
 
@@ -287,7 +301,7 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
     }
 
     // Store previous status before update
-    const dutyBeforeUpdate = await require('../models/Duty').findById(duty_id);
+    const dutyBeforeUpdate = await Duty.findById(duty_id);
     const previousStatus = dutyBeforeUpdate ? dutyBeforeUpdate.status : null;
 
     const duty = await DutyService.changeDutyStatus(duty_id, userId, status);
@@ -327,7 +341,6 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
 
         // If duty is completed, send completion notification to hospital
         if (status === 'completed') {
-            const MedicalStaff = require('../models/MedicalStaff');
             const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
             
             if (staff) {
@@ -340,15 +353,12 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
         } 
         // If staff is en route, send en route notification to hospital
         else if (status === 'enroute') {
-            const MedicalStaff = require('../models/MedicalStaff');
             const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
             
             if (staff) {
                 // Try to calculate ETA if coordinates are available
                 let eta = null;
                 try {
-                    const geocodingService = require('../services/geocoding.service');
-                    const Hospital = require('../models/Hospital');
                     const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
                     
                     const staffLat = staff.coordinates?.coordinates?.latitude;
@@ -378,7 +388,6 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
         }
         // If staff is on-site (in-progress), send on-site notification to hospital AND in-progress notification to staff
         else if (status === 'in-progress') {
-            const MedicalStaff = require('../models/MedicalStaff');
             const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
             
             if (staff) {
@@ -386,7 +395,6 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
                 await notificationEmitter.emitStaffOnSite(duty, staff, hospitalUserId);
                 
                 // Send in-progress notification to staff
-                const Hospital = require('../models/Hospital');
                 const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
                 if (hospital) {
                     await notificationEmitter.emitDutyInProgress(duty, hospital, staffUserId);
@@ -446,7 +454,7 @@ exports.editDuty = asyncHandler(async (req, res) => {
     const userId = req.user.id;
 
     // Get the duty before update to track changes
-    const dutyBeforeUpdate = await require('../models/Duty').findById(id).populate('assignedTo');
+    const dutyBeforeUpdate = await Duty.findById(id).populate('assignedTo');
 
     // Map frontend snake_case to backend camelCase
     const updateData = {};
@@ -556,8 +564,6 @@ exports.cancelDuty = asyncHandler(async (req, res) => {
         });
     }
 
-    // Import cancellation service
-    const CancellationService = require('../services/cancellation.service');
 
     try {
         // Cancel the duty
