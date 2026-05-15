@@ -9,6 +9,7 @@ const notificationEmitter = require('./notificationEmitter');
 const idfyService = require("./idfy.service");
 const ncismService = require("./ncism.service");
 const detectSystem = require("../utils/systemDetector");
+const { isNameMatched } = require("../utils/nameMatcher");
 
 const getAllowedDocs = (role) => {
     const config = requiredDocsConfig[role];
@@ -177,6 +178,48 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 extractedData = parserMap[documentType](extractedText);
             }
             console.log("EXTRACTED DATA:", extractedData);
+            // // ================= NAME VALIDATION =================
+
+            // if (user.role === "staff") {
+
+            //     // Fetch medical staff profile
+            //     const staffProfile = await MedicalStaff
+            //         .findOne({ user: user._id })
+            //         .populate("user", "name");
+
+            //     const profileName =
+            //         staffProfile?.user?.name || "";
+
+            //     // Extract document name
+            //     const documentName =
+            //         extractedData.name ||
+            //         extractedData.doctorName ||
+            //         extractedData.hospitalName ||
+            //         "";
+
+            //     // Validate only if OCR extracted a name
+            //     if (documentName) {
+
+            //         const matched = isNameMatched(
+            //             profileName,
+            //             documentName
+            //         );
+
+            //         console.log("PROFILE NAME:", profileName);
+            //         console.log("DOCUMENT NAME:", documentName);
+            //         console.log("NAME MATCH:", matched);
+
+            //         if (!matched) {
+
+            //             // rollback uploaded file
+            //             await deleteFromS3(key);
+
+            //             throw new Error(
+            //                 "Uploaded document name does not match profile name"
+            //             );
+            //         }
+            //     }
+            // }
 
             // Hospital Certificate Verification 
             if (
@@ -299,9 +342,9 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 verificationStatus = "pending";
 
                 try {
-                    const referenceId = crypto.randomUUID(); 
+                    const referenceId = crypto.randomUUID();
 
-                    const idfyResponse = await idfyService.verifyAadhaarDigilocker(referenceId); 
+                    const idfyResponse = await idfyService.verifyAadhaarDigilocker(referenceId);
 
                     if (idfyResponse && idfyResponse.request_id) {
 
@@ -311,7 +354,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         verificationMeta = {
                             provider: "idfy-digilocker",
                             requestId: idfyResponse.request_id,
-                            referenceId: referenceId, 
+                            referenceId: referenceId,
                             status: "initiated",
                             type: "aadhaar-card",
                             createdAt: new Date()
@@ -510,6 +553,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         }
     } catch (err) {
         console.error("OCR failed:", err);
+        throw err;
     }
 
     userDocs.documents.push({
@@ -524,7 +568,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
     await userDocs.save();
 
     // Sync the isDocumentsUploaded flag non-blocking
-    syncDocumentsUploadedFlag(user._id, user.role).catch(() => {});
+    syncDocumentsUploadedFlag(user._id, user.role).catch(() => { });
 
     let redirectUrl = null;
 
@@ -544,7 +588,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 };
 const processIdfyResultAsync = async (userDocId, requestId, documentType) => {
     let attempts = 0;
-    const maxAttempts = 10;
+    const maxAttempts = 30;
 
     const interval = setInterval(async () => {
         attempts++;
@@ -582,7 +626,7 @@ const processIdfyResultAsync = async (userDocId, requestId, documentType) => {
                 if (documentType === "cin-certificate") {
                     isVerified = source?.company_status === "Active";
                 }
-
+                
                 doc.verificationStatus = isVerified
                     ? "auto-verified"
                     : "rejected";
@@ -883,7 +927,7 @@ exports.deleteDocument = async (user, documentId) => {
     await docRecord.save();
 
     // Sync the isDocumentsUploaded flag non-blocking
-    syncDocumentsUploadedFlag(user._id, user.role).catch(() => {});
+    syncDocumentsUploadedFlag(user._id, user.role).catch(() => { });
 
     return true;
 };

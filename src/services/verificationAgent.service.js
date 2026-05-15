@@ -28,11 +28,10 @@ exports.verifyDoctor = async ({
                 );
 
             case "DCI":
-                // ✅ ONLY CHANGE HERE
                 return await dciService.verify(
                     registrationNumber,
                     doctorName,
-                    stateName // ✅ pass state ONLY for dental
+                    stateName //  pass state ONLY for dental
                 );
 
             case "MNC":

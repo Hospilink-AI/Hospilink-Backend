@@ -78,7 +78,12 @@ exports.uploadDocument = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
+        const statusCode =
+            error.message.includes("does not match")
+                ? 400
+                : 500;
+
+        res.status(statusCode).json({
             success: false,
             message: error.message
         });

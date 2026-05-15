@@ -1,6 +1,6 @@
 const Ncism = require("../models/NcismRegister");
 
-// ================= NORMALIZERS =================
+//  NORMALIZERS 
 const normalizeReg = (r) => {
     if (!r) return "";
 
@@ -23,7 +23,7 @@ const normalizeName = (n) =>
         .replace(/\s+/g, " ")
         .trim();
 
-// ================= SMART NAME MATCH =================
+// NAME MATCH 
 const isNameMatch = (dbName, inputName) => {
     if (!dbName || !inputName) return false;
 
@@ -41,7 +41,7 @@ const isNameMatch = (dbName, inputName) => {
     return matchCount >= Math.ceil(inputWords.length * 0.6);
 };
 
-// ================= MAIN VERIFY =================
+//VERIFY 
 exports.verify = async (registrationNumber, doctorName) => {
 
     const reg = normalizeReg(registrationNumber);
@@ -50,12 +50,11 @@ exports.verify = async (registrationNumber, doctorName) => {
     console.log("🔍 REG:", reg);
     console.log("🔍 NAME:", name);
 
-    // 🔥 Exact match
+    
     let record = await Ncism.findOne({
         registrationNumberNormalized: reg
     }).lean();
 
-    // 🔥 Fallback (OCR safe)
     if (!record) {
         const digits = reg.replace(/\D/g, "");
 
