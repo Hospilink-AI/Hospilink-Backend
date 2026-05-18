@@ -1094,88 +1094,110 @@ class ProfileService {
                 .lean();
 
             console.log(`Found ${nearbyStaff.length} available/verified staff candidates`);
-            
+
             // Initialize Google Maps API call counters for monitoring purpose
             let googleMapsApiCalls = 0;
             let realTimeLocationCalls = 0;
             let fallbackLocationCalls = 0;
 
-
-            // Get real-time location for bounding box subset
-            const staffWithRealTimeLocation = await Promise.allSettled(
+            // Get real-time location for all staff first (separate from distance calculation)
+            const staffWithLocations = await Promise.allSettled(
                 nearbyStaff.map(async (staff) => {
                     try {
+                        // Check if user field exists before accessing
+                        if (!staff.user || !staff.user._id) {
+                            console.warn(`Staff ${staff._id} has no user field, using profile coordinates`);
+                            return {
+                                staff,
+                                staffLat: staff.coordinates.coordinates.latitude,
+                                staffLng: staff.coordinates.coordinates.longitude,
+                                locationSource: 'profile_fallback',
+                                success: false
+                            };
+                        }
+
                         // Get real-time location from dashboard cache (falls back to profile location)
                         const locationData = await DashboardService.getStaffLocationForDuties(staff.user._id.toString());
                         
-                        const staffLat = locationData.location.latitude;
-                        const staffLng = locationData.location.longitude;
-                        const locationSource = locationData.source; // 'browser' or 'profile'
-
-                        // Calculate distance using real-time location
-                        const distanceResult = await geocodingService.calculateDistanceAndETA(
-                            hospitalLat,
-                            hospitalLng,
-                            staffLat,
-                            staffLng
-                        );
-
-                        googleMapsApiCalls++;
-                        realTimeLocationCalls++;
-
                         return {
-                            ...staff,
-                            realTimeLocation: {
-                                latitude: staffLat,
-                                longitude: staffLng,
-                                source: locationSource
-                            },
-                            distance: parseFloat(distanceResult.distance.toFixed(2)),
-                            distanceText: distanceResult.distanceText,
-                            estimatedTime: distanceResult.duration,
-                            estimatedTimeText: distanceResult.durationText
+                            staff,
+                            staffLat: locationData.location.latitude,
+                            staffLng: locationData.location.longitude,
+                            locationSource: locationData.source,
+                            success: true
                         };
                     } catch (error) {
                         console.error(`Error getting real-time location for staff ${staff._id}:`, error.message);
                         // Fallback to profile coordinates if real-time location fails
-                        try {
-                            const distanceResult = await geocodingService.calculateDistanceAndETA(
-                                hospitalLat,
-                                hospitalLng,
-                                staff.coordinates.coordinates.latitude,
-                                staff.coordinates.coordinates.longitude
-                            );
-
-                            googleMapsApiCalls++;
-                            fallbackLocationCalls++;
-    
-                            return {
-                                ...staff,
-                                realTimeLocation: {
-                                    latitude: staff.coordinates.coordinates.latitude,
-                                    longitude: staff.coordinates.coordinates.longitude,
-                                    source: 'profile_fallback'
-                                },
-                                distance: parseFloat(distanceResult.distance.toFixed(2)),
-                                distanceText: distanceResult.distanceText,
-                                estimatedTime: distanceResult.duration,
-                                estimatedTimeText: distanceResult.durationText
-                            };
-                        } catch (fallbackError) {
-                            console.error(`Fallback distance calculation failed for staff ${staff._id}:`, fallbackError.message);
-                            return null;
-                        }
+                        return {
+                            staff,
+                            staffLat: staff.coordinates.coordinates.latitude,
+                            staffLng: staff.coordinates.coordinates.longitude,
+                            locationSource: 'profile_fallback',
+                            success: false
+                        };
                     }
                 })
             );
 
-            // Third pass: Filter by exact radius
-            const validStaff = staffWithRealTimeLocation
-                .filter(result => result.status === 'fulfilled' && result.value && result.value.distance <= radiusKm)
+            // Filter successful results
+            const validStaffWithLocations = staffWithLocations
+                .filter(result => result.status === 'fulfilled' && result.value)
                 .map(result => result.value);
 
+            console.log(`Found ${validStaffWithLocations.length} staff with location data`);
+
+            // Prepare destinations for batch API call
+            const destinations = validStaffWithLocations.map(s => ({
+                id: s.staff._id.toString(),
+                latitude: s.staffLat,
+                longitude: s.staffLng
+            }));
+
+            // Single batch API call for all staff
+            console.log(`Making 1 batch Google Maps API call for ${destinations.length} destinations`);
+            const { resultMap: distanceResults, totalApiCalls: actualApiCalls } = await geocodingService.calculateBatchDistanceAndETA(
+                hospitalLat,
+                hospitalLng,
+                destinations
+            );
+            googleMapsApiCalls = actualApiCalls;
+
+            console.log(`[Google Maps API] Batch call completed for ${destinations.length} destinations`);
+
+            // Combine staff with distance results
+            const staffWithRealTimeLocation = validStaffWithLocations.map(s => {
+                const distanceResult = distanceResults.get(s.staff._id.toString());
+                
+                if (!distanceResult) {
+                    console.warn(`No distance result for staff ${s.staff._id}`);
+                    return null;
+                }
+
+                return {
+                    ...s.staff,
+                    realTimeLocation: {
+                        latitude: s.staffLat,
+                        longitude: s.staffLng,
+                        source: s.locationSource
+                    },
+                    distance: parseFloat(distanceResult.distance.toFixed(2)),
+                    distanceText: distanceResult.distanceText,
+                    estimatedTime: distanceResult.duration,
+                    estimatedTimeText: distanceResult.durationText
+                };
+            }).filter(s => s !== null);
+
+            // Third pass: Filter by exact radius
+            const validStaff = staffWithRealTimeLocation.filter(s => s.distance <= radiusKm);
+
             console.log(`Found ${validStaff.length} staff within exact distance using real-time location`);
-            console.log(`[Google Maps API] Total calls: ${googleMapsApiCalls} (Real-time: ${realTimeLocationCalls}, Fallback: ${fallbackLocationCalls})`);
+
+            // Update counters based on location source
+            realTimeLocationCalls = validStaffWithLocations.filter(s => s.success).length;
+            fallbackLocationCalls = validStaffWithLocations.filter(s => !s.success).length;
+
+            console.log(`[Google Maps API] Total calls: ${googleMapsApiCalls} (Real-time locations: ${realTimeLocationCalls}, Fallback locations: ${fallbackLocationCalls})`);
             
 
             // Get duty status for all valid staff (batch optimized)
