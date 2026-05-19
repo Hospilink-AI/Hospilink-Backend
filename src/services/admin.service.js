@@ -6,7 +6,7 @@ const Review = require('../models/Review');
 const Document = require('../models/Document');
 const User = require('../models/User');
 const { generatePreSignedURL } = require('./s3.service');
-const { calculateDutyDuration, formatDuration } = require('../utils/helpers');
+const { calculateDutyDuration, formatDuration, formatRoleForDisplay } = require('../utils/helpers');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
 const geocodingService = require('./geocoding.service');
 const locationTrackingService = require('./locationTracking.service');
@@ -524,6 +524,7 @@ class AdminService {
                     name: s.staff.fullName,
                     email: s.staff.user?.email || null,
                     role: s.staff.jobRole,
+                    formattedRole: formatRoleForDisplay(s.staff.jobRole),
                     phone: s.staff.phoneNumber,
                     rating: s.staff.averageRating || 0,
                     isAvailable: s.staff.isAvailable,

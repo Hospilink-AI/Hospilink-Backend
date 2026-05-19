@@ -5,7 +5,6 @@ const Duty = require('../models/Duty');
 const Document = require('../models/Document');
 const geocodingService = require('../services/geocoding.service');
 const cacheService = require('./cache.service');
-// const { toRadians } = require('../utils/helpers');
 const documentService = require('./document.service');
 const Review = require('../models/Review');
 const path = require('path');
@@ -14,6 +13,7 @@ const notificationEmitter = require('./notificationEmitter');
 const emailService = require('./email.service');
 const requiredDocsConfig = require('../config/requiredDocs');
 const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');            
+const { formatRoleForDisplay } = require('../utils/helpers');
 const DashboardService = require('./dashboard.service');
 
 class ProfileService {
@@ -1213,6 +1213,7 @@ class ProfileService {
                     name: staff.fullName,
                     email: staff.user?.email || staff.email,
                     role: staff.jobRole,
+                    formattedRole: formatRoleForDisplay(staff.jobRole),
                     phone: staff.phoneNumber,
                     rating: staff.averageRating || 0,
                     isAvailable: staff.isAvailable,

@@ -77,6 +77,15 @@ function normalizeRole(role) {
 
 
 
+// Helper function to format normalized role names for display
+function formatRoleForDisplay(normalizedRole) {
+    return normalizedRole
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+}
+
+
 // Calculate the duration of a duty shift in hours
 function calculateDutyDuration(startDate, startTime, endTime, isOvernightDuty, endDate) {
     // Parse time strings to get hours and minutes
@@ -145,6 +154,7 @@ module.exports = {
     toIST,
     getCurrentIST,
     normalizeRole,
+    formatRoleForDisplay,
     calculateDutyDuration,
     formatDuration
 };
