@@ -17,10 +17,6 @@ const userSchema = new mongoose.Schema({
             message: 'Please select a valid role'
         }
     },
-    isDocumentsUploaded: {
-        type: Boolean,
-        default: false
-    },
 
     // add password
     password: {

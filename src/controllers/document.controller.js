@@ -47,26 +47,6 @@ exports.uploadDocument = async (req, res) => {
                     req
                 ).catch(() => { });
             }
-            const userDocs = await Document.findOne({ userId: user._id });
-
-            let isComplete = false;
-
-            if (userDocs) {
-                const uploadedTypes = userDocs.documents
-                    .filter(doc => !doc.isDeleted)
-                    .map(doc => doc.documentType);
-
-                const requiredDocs = rules[user.role]?.required || [];
-
-                isComplete = requiredDocs.every(doc =>
-                    uploadedTypes.includes(doc)
-                );
-            }
-
-            // update user
-            await User.findByIdAndUpdate(user._id, {
-                isDocumentsUploaded: isComplete
-            });
 
             res.status(200).json({
                 success: true,
