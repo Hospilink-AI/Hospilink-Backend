@@ -510,35 +510,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         }
                     }
 
-                    // NMC / DCI / MNC / PHARMACIST 
-                    else if (
-                        ["NMC", "DCI", "MNC", "PHARMACIST"].includes(system)
-                    ) {
-
-                        try {
-
-                            const result = await verificationAgent.verifyDoctor({
-                                registrationNumber: extractedData.registrationNumber,
-                                doctorName: extractedData.doctorName,
-                                qualification: extractedData.qualification
-                            });
-
-                            verificationStatus = result.status;
-
-                            verificationMeta = {
-                                provider: result.source || system,
-                                reason: result.reason,
-                                verifiedAt: new Date()
-                            };
-
-                        } catch (err) {
-
-                            console.error("AGENT ERROR:", err);
-
-                            verificationStatus = "manual-pending-verification";
-                        }
-                    }
-
                     // UNKNOWN 
                     else {
 
@@ -632,7 +603,7 @@ const processIdfyResultAsync = async (userDocId, requestId, documentType) => {
                 if (documentType === "cin-certificate") {
                     isVerified = source?.company_status === "Active";
                 }
-                
+
                 doc.verificationStatus = isVerified
                     ? "auto-verified"
                     : "rejected";

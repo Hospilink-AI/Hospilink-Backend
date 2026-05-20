@@ -11,19 +11,5 @@ module.exports = ({ reg, qualification }) => {
     if (q.includes("BAMS")) return "AYURVED";
     if (q.includes("BUMS")) return "UNANI";
 
-    // MODERN MEDICINE
-    if (q.includes("MBBS") || q.includes("MD")) return "NMC";
-
-    //  DENTAL
-    if (q.includes("BDS") || q.includes("MDS")) return "DCI";
-
-    // NURSING 
-    if (q.includes("NURS") || q.includes("GNM") || q.includes("ANM")) return "MNC";
-    
-    // PHARMACIST
-    if (qualification === "D.PHARM" || qualification === "B.PHARM") {
-        return "PHARMACIST";
-    }
-
     return "UNKNOWN";
 };
