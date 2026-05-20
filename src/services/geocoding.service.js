@@ -191,6 +191,106 @@ class GeocodingService {
 
 
 
+    // Calculate batch distance and ETA using Google Maps Distance Matrix API
+    // destinations: array of { id, latitude, longitude }
+    // Returns: Map of id → { distance, duration, distanceText, durationText }
+    async calculateBatchDistanceAndETA(originLat, originLng, destinations) {
+        console.log(`Starting batch distance calculation for ${destinations.length} destinations`);
+            
+        if (!destinations || destinations.length === 0) {
+            return { resultMap: new Map(), totalApiCalls: 0 };
+        }
+    
+        try {
+            if (!this.apiKey) {
+                throw new Error('Google Maps API key is required for batch distance calculation');
+            }
+    
+            // Split into batches of 25 (Google Maps free tier limit)
+            const batchSize = 25;
+            const batches = [];
+            for (let i = 0; i < destinations.length; i += batchSize) {
+                batches.push(destinations.slice(i, i + batchSize));
+            }
+    
+            console.log(`Split into ${batches.length} batch(es) of max ${batchSize} destinations each`);
+    
+            const resultMap = new Map();
+            let totalApiCalls = 0;
+    
+            for (const batch of batches) {
+                const destinationCoords = batch.map(d => `${d.latitude},${d.longitude}`).join('|');
+                const destinationIds = batch.map(d => d.id);
+    
+                const requestParams = {
+                    origins: `${originLat},${originLng}`,
+                    destinations: destinationCoords,
+                    key: this.apiKey,
+                    mode: 'driving',
+                    region: 'in',
+                    traffic_model: 'best_guess',
+                    departure_time: 'now'
+                };
+    
+                console.log(`Making batch API call for ${batch.length} destinations`);
+                console.log('Request URL:', this.distanceMatrixUrl);
+                console.log('Request params:', {
+                    ...requestParams,
+                    key: this.apiKey ? 'API_KEY_PRESENT' : 'NO_API_KEY'
+                });
+    
+                const response = await axios.get(this.distanceMatrixUrl, {
+                    params: requestParams,
+                    timeout: 10000,
+                    headers: {
+                        'Accept': 'application/json',
+                        'User-Agent': 'HospiLink-Backend/1.0'
+                    }
+                });
+    
+                totalApiCalls++;
+                console.log(`Response status: ${response.status}`);
+    
+                if (response.data.status === 'OK' && response.data.rows[0]) {
+                    const elements = response.data.rows[0].elements;
+                        
+                    elements.forEach((element, index) => {
+                        if (element.status === 'OK') {
+                            const distance = element.distance.value / 1000; // Convert to km
+                            const duration = element.duration.value / 60; // Convert to minutes
+                                
+                            resultMap.set(destinationIds[index], {
+                                distance: Math.round(distance * 100) / 100, // Round to 2 decimal places
+                                duration: Math.round(duration),
+                                distanceText: element.distance.text,
+                                durationText: element.duration.text
+                            });
+                        } else {
+                            console.warn(`Destination ${destinationIds[index]} returned status: ${element.status}`);
+                        }
+                    });
+                        
+                    console.log(`Successfully calculated distances for ${elements.length} destinations in this batch`);
+                } else {
+                    console.error('Google Maps API returned non-OK status:', response.data.status);
+                }
+            }
+    
+            console.log(`Batch calculation completed: ${resultMap.size}/${destinations.length} successful, ${totalApiCalls} API call(s)`);
+            return { resultMap, totalApiCalls };
+    
+        } catch (error) {
+            console.error('Batch distance calculation error:', error.message);
+            if (error.response) {
+                console.error('Error response status:', error.response.status);
+                console.error('Error response data:', JSON.stringify(error.response.data, null, 2));
+            }
+            throw new Error(`Batch distance calculation error: ${error.message}`);
+        }
+    }
+
+
+
     // Get directions between two points using Google Maps Directions API
     async getDirections(originLat, originLng, destLat, destLng) {
         try {

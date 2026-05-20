@@ -2,6 +2,7 @@ const Duty = require('../models/Duty');
 const Hospital = require('../models/Hospital');
 const MedicalStaff = require('../models/MedicalStaff');
 const Review = require('../models/Review');
+const mongoose = require('mongoose');
 const {
     doDutiesOverlap,
     toIST,
@@ -22,6 +23,35 @@ const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
 const notificationEmitter = require('./notificationEmitter');
 
+// Per-duty Redis lock TTL in seconds — prevents thundering herd
+const DUTY_ACCEPT_LOCK_TTL = 10;
+
+/**
+ * Acquire a short-lived Redis lock for a specific duty acceptance attempt.
+ * Returns true if lock acquired, false if another request already holds it.
+ * Uses SET NX EX (atomic in Redis) — no race condition possible.
+ */
+async function acquireDutyLock(dutyId, staffId) {
+    try {
+        const redis = await redisClient.getClientAsync();
+        const key = `duty_accept_lock:${dutyId}:${staffId}`;
+        // NX = only set if not exists, EX = expire after TTL
+        const result = await redis.set(key, '1', 'EX', DUTY_ACCEPT_LOCK_TTL, 'NX');
+        return result === 'OK';
+    } catch {
+        // Redis unavailable — fail open (allow the request through)
+        return true;
+    }
+}
+
+async function releaseDutyLock(dutyId, staffId) {
+    try {
+        const redis = await redisClient.getClientAsync();
+        await redis.del(`duty_accept_lock:${dutyId}:${staffId}`);
+    } catch {
+        // Best-effort — TTL will clean it up anyway
+    }
+}
 
 class DutyService {
     async createDuty(dutyData, userId) {
@@ -152,93 +182,128 @@ class DutyService {
 
 
     async acceptDuty(dutyId, userId) {
-        // Find the medical staff profile for this user
-        const medicalStaff = await MedicalStaff.findOne({ user: userId });
-        if (!medicalStaff) {
-            throw new Error('Medical staff profile not found. Please complete your profile first.');
+        // ── Per-staff idempotency lock ────────────────────────────────────────
+        // Prevents the same staff member from firing duplicate requests
+        // (e.g. double-tap, network retry) within the lock window.
+        const staffLockAcquired = await acquireDutyLock(dutyId, userId.toString());
+        if (!staffLockAcquired) {
+            throw new Error('Your acceptance request is already being processed. Please wait.');
         }
 
-        const duty = await Duty.findById(dutyId)
-            .populate({
-                path: 'hospital',
-                populate: {
-                    path: 'user',
-                    select: 'name email'
+        // Use a MongoDB session for the overlap check + atomic claim so both
+        // operations are isolated from concurrent writes to the same staff member.
+        const session = await mongoose.startSession();
+
+        try {
+            let claimedDuty;
+
+            await session.withTransaction(async () => {
+
+                // ── 1. Load staff profile ─────────────────────────────────────
+                const medicalStaff = await MedicalStaff.findOne({ user: userId }).session(session);
+                if (!medicalStaff) {
+                    throw new Error('Medical staff profile not found. Please complete your profile first.');
                 }
+
+                // ── 2. Load duty for validation ───────────────────────────────
+                const duty = await Duty.findById(dutyId)
+                    .populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } })
+                    .session(session);
+
+                if (!duty) {
+                    throw new Error('Duty not found');
+                }
+
+                // ── 3. Role check ─────────────────────────────────────────────
+                const normalizedStaffRole = normalizeRole(medicalStaff.jobRole);
+                const normalizedDutyRole  = normalizeRole(duty.staffRole);
+
+                if (normalizedStaffRole !== normalizedDutyRole) {
+                    throw new Error(`Role mismatch: This duty requires a ${duty.staffRole}, but your profile shows ${medicalStaff.jobRole}`);
+                }
+
+                // ── 4. Status check ───────────────────────────────────────────
+                if (duty.status !== 'available') {
+                    throw new Error('Duty is no longer available');
+                }
+
+                // ── 5. Start time check ───────────────────────────────────────
+                const now = getCurrentIST();
+                const istDutyDate = toIST(new Date(duty.date));
+                const [startHours, startMinutes] = duty.startTime.split(':');
+                const dutyStartTime = new Date(istDutyDate);
+                dutyStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
+
+                if (now >= dutyStartTime) {
+                    throw new Error('Cannot accept duty after start time.');
+                }
+
+                // ── 6. Overlap check (inside transaction = consistent read) ───
+                // Reading within the same session ensures we see any duties
+                // committed by concurrent transactions before this one started.
+                const existingDuties = await Duty.find({
+                    assignedTo: medicalStaff._id,
+                    status: 'assigned',
+                    $or: [
+                        { date: duty.date },
+                        ...(duty.isOvernightDuty && duty.endDate ? [{ date: duty.endDate }] : [])
+                    ]
+                }).session(session);
+
+                for (const existingDuty of existingDuties) {
+                    if (doDutiesOverlap(duty, existingDuty)) {
+                        throw new Error(
+                            `Time conflict: You already have a duty from ${existingDuty.startTime} to ${existingDuty.endTime}. ` +
+                            `New duty from ${duty.startTime} to ${duty.endTime} overlaps.`
+                        );
+                    }
+                }
+
+                // ── 7. Atomic claim ───────────────────────────────────────────
+                // findOneAndUpdate with status:'available' as the guard.
+                // Inside a transaction this is both atomic AND isolated —
+                // concurrent transactions trying the same duty will block
+                // until this one commits, then find status='assigned' and abort.
+                const assignedAt = getCurrentIST();
+                claimedDuty = await Duty.findOneAndUpdate(
+                    { _id: dutyId, status: 'available' },
+                    {
+                        $set: {
+                            status: 'assigned',
+                            assignedTo: medicalStaff._id,
+                            assignedAt
+                        },
+                        $push: {
+                            statusHistory: {
+                                status: 'assigned',
+                                timestamp: assignedAt,
+                                changedBy: medicalStaff.user,
+                                reason: 'Duty accepted by staff'
+                            }
+                        }
+                    },
+                    { new: true, runValidators: true, session }
+                ).populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } });
+
+                if (!claimedDuty) {
+                    throw new Error('Duty is no longer available');
+                }
+
+            }); // transaction auto-commits or auto-aborts
+
+            // Populate assignedTo outside transaction (read-only, no isolation needed)
+            await claimedDuty.populate({
+                path: 'assignedTo',
+                populate: { path: 'user', select: 'name email' }
             });
 
-        if (!duty) {
-            throw new Error('Duty not found');
+            return claimedDuty;
+
+        } finally {
+            session.endSession();
+            // Always release the per-staff lock regardless of outcome
+            await releaseDutyLock(dutyId, userId.toString());
         }
-
-        // Normalize roles for comparison (convert both to lowercase and replace spaces with underscores)
-        const normalizedStaffRole = normalizeRole(medicalStaff.jobRole);
-        const normalizedDutyRole = normalizeRole(duty.staffRole);
-
-        // Validate staff role matches duty role
-        if (normalizedStaffRole !== normalizedDutyRole) {
-            throw new Error(`Role mismatch: This duty requires a ${duty.staffRole}, but your profile shows ${medicalStaff.jobRole}`);
-        }
-
-        if (duty.status !== 'available') {
-            throw new Error('Duty is no longer available');
-        }
-
-        // Check if duty has already started
-        const now = getCurrentIST();
-        const dutyDate = new Date(duty.date);
-        const [startHours, startMinutes] = duty.startTime.split(':');
-
-        // Convert duty date to IST first, then set time
-        const istDutyDate = toIST(dutyDate);
-        const dutyStartTime = new Date(istDutyDate);
-        dutyStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
-
-        // Prevent acceptance after start time
-        if (now >= dutyStartTime) {
-            throw new Error('Cannot accept duty after start time.');
-        }
-
-        // Check for overlapping duties
-        const existingDuties = await Duty.find({
-            assignedTo: medicalStaff._id,
-            status: 'assigned',
-            $or: [
-                { date: duty.date },
-                ...(duty.isOvernightDuty && duty.endDate ? [{ date: duty.endDate }] : [])
-            ]
-        });
-
-        for (const existingDuty of existingDuties) {
-            if (doDutiesOverlap(duty, existingDuty)) {
-                throw new Error(`Time conflict: You already have a duty from ${existingDuty.startTime} to ${existingDuty.endTime}. New duty from ${duty.startTime} to ${duty.endTime} overlaps.`);
-            }
-        }
-
-        duty.status = 'assigned';
-        duty.assignedTo = medicalStaff._id;
-        duty.assignedAt = getCurrentIST();
-
-        // Add status history entry for assignment
-        duty.statusHistory.push({
-            status: 'assigned',
-            timestamp: getCurrentIST(),
-            changedBy: medicalStaff.user,
-            reason: 'Duty accepted by staff'
-        });
-
-        await duty.save();
-
-        // Populate the staff information
-        await duty.populate({
-            path: 'assignedTo',
-            populate: {
-                path: 'user',
-                select: 'name email'
-            }
-        });
-
-        return duty;
     }
 
 
