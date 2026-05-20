@@ -50,7 +50,7 @@ exports.verify = async (registrationNumber, doctorName) => {
     console.log("🔍 REG:", reg);
     console.log("🔍 NAME:", name);
 
-    
+
     let record = await Ncism.findOne({
         registrationNumberNormalized: reg
     }).lean();
@@ -81,73 +81,3 @@ exports.verify = async (registrationNumber, doctorName) => {
         source: "ncism-db"
     };
 };
-// const puppeteer = require("puppeteer");
-
-// exports.verify = async (regNo, name) => {
-
-//     const browser = await puppeteer.launch({
-//         headless: true
-//     });
-
-//     const page = await browser.newPage();
-
-//     try {
-//         await page.goto(
-//             "https://www.nmc.org.in/information-desk/indian-medical-register/",
-//             { waitUntil: "networkidle2" }
-//         );
-
-//         // ✅ Wait for input field properly
-//         await page.waitForSelector("input[type='text']");
-
-//         // ✅ Type doctor name (first text input)
-//         const inputs = await page.$$("input[type='text']");
-//         await inputs[0].type(name);
-
-//         // ✅ Extract captcha (math like "7 + 7")
-//         const captchaText = await page.evaluate(() => {
-//             const allText = document.body.innerText;
-//             const match = allText.match(/(\d+\s*\+\s*\d+)/);
-//             return match ? match[0] : null;
-//         });
-
-//         if (!captchaText) {
-//             throw new Error("Captcha not found");
-//         }
-
-//         const answer = eval(captchaText);
-
-//         // ✅ Type captcha answer (second input)
-//         await inputs[1].type(answer.toString());
-
-//         // ✅ Click submit (more reliable)
-//         const buttons = await page.$$("button");
-//         await buttons[0].click();
-
-//         // ✅ Wait for results table
-//         await page.waitForSelector("table", { timeout: 5000 });
-
-//         const content = await page.content();
-
-//         if (content.includes(regNo)) {
-//             await browser.close();
-
-//             return {
-//                 status: "auto-verified",
-//                 source: "nmc"
-//             };
-//         }
-
-//         await browser.close();
-//         return { status: "rejected" };
-
-//     } catch (err) {
-//         console.error("❌ NMC ERROR:", err.message);
-
-//         await browser.close();
-
-//         return {
-//             status: "manual-pending-verification"
-//         };
-//     }
-// };
