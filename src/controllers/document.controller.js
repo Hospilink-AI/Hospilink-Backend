@@ -1,13 +1,10 @@
 const documentService = require("../services/document.service");
-const { deleteFromS3 } = require("../services/s3.service");
-<<<<<<< HEAD
 const Document = require("../models/Document");
 const User = require("../models/User");
 const rules = require("../config/requiredDocs");
-=======
+const { deleteFromS3 } = require("../services/s3.service");
 const activityLogEmitter = require('../services/activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
->>>>>>> 058558da6f349bf7e2c7e245730295efd65b41d0
 
 exports.uploadDocument = async (req, res) => {
     try {
@@ -48,7 +45,7 @@ exports.uploadDocument = async (req, res) => {
                     { userId: user._id || user.id, name: user.name, role: user.role, email: user.email },
                     {},
                     req
-                ).catch(() => {});
+                ).catch(() => { });
             }
             const userDocs = await Document.findOne({ userId: user._id });
 
@@ -169,7 +166,7 @@ exports.verifyDocument = async (req, res) => {
             { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
             { targetUserId: result.userId, targetUserName: result.userName },
             req
-        ).catch(() => {});
+        ).catch(() => { });
 
         res.json({
             success: true,
@@ -211,7 +208,7 @@ exports.rejectDocument = async (req, res) => {
             { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
             { targetUserId: result.userId, targetUserName: result.userName, reason },
             req
-        ).catch(() => {});
+        ).catch(() => { });
 
         res.json({
             success: true,
@@ -268,7 +265,7 @@ exports.deleteDocument = async (req, res) => {
             { userId: req.user._id || req.user.id, name: req.user.name, role: req.user.role, email: req.user.email },
             {},
             req
-        ).catch(() => {});
+        ).catch(() => { });
 
         res.json({
             success: true,

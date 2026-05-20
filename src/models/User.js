@@ -65,10 +65,7 @@ const userSchema = new mongoose.Schema({
             default: Date.now
         }
     }],
-<<<<<<< HEAD
 
-=======
-    
     // FCM tokens for push notifications (Phase 3)
     fcmTokens: {
         type: [{
@@ -89,8 +86,7 @@ const userSchema = new mongoose.Schema({
         }],
         default: []
     },
-    
->>>>>>> 058558da6f349bf7e2c7e245730295efd65b41d0
+
     createdAt: {
         type: Date,
         default: Date.now
