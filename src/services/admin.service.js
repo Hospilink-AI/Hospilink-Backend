@@ -655,16 +655,19 @@ class AdminService {
         }
 
         const hospitals = await Hospital.find(match)
-            .select('_id hospitalLegalName currentAddress city state pincode')
+            .select('_id hospitalLegalName currentAddress city state pincode verificationStatus')
             .sort({ hospitalLegalName: 1 })
             .lean();
 
         return hospitals.map(h => ({
             id: h._id,
             name: h.hospitalLegalName,
-            location: `${h.currentAddress}, ${h.city}, ${h.state}, ${h.pincode}`
+            location: `${h.currentAddress}, ${h.city}, ${h.state}, ${h.pincode}`,
+            verificationStatus: h.verificationStatus
         }));
     }
+
+
 
     // GET /api/admin/hospitals — paginated, filtered hospital list
     async getHospitalList({ search, status, city, page = 1, limit = 10 }) {
