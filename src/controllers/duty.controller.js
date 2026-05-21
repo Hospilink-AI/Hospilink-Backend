@@ -151,11 +151,11 @@ exports.createDuty = asyncHandler(async (req, res) => {
 
 
 
-exports.getDuties = asyncHandler(async (req, res) => {
+exports.getActiveDuties = asyncHandler(async (req, res) => {
     const userId = req.user.id;
     const { date, startDate, endDate, status, staffRole, page = 1, limit = 10 } = req.query;
 
-    const result = await DutyService.getDutyHistory({
+    const result = await DutyService.getActiveDuties({
         hospitalUserId: userId,
         date,
         startDate,
@@ -166,6 +166,32 @@ exports.getDuties = asyncHandler(async (req, res) => {
         limit: parseInt(limit)
     });
 
+    res.status(200).json({
+        success: true,
+        count: result.duties.length,
+        data: result.duties,
+        pagination: result.pagination
+    });
+});
+
+
+
+
+exports.getDutyHistory = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const { date, startDate, endDate, status, staffRole, page = 1, limit = 10 } = req.query;
+ 
+    const result = await DutyService.getDutyHistory({
+        hospitalUserId: userId,
+        date,
+        startDate,
+        endDate,
+        status,
+        staffRole,
+        page: parseInt(page),
+        limit: parseInt(limit)
+    });
+ 
     res.status(200).json({
         success: true,
         count: result.duties.length,
