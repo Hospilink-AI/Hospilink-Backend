@@ -2291,7 +2291,8 @@ class DutyService {
                 hospital: {
                     id: duty.hospital?._id,
                     name: duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'N/A',
-                    address: duty.hospital?.currentAddress
+                    address: duty.hospital?.currentAddress,
+                    city: duty.hospital?.city
                 },
                 staffRole: duty.staffRole,
                 date: duty.date,
