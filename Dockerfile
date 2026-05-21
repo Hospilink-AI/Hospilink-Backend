@@ -1,36 +1,45 @@
-FROM node:20-alpine as builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm ci
+# Install production deps only — no devDependencies in final image
+RUN npm ci --omit=dev
 
 COPY . .
 
-RUN npm prune --production
-
+# ── Final image ──────────────────────────────────────────────────────────────
 FROM node:20-alpine
+
+# dumb-init: PID 1 process that forwards signals correctly to Node
+# Without this, SIGTERM from ECS never reaches your graceful shutdown handlers
+RUN apk add --no-cache dumb-init
 
 WORKDIR /app
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Create non-root user before copying files
+RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001 -G nodejs
 
-COPY package*.json ./
-
-COPY --from=builder /app/node_modules ./node_modules
-
-COPY --chown=node:node . .
-
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+# Copy built app from builder stage with correct ownership
+COPY --from=builder --chown=nodejs:nodejs /app /app
 
 USER nodejs
+
+ENV NODE_ENV=production
+
+# SERVICE controls which process this container runs:
+#   docker build --build-arg SERVICE=api   → node server.js      (port 3000)
+#   docker build --build-arg SERVICE=agent → node agent/start.js (port 3002)
+ARG SERVICE=api
+ENV SERVICE=${SERVICE}
 
 EXPOSE 3000
 EXPOSE 3002
 
+# dumb-init as entrypoint ensures Node receives SIGTERM/SIGINT from ECS
+ENTRYPOINT ["dumb-init", "--"]
 
-# Use npx instead of global concurrently, with dumb-init
-CMD ["dumb-init", "sh", "-c", "npx concurrently 'npm start' 'npm run agent:start'"]
+# exec form: shell evaluates the if/else, then exec replaces itself with node
+# so Node becomes the direct child of dumb-init (correct signal chain)
+CMD ["sh", "-c", "if [ \"$SERVICE\" = \"agent\" ]; then exec node agent/start.js; else exec node server.js; fi"]

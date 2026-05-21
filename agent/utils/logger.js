@@ -1,10 +1,14 @@
 /**
  * Agent Logger Module
- * Extends backend's logger with Agent-specific functionality
- * Adds cost tracking for SearchAPI and Gemini API calls
+ * Self-contained — no dependency on src/utils/logger.
+ * Adds cost tracking for SearchAPI and Gemini API calls.
  */
 
-const baseLogger = require('../../src/utils/logger');
+const baseLogger = {
+    info:  (msg) => console.log(`[INFO]  ${new Date().toISOString()} - ${msg}`),
+    error: (msg) => console.error(`[ERROR] ${new Date().toISOString()} - ${msg}`),
+    warn:  (msg) => console.warn(`[WARN]  ${new Date().toISOString()} - ${msg}`),
+};
 
 // Cost tracker for API calls
 const costTracker = {

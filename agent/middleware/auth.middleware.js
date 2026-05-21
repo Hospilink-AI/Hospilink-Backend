@@ -4,8 +4,11 @@
  */
 
 const jwt = require('jsonwebtoken');
-const User = require('../../src/models/User');
-const MedicalStaff = require('../../src/models/MedicalStaff');
+// Models are shared — both services connect to the same MongoDB Atlas cluster.
+// Using path.resolve keeps this working regardless of where node is invoked from.
+const path = require('path');
+const User = require(path.resolve(__dirname, '../../src/models/User'));
+const MedicalStaff = require(path.resolve(__dirname, '../../src/models/MedicalStaff'));
 const logger = require('../utils/logger');
 
 /**
