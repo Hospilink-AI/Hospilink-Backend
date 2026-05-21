@@ -7,9 +7,6 @@ const { extractTextFromBuffer } = require("./ocr.service");
 const { paginateArray } = require("../utils/pagination");
 const notificationEmitter = require('./notificationEmitter');
 const idfyService = require("./idfy.service");
-const ncismService = require("./ncism.service");
-const detectSystem = require("../utils/systemDetector");
-const { isNameMatched } = require("../utils/nameMatcher");
 
 const getAllowedDocs = (role) => {
     const config = requiredDocsConfig[role];
@@ -184,48 +181,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 extractedData = parserMap[documentType](extractedText);
             }
             console.log("EXTRACTED DATA:", extractedData);
-            // // ================= NAME VALIDATION =================
-
-            // if (user.role === "staff") {
-
-            //     // Fetch medical staff profile
-            //     const staffProfile = await MedicalStaff
-            //         .findOne({ user: user._id })
-            //         .populate("user", "name");
-
-            //     const profileName =
-            //         staffProfile?.user?.name || "";
-
-            //     // Extract document name
-            //     const documentName =
-            //         extractedData.name ||
-            //         extractedData.doctorName ||
-            //         extractedData.hospitalName ||
-            //         "";
-
-            //     // Validate only if OCR extracted a name
-            //     if (documentName) {
-
-            //         const matched = isNameMatched(
-            //             profileName,
-            //             documentName
-            //         );
-
-            //         console.log("PROFILE NAME:", profileName);
-            //         console.log("DOCUMENT NAME:", documentName);
-            //         console.log("NAME MATCH:", matched);
-
-            //         if (!matched) {
-
-            //             // rollback uploaded file
-            //             await deleteFromS3(key);
-
-            //             throw new Error(
-            //                 "Uploaded document name does not match profile name"
-            //             );
-            //         }
-            //     }
-            // }
 
             // Hospital Certificate Verification 
             if (
@@ -470,49 +425,8 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     console.error("QR verification error:", err);
                     verificationStatus = "manual-pending-verification";
                 }
-                if (
-                    !qrMatched &&
-                    (
-                        documentType === "mcim-certificate" ||
-                        documentType === "ncim-certificate"
-                    )
-                ) {
-
-                    const system = detectSystem({
-                        reg: extractedData.registrationNumber,
-                        qualification: extractedData.qualification
-                    });
-
-                    console.log("DETECTED SYSTEM:", system);
-
-                    //AYURVED / UNANI 
-                    if (system === "AYURVED" || system === "UNANI") {
-
-                        try {
-
-                            const result = await ncismService.verify(
-                                extractedData.registrationNumber,
-                                extractedData.doctorName
-                            );
-
-                            verificationStatus = result.status;
-
-                            verificationMeta = {
-                                provider: result.source,
-                                verifiedAt: new Date()
-                            };
-
-                        } catch (err) {
-
-                            verificationStatus = "manual-pending-verification";
-                        }
-                    }
-
-                    // UNKNOWN 
-                    else {
-
-                        verificationStatus = "manual-pending-verification";
-                    }
+                if (!qrMatched) {
+                    verificationStatus = "manual-pending-verification";
                 }
             }
 
