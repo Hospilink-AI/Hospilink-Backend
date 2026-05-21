@@ -12,7 +12,7 @@ const { uploadToS3, deleteFromS3, generatePreSignedURL } = require('./s3.service
 const notificationEmitter = require('./notificationEmitter');
 const emailService = require('./email.service');
 const requiredDocsConfig = require('../config/requiredDocs');
-const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');            
+const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');
 const { formatRoleForDisplay } = require('../utils/helpers');
 const DashboardService = require('./dashboard.service');
 
@@ -241,7 +241,7 @@ class ProfileService {
             const hospitalProfile = new Hospital({
                 user: userId,
                 hospitalLegalName: profileData.hospitalLegalName,
-                email: profileData.email, 
+                email: profileData.email,
                 currentAddress: profileData.currentAddress,
                 city: profileData.city,
                 state: profileData.state,
@@ -299,7 +299,7 @@ class ProfileService {
     // Get user profile based on role
     async getUserProfile(userId) {
         try {
-            const user = await User.findById(userId).select('name email role isEmailVerified isDocumentsUploaded').lean();
+            const user = await User.findById(userId).select('name email role isEmailVerified').lean();
             if (!user) throw new Error('User not found');
 
             // Check cache first
@@ -441,8 +441,7 @@ class ProfileService {
                     name: user.name,
                     email: user.email,
                     role: user.role,
-                    isEmailVerified: user.isEmailVerified,
-                    isDocumentsUploaded: user.isDocumentsUploaded
+                    isEmailVerified: user.isEmailVerified
                 },
                 profile,
                 documents
@@ -608,7 +607,7 @@ class ProfileService {
                         updateData.state || currentProfile.state,
                         updateData.pincode || currentProfile.pincode
                     ].filter(part => part && part.trim() !== '');
-                    
+
                     const locationToGeocode = addressParts.join(', ');
 
                     if (locationToGeocode) {
@@ -692,7 +691,7 @@ class ProfileService {
                 if (user.role === 'hospital') {
                     // Email comes from user collection (always available)
                     freshProfile.profile.email = user.email;
-                    
+
                     // Phone comes from hospital profile (read-only)
                     const hospitalProfile = await Hospital.findOne({ user: userId }).lean();
                     if (hospitalProfile) {
@@ -701,7 +700,7 @@ class ProfileService {
                 } else if (user.role === 'staff') {
                     // Email comes from user collection (always available)
                     freshProfile.profile.email = user.email;
-                    
+
                     // Phone comes from staff profile (read-only)
                     const staffProfile = await MedicalStaff.findOne({ user: userId }).lean();
                     if (staffProfile) {
@@ -929,10 +928,10 @@ class ProfileService {
 
             // Check verification status for availability toggle
             if (medicalStaff.verificationStatus === 'pending') {
-                const availabilityMessage = isAvailable 
+                const availabilityMessage = isAvailable
                     ? 'You cannot set availability to ON until your profile has been verified.'
                     : 'You won\'t receive duty requests unless your profile has been verified.';
-                
+
                 return {
                     success: false,
                     message: availabilityMessage,
@@ -1063,7 +1062,7 @@ class ProfileService {
             const hospitalLat = hospital.coordinates.coordinates.latitude;
             const hospitalLng = hospital.coordinates.coordinates.longitude;
 
-            
+
             console.log(`Searching for staff within ${radiusKm}km radius using hybrid approach (bounding box + real-time location)`);
 
             // Bounding box query with profile coordinates (MongoDB indexed query)
@@ -1119,7 +1118,7 @@ class ProfileService {
 
                         // Get real-time location from dashboard cache (falls back to profile location)
                         const locationData = await DashboardService.getStaffLocationForDuties(staff.user._id.toString());
-                        
+
                         return {
                             staff,
                             staffLat: locationData.location.latitude,
@@ -1169,7 +1168,7 @@ class ProfileService {
             // Combine staff with distance results
             const staffWithRealTimeLocation = validStaffWithLocations.map(s => {
                 const distanceResult = distanceResults.get(s.staff._id.toString());
-                
+
                 if (!distanceResult) {
                     console.warn(`No distance result for staff ${s.staff._id}`);
                     return null;
@@ -1199,7 +1198,7 @@ class ProfileService {
             fallbackLocationCalls = validStaffWithLocations.filter(s => !s.success).length;
 
             console.log(`[Google Maps API] Total calls: ${googleMapsApiCalls} (Real-time locations: ${realTimeLocationCalls}, Fallback locations: ${fallbackLocationCalls})`);
-            
+
 
             // Get duty status for all valid staff (batch optimized)
             const staffIds = validStaff.map(staff => staff._id);
@@ -1208,7 +1207,7 @@ class ProfileService {
             // Format response with duty status
             const staffWithDutyStatus = validStaff.map(staff => {
                 const dutyStatus = dutyStatusMap.get(staff._id.toString());
-                
+
                 return {
                     id: staff._id,
                     name: staff.fullName,
@@ -1218,7 +1217,7 @@ class ProfileService {
                     phone: staff.phoneNumber,
                     rating: staff.averageRating || 0,
                     isAvailable: staff.isAvailable,
-                    verificationStatus: staff.verificationStatus, 
+                    verificationStatus: staff.verificationStatus,
                     distance: staff.distance,
                     distanceText: staff.distanceText,
                     estimatedTime: staff.estimatedTime,
