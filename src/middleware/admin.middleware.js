@@ -767,6 +767,87 @@ const validateMedicalStaffListQuery = (req, res, next) => {
 
 
 
+// Validate medical staff list query parameters (verified staff only)
+const validateMedicalStaffListVerified = (req, res, next) => {
+    // Check for request body content - GET requests should not have body
+    if (req.body && Object.keys(req.body).length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'GET request should not contain request body. Use query parameters only.'
+        });
+    }
+ 
+    // Validate allowed query parameters only
+    const allowedParams = ['city', 'jobRole', 'page', 'limit'];
+    const receivedParams = Object.keys(req.query);
+ 
+    // Check for unexpected parameters
+    const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
+    if (unexpectedParams.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
+        });
+    }
+ 
+    const { city, jobRole, page = 1, limit = 10 } = req.query;
+ 
+    // Validate city parameter (optional)
+    if (city && typeof city !== 'string') {
+        return res.status(400).json({
+            success: false,
+            message: 'City parameter must be a string'
+        });
+    }
+ 
+    // Validate jobRole parameter (optional)
+    const allowedRoles = [
+        'rmo', 'dmo', 'general_physician', 'intensivist', 'emergency_doctor',
+        'anesthetist', 'pediatrician', 'gynecologist', 'orthopedic_surgeon',
+        'general_surgeon', 'radiologist', 'pathologist', 'staff_nurse',
+        'icu_nurse', 'emergency_nurse', 'ot_nurse', 'dialysis_nurse', 'nicu_nurse',
+        'lab_technician', 'radiology_technician', 'ot_technician', 'dialysis_technician',
+        'cath_lab_technician', 'icu_technician', 'ward_boy', 'ayah', 'opd_attendant',
+        'emergency_attendant', 'patient_care_taker', 'pharmacist', 'pharmacy_assistant',
+        'biomedical_engineer', 'housekeeping_staff', 'security_guard', 'ambulance_driver',
+        'receptionist', 'billing_executive', 'medical_records_staff', 'hr_accounts'
+    ];
+    if (jobRole && !allowedRoles.includes(jobRole)) {
+        return res.status(400).json({
+            success: false,
+            message: `Job role parameter must be one of: ${allowedRoles.join(', ')}`
+        });
+    }
+ 
+    // Validate page parameter
+    const pageNum = parseInt(page);
+    if (isNaN(pageNum) || pageNum < 1) {
+        return res.status(400).json({
+            success: false,
+            message: 'Page parameter must be a positive integer'
+        });
+    }
+ 
+    // Validate limit parameter
+    const limitNum = parseInt(limit);
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+        return res.status(400).json({
+            success: false,
+            message: 'Limit parameter must be a positive integer between 1 and 100'
+        });
+    }
+ 
+    req.validatedQuery = {
+        city: city || null,
+        jobRole: jobRole || null,
+        page: pageNum,
+        limit: limitNum
+    };
+ 
+    next();
+};
+
+
 // Validate documents list query parameters
 const validateDocumentsListQuery = (req, res, next) => {
     // Check for request body content - GET requests should not have body
@@ -922,6 +1003,7 @@ module.exports = {
     validateHospitalSimpleListQuery,
     validateHospitalListQuery,
     validateMedicalStaffListQuery,
+    validateMedicalStaffListVerified,
     validateDocumentsListQuery,
     validateObjectId,
     validateRejectionReason,

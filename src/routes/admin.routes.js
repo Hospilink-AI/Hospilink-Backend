@@ -15,10 +15,12 @@ const {
     validateHospitalSimpleListQuery,
     validateHospitalListQuery,
     validateMedicalStaffListQuery,
+    validateMedicalStaffListVerified,
     validateDocumentsListQuery,
     validateObjectId,
     validateRejectionReason,
-    validateAssignDuty
+    validateAssignDuty,
+    
 } = require('../middleware/admin.middleware');
 
 const { validateDutyCreation } = require('../middleware/validation.middleware');
@@ -62,6 +64,7 @@ router.get('/staff-stats', adminController.getStaffStatistics);
 router.get('/medical-staff/stats', adminController.getMedicalStaffStats);
 router.get('/medical-staff/:staffId', validateObjectId('staffId'), adminController.getMedicalStaffDetail);
 router.get('/medical-staff', validateMedicalStaffListQuery, adminController.getMedicalStaffList);
+router.get('/medical-staff-list', validateMedicalStaffListVerified, adminController.getVerifiedMedicalStaffList);
 router.patch('/medical-staff/:staffId/verify', validateObjectId('staffId'), adminController.verifyMedicalStaff);
 router.patch('/medical-staff/:staffId/reject', validateObjectId('staffId'), validateRejectionReason, adminController.rejectMedicalStaff);
 

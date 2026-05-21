@@ -283,6 +283,26 @@ exports.getMedicalStaffList = asyncHandler(async (req, res) => {
 });
 
 
+
+// GET /api/admin/medical-staff-list — verified staff list with city and jobRole filters
+exports.getVerifiedMedicalStaffList = asyncHandler(async (req, res) => {
+    const { city, jobRole, page, limit } = req.validatedQuery;
+ 
+    const result = await adminService.getVerifiedMedicalStaffList({
+        city,
+        jobRole,
+        page,
+        limit
+    });
+ 
+    res.status(200).json({
+        success: true,
+        ...result
+    });
+});
+
+
+
 // GET /api/admin/medical-staff/:staffId — detailed view
 exports.getMedicalStaffDetail = asyncHandler(async (req, res) => {
     const result = await adminService.getMedicalStaffDetail(req.params.staffId);

@@ -1204,6 +1204,92 @@ class AdminService {
 
 
 
+    // GET /api/admin/medical-staff-list — verified staff list with city and jobRole filters
+    async getVerifiedMedicalStaffList({ city, jobRole, page = 1, limit = 10 }) {
+        const { skip } = getPaginationParams(page, limit);
+    
+        // Build match stage - only verified staff
+        const match = { verificationStatus: 'verified' };
+            
+        if (city) match.city = { $regex: city.trim(), $options: 'i' };
+        if (jobRole) match.jobRole = jobRole;
+    
+        const pipeline = [
+            { $match: match },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'user',
+                    foreignField: '_id',
+                    as: 'userInfo'
+                }
+            },
+            { $unwind: { path: '$userInfo', preserveNullAndEmptyArrays: true } },
+            { $sort: { fullName: 1 } },
+            {
+                $facet: {
+                    data: [
+                        { $skip: skip },
+                        { $limit: parseInt(limit) },
+                        {
+                            $project: {
+                                _id: 1,
+                                staffId: '$_id',
+                                fullName: 1,
+                                jobRole: 1,
+                                isAvailable: 1,
+                                userId: '$user',
+                                currentAddress: 1,
+                                city: 1,
+                                state: 1,
+                                pincode: 1,
+                                email: '$userInfo.email',
+                                verificationStatus: 1,
+                                profilePicture: 1
+                            }
+                        }
+                    ],
+                    totalCount: [{ $count: 'count' }]
+                }
+            }
+        ];
+    
+        const [result] = await MedicalStaff.aggregate(pipeline);
+    
+        // Generate pre-signed URLs for profile pictures
+        const staffWithUrls = await Promise.all((result.data || []).map(async (staff) => {
+            let profilePictureUrl = null;
+            if (staff.profilePicture?.s3Key) {
+                try {
+                    profilePictureUrl = await generatePreSignedURL(staff.profilePicture.s3Key);
+                } catch (error) {
+                    console.error('Error generating profile picture URL:', error);
+                }
+            }
+            return {
+                fullName: staff.fullName,
+                jobRole: staff.jobRole,
+                isAvailable: staff.isAvailable,
+                staffId: staff.staffId,
+                userId: staff.userId,
+                currentAddress: staff.currentAddress,
+                city: staff.city,
+                state: staff.state,
+                pincode: staff.pincode,
+                email: staff.email,
+                verificationStatus: staff.verificationStatus,
+                profilePicture: profilePictureUrl
+            };
+        }));
+    
+        return {
+            staff: staffWithUrls,
+            pagination: getPaginationMeta(result.totalCount[0]?.count || 0, parseInt(page), parseInt(limit))
+        };
+    }
+
+
+
     // GET /api/admin/medical-staff/:staffId — detailed view for review modal
     async getMedicalStaffDetail(staffId) {
         const staff = await MedicalStaff.findById(staffId)
