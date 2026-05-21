@@ -4,6 +4,29 @@ const { ACTIVITY_ACTIONS } = require('./activityLog.constants');
 const User = require('../models/User');
 const notificationEmitter = require('../services/notificationEmitter');
 const EmailService = require('../services/email.service');
+const redisClient = require('../config/redis');
+
+/**
+ * Acquire a distributed Redis lock so only one ECS task runs a given cron job.
+ * Returns true if lock was acquired, false if another task already holds it.
+ */
+async function acquireCronLock(lockName, ttlSeconds) {
+    try {
+        const redis = await redisClient.getClientAsync();
+        const result = await redis.set(
+            `cron:lock:${lockName}`,
+            process.env.HOSTNAME || 'local',
+            'NX',
+            'EX',
+            ttlSeconds
+        );
+        return result === 'OK';
+    } catch (err) {
+        // If Redis is unavailable, allow the job to run (single-instance fallback)
+        console.warn(`Could not acquire cron lock for ${lockName}, running anyway:`, err.message);
+        return true;
+    }
+}
 
 /**
  * Notify all admin users about an emergency/escalated duty via push + email.
@@ -88,6 +111,10 @@ class CronJobs {
         // Auto-complete duties job - run every 1 minute on the clock (:00, :01, :02, etc.)
         this.scheduleJob(
             async () => {
+                // Distributed lock: 55s TTL — shorter than 60s interval so it always expires before next run
+                const hasLock = await acquireCronLock('auto-complete', 55);
+                if (!hasLock) return;
+
                 const completed = await DutyService.autoCompleteDuties();
                 const expired = await DutyService.expireUnacceptedDuties();
                 const reminders = DutyService.sendNavigationReminders ? await DutyService.sendNavigationReminders() : 0;
@@ -146,6 +173,10 @@ class CronJobs {
         // Mark incomplete duties job - run every 30 minutes on the clock (:00 and :30)
         this.scheduleJob(
             async () => {
+                // Distributed lock: 29 minutes TTL — shorter than 30min interval
+                const hasLock = await acquireCronLock('mark-incomplete', 29 * 60);
+                if (!hasLock) return;
+
                 const markedIncomplete = await DutyService.markIncompleteDuties();
                 if (markedIncomplete > 0) {
                     console.log(`Marked ${markedIncomplete} duties incomplete at ${new Date().toLocaleString()}`);

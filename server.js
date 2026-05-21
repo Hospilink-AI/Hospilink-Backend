@@ -7,7 +7,6 @@ const { initializeSocket } = require('./src/socket/index');
 const websocketManager = require('./src/services/websocketManager');
 
 const PORT = process.env.PORT || 3000;
-const { initAgent } = require('./agent/api');
 const CronJobs = require('./src/utils/cronJobs');
 
 // Start server
@@ -40,12 +39,6 @@ const startServer = async () => {
         if (process.env.ENABLE_CRON_JOBS === 'true') {
             CronJobs.startAllJobs();
         }
-
-        // Initialize Agent services (runs in background)
-        initAgent().catch(err => {
-            logger.error('Agent initialization failed:', err.message);
-            logger.warn('Continuing without Agent services');
-        });
 
         // Create HTTP server
         const server = http.createServer(app);
