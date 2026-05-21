@@ -100,8 +100,8 @@ class DutyService {
 
 
 
-    // Duty history for hospital — shaped for the Duty History UI table
-    async getDutyHistory({ hospitalUserId, date, startDate, endDate, status, staffRole, page = 1, limit = 10 }) {
+    // Active duties for hospital — shows only available, assigned, enroute, in-progress statuses
+    async getActiveDuties({ hospitalUserId, date, startDate, endDate, status, staffRole, page = 1, limit = 10 }) {
         const { skip } = getPaginationParams(page, limit);
 
         const hospital = await Hospital.findOne({ user: hospitalUserId });
@@ -126,7 +126,19 @@ class DutyService {
             }
         }
 
-        if (status) match.status = status;
+        // Only show active statuses for duties-published endpoint
+        const activeStatuses = ['available', 'assigned', 'enroute', 'in-progress'];
+        if (status) {
+            // If status is provided, validate it's one of the active statuses
+            if (!activeStatuses.includes(status)) {
+                throw new Error('Invalid status. Only available, assigned, enroute, in-progress are allowed');
+            }
+            match.status = status;
+        } else {
+            // Default to showing only active statuses
+            match.status = { $in: activeStatuses };
+        }
+
         if (staffRole) match.staffRole = staffRole;
 
         const [duties, total] = await Promise.all([
@@ -173,6 +185,105 @@ class DutyService {
             };
         });
 
+        return {
+            duties: formatted,
+            pagination: getPaginationMeta(total, parseInt(page), parseInt(limit))
+        };
+    }
+
+
+
+
+    // Duty history for hospital — shows only completed, cancelled, expired, incomplete statuses
+    async getDutyHistory({ hospitalUserId, date, startDate, endDate, status, staffRole, page = 1, limit = 10 }) {
+        const { skip } = getPaginationParams(page, limit);
+    
+        const hospital = await Hospital.findOne({ user: hospitalUserId });
+        if (!hospital) return { duties: [], pagination: getPaginationMeta(0, page, limit) };
+    
+        const match = { hospital: hospital._id };
+    
+        // Single date filter
+        if (date) {
+            const d = new Date(date);
+            const next = new Date(d);
+            next.setDate(next.getDate() + 1);
+            match.date = { $gte: d, $lt: next };
+        // Date range filter
+        } else if (startDate || endDate) {
+            match.date = {};
+            if (startDate) match.date.$gte = new Date(startDate);
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setDate(end.getDate() + 1);
+                match.date.$lt = end;
+            }
+        }
+    
+        // Only show historical statuses for duties-history endpoint
+        const historicalStatuses = ['completed', 'cancelled', 'expired', 'incomplete'];
+        if (status) {
+            // If status is provided, validate it's one of the historical statuses
+            if (!historicalStatuses.includes(status)) {
+                throw new Error('Invalid status. Only completed, cancelled, expired, incomplete are allowed');
+            }
+            match.status = status;
+        } else {
+            // Default to showing only historical statuses
+            match.status = { $in: historicalStatuses };
+        }
+    
+        if (staffRole) match.staffRole = staffRole;
+    
+        const [duties, total] = await Promise.all([
+            Duty.find(match)
+                .populate({
+                    path: 'assignedTo',
+                    select: 'fullName averageRating totalRatings',
+                    populate: { path: 'user', select: 'name email' }
+                })
+                .select('staffRole startTime endTime date isOvernightDuty endDate status assignedTo totalPayment offeredRate completedAt cancelledAt expiredAt incompleteAt cancellation')
+                .sort({ completedAt: -1, cancelledAt: -1, expiredAt: -1, incompleteAt: -1 })
+                .skip(skip)
+                .limit(parseInt(limit)),
+            Duty.countDocuments(match)
+        ]);
+    
+        const formatted = duties.map(duty => {
+            const staff = duty.assignedTo;
+            const hoursCompleted = calculateDutyDuration(
+                duty.date, duty.startTime, duty.endTime,
+                duty.isOvernightDuty, duty.endDate
+            );
+    
+            // Format hours label e.g. "8 Hours" or "1.5 Hours"
+            const hoursLabel = hoursCompleted === 1
+                ? '1 Hour'
+                : `${Number.isInteger(hoursCompleted) ? hoursCompleted : hoursCompleted.toFixed(1)} Hours`;
+    
+            // Get the relevant timestamp based on status
+            const statusTimestamp = duty.completedAt || duty.cancelledAt || duty.expiredAt || duty.incompleteAt;
+    
+            return {
+                dutyId: duty._id,
+                staff: staff ? {
+                    name: staff.fullName || staff.user?.name || '—',
+                    email: staff.user?.email || '—',
+                    averageRating: staff.averageRating ?? 0,
+                    totalRatings: staff.totalRatings ?? 0
+                } : null,
+                staffRole: duty.staffRole,
+                shiftDuration: `${duty.startTime} - ${duty.endTime}`,
+                hoursCompleted: hoursLabel,
+                status: duty.status,
+                offeredRate: duty.offeredRate,
+                totalPayment: duty.totalPayment,
+                date: duty.date,
+                statusTimestamp: statusTimestamp,
+                cancellation: duty.cancellation || null
+            };
+        });
+    
         return {
             duties: formatted,
             pagination: getPaginationMeta(total, parseInt(page), parseInt(limit))

@@ -28,7 +28,9 @@ router.post(
     dutyController.createDuty
 );
 
-router.get('/duties-published', authorize('hospital'), requireHospitalVerification, validatePagination, dutyController.getDuties);
+router.get('/duties-published', authorize('hospital'), requireHospitalVerification, validatePagination, dutyController.getActiveDuties);
+
+router.get('/duties/history', authorize('hospital'), requireHospitalVerification, validatePagination, dutyController.getDutyHistory);
 
 router.get('/duties/available', authorize('staff'), requireStaffVerificationandisAvailable, dutyController.getAvailableJobsWithDistance);
 
