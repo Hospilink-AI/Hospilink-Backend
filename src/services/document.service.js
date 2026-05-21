@@ -478,8 +478,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     )
                 ) {
 
-                    const verificationAgent = require("./verificationAgent.service");
-
                     const system = detectSystem({
                         reg: extractedData.registrationNumber,
                         qualification: extractedData.qualification
