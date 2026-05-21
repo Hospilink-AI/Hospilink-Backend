@@ -24,13 +24,13 @@ const {
 const cacheService = require("./services/cache.service");
 
 // Geocoding service for distance calculations
-const geocodingService = require("../src/services/geocoding.service");
+const geocodingService = require("./services/geocoding.service");
 
 const {
   getPaginationParams,
   getPaginationMeta,
   DEFAULT_PAGE_LIMIT,
-} = require("../src/utils/pagination");
+} = require("./utils/pagination");
 
 // Cache utilities for job and stats caching
 const {

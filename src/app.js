@@ -125,10 +125,6 @@ app.use("/api/reviews", reviewRoutes);
 app.use("/api/documents", documentRoutes);
 app.use("/api/webhook", require("./routes/webhook.route"));
 
-// Agent - AI Job Finder routes (mounted BEFORE general /api route to avoid auth conflicts)
-const agentApp = require("../agent/api").app;
-app.use("/api/agent", agentApp);
-
 // Admin routes
 app.use("/api/admin", adminRoutes);
 
@@ -160,8 +156,9 @@ app.use((err, req, res, next) => {
   });
 
   const statusCode = err.statusCode || 500;
-  // TEMPORARY DEBUGGING: Always show error message
-  const message = err.message;
+  const message = process.env.NODE_ENV === 'production' && statusCode === 500
+    ? 'Internal server error'
+    : err.message;
 
   res.status(statusCode).json({
     success: false,
