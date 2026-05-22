@@ -25,12 +25,12 @@ const app = express();
 // Security middleware
 app.use(helmet());
 
-// CORS configuration
 const corsOptions = {
   origin: (origin, callback) => {
     const allowed = [
       'https://hospilink-frontend-ten.vercel.app',
       'https://hospilink.in',
+      'https://hoppscotch.io',
       // allow server-to-server and local dev (no origin header)
       undefined,
     ];
