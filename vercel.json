@@ -4,14 +4,6 @@
     {
       "src": "backend/api/index.js",
       "use": "@vercel/node"
-    },
-    {
-      "src": "backend/api/cron/auto-complete-duties.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "backend/api/cron/mark-incomplete-duties.js",
-      "use": "@vercel/node"
     }
   ],
   "headers": [
@@ -30,16 +22,6 @@
     {
       "source": "/(.*)",
       "destination": "/backend/api/index.js"
-    }
-  ],
-  "crons": [
-    {
-      "path": "/backend/api/cron/auto-complete-duties",
-      "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/backend/api/cron/mark-incomplete-duties",
-      "schedule": "*/30 * * * *"
     }
   ]
 }
