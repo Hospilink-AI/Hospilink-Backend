@@ -68,3 +68,9 @@ agent/data/
 
 # Tesseract OCR language data (auto-downloaded by tesseract.js)
 *.traineddata
+
+
+
+# Service-specific node_modules
+agent/node_modules
+backend/node_modules

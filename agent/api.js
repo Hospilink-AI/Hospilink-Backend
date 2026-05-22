@@ -1289,7 +1289,7 @@ async function startServer(role, location, cronSchedule) {
   }
 
   const PORT = config.server?.port || 3000;
-  const HOST = config.server?.host || "0.0.0.0";
+  const HOST = config.server?.host || "::";
 
   server = app.listen(PORT, HOST, () => {
     logger.info(`Server running on http://${HOST}:${PORT}`, {
