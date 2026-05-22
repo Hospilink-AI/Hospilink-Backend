@@ -25,9 +25,21 @@ const app = express();
 // Security middleware
 app.use(helmet());
 
-// CORS configuration - Open for all origins
+// CORS configuration
 const corsOptions = {
-  origin: true,
+  origin: (origin, callback) => {
+    const allowed = [
+      'https://hospilink-frontend-ten.vercel.app',
+      'https://hospilink.in',
+      // allow server-to-server and local dev (no origin header)
+      undefined,
+    ];
+    if (!origin || allowed.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS: origin ${origin} not allowed`));
+    }
+  },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: [
@@ -47,6 +59,9 @@ const corsOptions = {
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
+
+// Handle OPTIONS preflight explicitly before any other middleware
+app.options('*', cors(corsOptions));
 
 // Body parsing middleware
 app.use(express.json({ limit: "10kb" }));
