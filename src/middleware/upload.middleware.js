@@ -6,11 +6,12 @@ const fileFilter = (req, file, cb) => {
     const allowedTypes = [
         "image/jpeg",
         "image/jpg",
-        "image/png"
+        "image/png",
+        "application/pdf"
     ];
 
     if (!allowedTypes.includes(file.mimetype)) {
-        return cb(new Error("Only image files (JPEG, JPG, PNG) are allowed"), false);
+        return cb(new Error("Only image files (JPEG, JPG, PNG) or PDF files are allowed"), false);
     }
 
     cb(null, true);

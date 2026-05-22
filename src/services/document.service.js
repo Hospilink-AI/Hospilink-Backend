@@ -7,6 +7,7 @@ const { extractTextFromBuffer } = require("./ocr.service");
 const { paginateArray } = require("../utils/pagination");
 const notificationEmitter = require('./notificationEmitter');
 const idfyService = require("./idfy.service");
+const { extractTextFromPDF } = require("./pdf.service");
 
 const getAllowedDocs = (role) => {
     const config = requiredDocsConfig[role];
@@ -174,7 +175,10 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         if (ocrSupportedDocs.includes(documentType)) {
 
             // OCR
-            extractedText = await extractTextFromBuffer(file.buffer, file.mimetype);
+            const isPDF = file.mimetype === "application/pdf";
+
+            extractedText = isPDF ? await extractTextFromPDF(file.buffer)
+                : await extractTextFromBuffer(file.buffer, file.mimetype, documentType);
 
             //Parse
             if (parserMap[documentType]) {
