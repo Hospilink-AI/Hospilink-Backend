@@ -7,7 +7,7 @@ module.exports = async (req, res) => {
         await connectDB();
         
         // Initialize Agent services for production
-        const { initAgent } = require('../agent/api');
+        const { initAgent } = require('../../agent/api');
         await initAgent();
         
         // Forward to Express app
