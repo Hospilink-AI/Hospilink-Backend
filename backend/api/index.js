@@ -1,6 +1,13 @@
 const app = require('../src/app');
 const connectDB = require('../src/config/database');
 
+let initialized = false;
+async function initialize() {
+    if (initialized) return;
+    await connectDB();
+    initialized = true;
+}
+
 module.exports = async (req, res) => {
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
@@ -13,14 +20,7 @@ module.exports = async (req, res) => {
     }
 
     try {
-        // main db
-        await connectDB();
-        
-        // Initialize Agent services for production
-        const { initAgent } = require('../../agent/api');
-        await initAgent();
-        
-        // Forward to Express app
+        await initialize();
         return app(req, res);
     } catch (error) {
         console.error('Serverless Function Error:', error);
