@@ -2,10 +2,9 @@ services:
 
   backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
-      args:
-        SERVICE: api
+    image: hospilink-backend:latest
     container_name: hospilink-backend
     restart: unless-stopped
     ports:
@@ -14,12 +13,11 @@ services:
       - .env
     environment:
       - NODE_ENV=production
-      - SERVICE=api
       - ENABLE_CRON_JOBS=true
     networks:
       - hospilink-network
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -28,10 +26,9 @@ services:
 
   agent:
     build:
-      context: .
+      context: ./agent
       dockerfile: Dockerfile
-      args:
-        SERVICE: agent
+    image: hospilink-agent:latest
     container_name: hospilink-agent
     restart: unless-stopped
     ports:
@@ -40,12 +37,11 @@ services:
       - .env
     environment:
       - NODE_ENV=production
-      - SERVICE=agent
       - AGENT_PORT=3002
     networks:
       - hospilink-network
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3002/v1/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3

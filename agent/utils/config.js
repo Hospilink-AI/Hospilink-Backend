@@ -273,7 +273,7 @@ const config = {
       },
       
       // Automated scheduling
-      scheduleInterval: '0 13 * * 6', // Every Saturday at 12:45 PM IST
+      scheduleInterval: '0 15 * * 2', // Every Tuesday at 3:00 PM on IST
       dataRetentionDays: 7, // Remove data after 7 days
       enabled: true // Enable automated agent
   }

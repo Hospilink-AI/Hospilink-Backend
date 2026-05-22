@@ -123,10 +123,20 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
     }
 
     const hospital = await Hospital.findById(hospital_id)
-        .select('hospitalLegalName currentAddress city state pincode coordinates servicesAvailable staffCount isProfileComplete user')
+        .select('hospitalLegalName currentAddress city state pincode coordinates servicesAvailable staffCount isProfileComplete verificationStatus user')
         .populate('user', '_id name');
+
     if (!hospital) {
         return res.status(404).json({ success: false, message: 'Hospital not found' });
+    }
+
+    if (hospital.verificationStatus !== 'verified') {
+        const statusMessages = {
+            pending: 'Cannot create duty: hospital verification is still pending.',
+            rejected: 'Cannot create duty: hospital has been rejected and is not verified.'
+        };
+        const message = statusMessages[hospital.verificationStatus] || 'Cannot create duty: hospital is not verified.';
+        return res.status(403).json({ success: false, message });
     }
 
     // Determine number of duties to create (default to 1 if staff_count not provided)
@@ -271,6 +281,26 @@ exports.getMedicalStaffList = asyncHandler(async (req, res) => {
         ...result
     });
 });
+
+
+
+// GET /api/admin/medical-staff-list — verified staff list with city and jobRole filters
+exports.getVerifiedMedicalStaffList = asyncHandler(async (req, res) => {
+    const { city, jobRole, page, limit } = req.validatedQuery;
+ 
+    const result = await adminService.getVerifiedMedicalStaffList({
+        city,
+        jobRole,
+        page,
+        limit
+    });
+ 
+    res.status(200).json({
+        success: true,
+        ...result
+    });
+});
+
 
 
 // GET /api/admin/medical-staff/:staffId — detailed view

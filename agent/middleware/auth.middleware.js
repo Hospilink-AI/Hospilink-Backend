@@ -1,14 +1,6 @@
-/**
- * Agent Authentication Middleware
- * Ensures only authenticated medical staff can access agent endpoints
- */
-
 const jwt = require('jsonwebtoken');
-// Models are shared — both services connect to the same MongoDB Atlas cluster.
-// Using path.resolve keeps this working regardless of where node is invoked from.
-const path = require('path');
-const User = require(path.resolve(__dirname, '../../src/models/User'));
-const MedicalStaff = require(path.resolve(__dirname, '../../src/models/MedicalStaff'));
+const User = require('../models/User');
+const MedicalStaff = require('../models/MedicalStaff');
 const logger = require('../utils/logger');
 
 /**

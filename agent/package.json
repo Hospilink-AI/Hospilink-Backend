@@ -1,0 +1,34 @@
+{
+    "name": "hospilink-agent",
+    "version": "1.0.0",
+    "description": "Job Search Agent Service",
+    "main": "start.js",
+    "engines": {
+        "node": "20.x"
+    },
+    "scripts": {
+        "start": "node start.js",
+        "dev": "nodemon start.js"
+    },
+    "dependencies": {
+        "@google/generative-ai": "^0.21.0",
+        "axios": "^1.16.1",
+        "bcryptjs": "^2.4.3",
+        "cheerio": "^1.2.0",
+        "commander": "^12.1.0",
+        "compression": "^1.8.1",
+        "cors": "^2.8.6",
+        "dotenv": "^16.6.1",
+        "express": "^4.22.2",
+        "express-rate-limit": "^6.11.2",
+        "express-validator": "^7.3.2",
+        "googleapis": "^171.4.0",
+        "helmet": "^7.2.0",
+        "jsonwebtoken": "^9.0.3",
+        "mongoose": "^7.8.9",
+        "node-cron": "^4.2.1",
+        "uuid": "^9.0.1",
+        "validator": "^13.15.35",
+        "winston": "^3.19.0"
+    }
+}
