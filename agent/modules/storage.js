@@ -160,9 +160,10 @@ async function disconnect() {
 }
 
 function getConnectionStatus() {
+    const readyState = mongoose.connection.readyState;
     return {
-        isConnected,
-        readyState: mongoose.connection.readyState,
+        isConnected: readyState === 1,  // Always derive from mongoose, not stale local var
+        readyState,
         host: mongoose.connection.host,
         name: mongoose.connection.name
     };

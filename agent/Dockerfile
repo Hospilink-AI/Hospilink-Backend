@@ -15,8 +15,8 @@ COPY . .
 # ── Final Stage ───────────────────────────────────────────────────────────────
 FROM node:20-alpine
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Install dumb-init and curl for health checks
+RUN apk add --no-cache dumb-init curl
 
 WORKDIR /app
 

@@ -113,15 +113,8 @@ app.use(
 );
 
 // CORS configuration for cross-origin requests
-app.use(
-  cors({
-    origin: config.server?.corsOrigins || "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Request-ID"],
-    credentials: true,
-    maxAge: 86400,
-  }),
-);
+const { buildCorsOptions } = require('./utils/cors.config');
+app.use(cors(buildCorsOptions()));
 
 // Body parsing middleware with size limits
 app.use(express.json({ limit: config.server?.bodyLimit || "1mb" }));

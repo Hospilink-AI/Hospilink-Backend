@@ -11,3 +11,5 @@ logs
 README.md
 docs
 uploads
+vercel.json
+api/

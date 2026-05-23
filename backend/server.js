@@ -1,3 +1,4 @@
+// Load .env — try repo root (local dev), fall back to cwd (Docker/ECS injects env vars directly)
 require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 const http = require('http');
 const app = require('./src/app');

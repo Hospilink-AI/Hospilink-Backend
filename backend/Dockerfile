@@ -15,8 +15,8 @@ COPY . .
 # ── Final Stage ───────────────────────────────────────────────────────────────
 FROM node:20-alpine
 
-# Install dumb-init and wget for health checks
-RUN apk add --no-cache dumb-init wget
+# Install dumb-init and curl for health checks
+RUN apk add --no-cache dumb-init curl
 
 WORKDIR /app
 
