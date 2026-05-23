@@ -13,13 +13,11 @@ let redisAdapterInitialized = false;
 
 // Initialize Socket.IO server
 async function initializeSocket(server) {
+    const { buildSocketCorsOptions } = require('../config/cors.config');
+
     // Create Socket.IO instance with CORS configuration
     io = new Server(server, {
-        cors: {
-            origin: process.env.FRONTEND_URL,
-            credentials: true,
-            methods: ['GET', 'POST']
-        },
+        cors: buildSocketCorsOptions(),
         pingTimeout: 60000,
         pingInterval: 25000,
         // Connection state recovery for reconnections

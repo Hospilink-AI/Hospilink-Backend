@@ -20,42 +20,14 @@ const logger = require("./utils/logger");
 // Only run interval-based cron in persistent environments (local dev)
 // On Vercel, cron jobs are handled via api/cron/* endpoints + vercel.json schedules
 
+const { buildCorsOptions } = require('./config/cors.config');
+
 const app = express();
 
 // Security middleware
 app.use(helmet());
 
-const corsOptions = {
-  origin: (origin, callback) => {
-    const allowed = [
-      'https://hospilink-frontend-ten.vercel.app',
-      'https://hospilink.in',
-      'https://hoppscotch.io',
-      // allow server-to-server and local dev (no origin header)
-      undefined,
-    ];
-    if (!origin || allowed.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS: origin ${origin} not allowed`));
-    }
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "Accept",
-    "X-Requested-With",
-    "Origin",
-    "Access-Control-Request-Method",
-    "Access-Control-Request-Headers",
-    "Cache-Control",
-  ],
-  exposedHeaders: ["Content-Length", "X-Request-ID"],
-  maxAge: 86400,
-  optionsSuccessStatus: 200,
-};
+const corsOptions = buildCorsOptions();
 
 // Apply CORS middleware
 app.use(cors(corsOptions));

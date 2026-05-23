@@ -5,9 +5,8 @@
  * Starts the job search agent independently from the main application
  */
 
+// Load .env — try repo root (local dev), fall back to cwd (Docker/ECS injects env vars directly)
 const path = require('path');
-
-// Load environment variables from backend root
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 process.env.TZ = "Asia/Kolkata";

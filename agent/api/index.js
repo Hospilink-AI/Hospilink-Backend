@@ -1,19 +1,17 @@
 // Serverless entry point for Vercel
-// Wraps the agent Express app as a serverless function
-
-const { app, initAgent } = require('../api.js');
-
-let initialized = false;
-async function initialize() {
-    if (initialized) return;
-    await initAgent();
-    initialized = true;
-}
+const { app } = require('../api.js');
+const { connect } = require('../modules/storage');
+const { getAllowedOriginsRaw } = require('../utils/cors.config');
 
 module.exports = async (req, res) => {
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
-        res.setHeader('Access-Control-Allow-Origin', 'https://hospilink-frontend-ten.vercel.app');
+        const allowed = getAllowedOriginsRaw();
+        const requestOrigin = req.headers.origin;
+        const originHeader = allowed
+            ? (allowed.includes(requestOrigin) ? requestOrigin : allowed[0])
+            : (requestOrigin || '*');
+        res.setHeader('Access-Control-Allow-Origin', originHeader);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
         res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Origin,Access-Control-Request-Method,Access-Control-Request-Headers,Cache-Control');
@@ -22,7 +20,8 @@ module.exports = async (req, res) => {
     }
 
     try {
-        await initialize();
+        // Reconnect on every request — Vercel drops idle connections between invocations
+        await connect();
         return app(req, res);
     } catch (error) {
         console.error('Agent Serverless Error:', error);

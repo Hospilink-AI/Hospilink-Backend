@@ -4,7 +4,8 @@
  * API requests are handled by Vercel
  */
 
-require('dotenv').config({ path: __dirname + '/.env' });
+// Load .env — try local path (local dev), fall back to cwd (Docker/ECS injects env vars directly)
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
