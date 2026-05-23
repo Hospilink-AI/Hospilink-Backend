@@ -1,25 +1,22 @@
 {
-    "version": 2,
-    "builds": [
-        {
-        "src": "api/index.js",
-        "use": "@vercel/node"
-        }
-    ],
-    "routes": [
-        {
-        "src": "/(.*)",
-        "headers": {
-            "Access-Control-Allow-Origin": "https://hospilink-frontend-ten.vercel.app",
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,PATCH,OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type,Authorization,Accept,X-Requested-With,Origin,Access-Control-Request-Method,Access-Control-Request-Headers,Cache-Control",
-            "Access-Control-Max-Age": "86400"
-        },
-        "dest": "/api/index.js"
-        }
-    ],
-    "env": {
-        "NODE_ENV": "production"
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/index.js",
+      "use": "@vercel/node"
     }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "headers": {
+        "Access-Control-Allow-Origin": "https://hospilink-frontend-ten.vercel.app",
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,PATCH,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization,Accept,X-Requested-With,Origin,Access-Control-Request-Method,Access-Control-Request-Headers,Cache-Control",
+        "Access-Control-Max-Age": "86400"
+      },
+      "dest": "/api/index.js"
+    }
+  ]
 }
