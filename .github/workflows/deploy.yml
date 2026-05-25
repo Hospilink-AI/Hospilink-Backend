@@ -1,0 +1,97 @@
+name: Deploy to AWS ECS
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REGISTRY: 046081688941.dkr.ecr.ap-south-1.amazonaws.com
+  ECS_CLUSTER: hospilink
+
+jobs:
+  deploy-backend:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::046081688941:role/hospilink-github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/hospilink/backend:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/hospilink/backend:latest \
+                       ./backend
+          docker push $ECR_REGISTRY/hospilink/backend:$IMAGE_TAG
+          docker push $ECR_REGISTRY/hospilink/backend:latest
+
+      - name: Deploy backend to ECS
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service hospilink-backend \
+            --force-new-deployment \
+            --region $AWS_REGION
+
+      - name: Wait for backend to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster $ECS_CLUSTER \
+            --services hospilink-backend \
+            --region $AWS_REGION
+
+  deploy-agent:
+    name: Deploy Agent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::046081688941:role/hospilink-github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push agent image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/hospilink/agent:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/hospilink/agent:latest \
+                       ./agent
+          docker push $ECR_REGISTRY/hospilink/agent:$IMAGE_TAG
+          docker push $ECR_REGISTRY/hospilink/agent:latest
+
+      - name: Deploy agent to ECS
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service hospilink-agent \
+            --force-new-deployment \
+            --region $AWS_REGION
+
+      - name: Wait for agent to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster $ECS_CLUSTER \
+            --services hospilink-agent \
+            --region $AWS_REGION
