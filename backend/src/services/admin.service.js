@@ -1397,8 +1397,14 @@ class AdminService {
             logger.error(`Failed to refresh cache for staff ${staffId} after verification`);
         }
 
-        // Invalidate availability cache after enabling
-        await cacheService.del(`staff_availability:${staff.user._id}`);
+        // Clear profile caches so /profile/me reflects the new verification status
+        const verifiedUserId = staff.user._id.toString();
+        await Promise.allSettled([
+            cacheService.invalidateUserProfiles(verifiedUserId),
+            cacheService.invalidateProfileStatus(verifiedUserId)
+        ]);
+
+        logger.info(`Profile cache invalidated for staff ${staffId} after verification`);
 
         logger.info(`Medical staff ${staffId} verified: ${previousStatus} → verified`);
 
@@ -1444,20 +1450,28 @@ class AdminService {
 
         // IMMEDIATE: Invalidate cache with retry mechanism
         const cacheInvalidated = await CacheInvalidationService.invalidateStaffVerificationCache(staff.user._id);
-        
+
         if (!cacheInvalidated) {
             logger.error(`Failed to invalidate cache for staff ${staffId} after rejection`);
         }
 
         // IMMEDIATE: Refresh cache to ensure consistency
         const cacheRefreshed = await CacheInvalidationService.refreshStaffVerificationCache(staff.user._id);
-        
+
         if (!cacheRefreshed) {
             logger.error(`Failed to refresh cache for staff ${staffId} after rejection`);
         }
 
-        logger.info(`Medical staff ${staffId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
+        // Clear profile caches so /profile/me reflects the new verification status
+        const rejectedUserId = staff.user._id.toString();
+        await Promise.allSettled([
+            cacheService.invalidateUserProfiles(rejectedUserId),
+            cacheService.invalidateProfileStatus(rejectedUserId)
+        ]);
 
+        logger.info(`Profile cache invalidated for staff ${staffId} after rejection`);
+        
+        logger.info(`Medical staff ${staffId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
         // Send email to staff
         EmailService.sendMedicalStaffRejectedEmail(staff.user.email, staff.fullName, reason)
             .catch(err => logger.error('Reject email error:', err.message));
