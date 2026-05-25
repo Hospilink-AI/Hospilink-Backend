@@ -72,4 +72,9 @@ process.on('unhandledRejection', (reason) => {
     process.exit(1);
 });
 
+process.on('SIGTERM', () => {
+    logger.info('SIGTERM received, shutting down gracefully');
+    process.exit(0);
+});
+
 main();

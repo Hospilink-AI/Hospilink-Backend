@@ -61,6 +61,8 @@ const startServer = async () => {
             logger.info(`Redis ${redisResult.status === 'fulfilled' ? 'Connected' : 'Unavailable'}`);
             logger.info(`WebSocket server initialized`);
         });
+
+        return server;
     } catch (error) {
         logger.error(`Failed to start server: ${error.message}`);
         process.exit(1);
@@ -79,4 +81,14 @@ process.on('unhandledRejection', (reason, promise) => {
     process.exit(1);
 });
 
-startServer();
+startServer().then((server) => {
+    if (server) {
+        process.on('SIGTERM', () => {
+            logger.info('SIGTERM received, shutting down gracefully');
+            server.close(() => {
+                logger.info('HTTP server closed');
+                process.exit(0);
+            });
+        });
+    }
+});
