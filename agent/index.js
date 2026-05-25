@@ -26,7 +26,6 @@ const { deduplicate } = require('./modules/deduplicator');
 const { rankJobs } = require('./modules/ranker');
 const { enrichJobs } = require('./modules/enricher');
 const { connect, disconnect, storeJobs } = require('./modules/storage');
-const { startServer } = require('./api');
 
 /**
  * Main job finder orchestration
@@ -397,6 +396,7 @@ async function main() {
 
     // Server Mode - default when no role/location provided
     console.log('\n🚀 Starting Job Finder Server v2.0 (Crawl-Free)...\n');
+    const { startServer } = require('./api');
     await startServer(options.role, options.location, options.cron);
 }
 

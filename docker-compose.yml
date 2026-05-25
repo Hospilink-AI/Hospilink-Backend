@@ -1,43 +1,53 @@
 services:
-  app:
+
+  backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
+    image: hospilink-backend:latest
     container_name: hospilink-backend
     restart: unless-stopped
     ports:
       - "3000:3000"
-      - "3002:3002"
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - ENABLE_CRON_JOBS=true
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    depends_on:
-      - redis
     networks:
       - hospilink-network
-    volumes:
-      - ./.env:/app/.env
-      - ./logs:/app/logs
-      - ./uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
 
-  redis:
-    image: redis:7-alpine
-    container_name: hospilink-redis
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    image: hospilink-agent:latest
+    container_name: hospilink-agent
     restart: unless-stopped
     ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+      - "3002:3002"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - AGENT_PORT=3002
     networks:
       - hospilink-network
-    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
 
 networks:
   hospilink-network:
     driver: bridge
-
-volumes:
-  redis_data:
-    driver: local

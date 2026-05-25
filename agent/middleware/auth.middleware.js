@@ -1,11 +1,6 @@
-/**
- * Agent Authentication Middleware
- * Ensures only authenticated medical staff can access agent endpoints
- */
-
 const jwt = require('jsonwebtoken');
-const User = require('../../src/models/User');
-const MedicalStaff = require('../../src/models/MedicalStaff');
+const User = require('../models/User');
+const MedicalStaff = require('../models/MedicalStaff');
 const logger = require('../utils/logger');
 
 /**

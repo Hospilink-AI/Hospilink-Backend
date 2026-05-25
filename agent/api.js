@@ -24,13 +24,13 @@ const {
 const cacheService = require("./services/cache.service");
 
 // Geocoding service for distance calculations
-const geocodingService = require("../src/services/geocoding.service");
+const geocodingService = require("./services/geocoding.service");
 
 const {
   getPaginationParams,
   getPaginationMeta,
   DEFAULT_PAGE_LIMIT,
-} = require("../src/utils/pagination");
+} = require("./utils/pagination");
 
 // Cache utilities for job and stats caching
 const {
@@ -113,15 +113,8 @@ app.use(
 );
 
 // CORS configuration for cross-origin requests
-app.use(
-  cors({
-    origin: config.server?.corsOrigins || "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Request-ID"],
-    credentials: true,
-    maxAge: 86400,
-  }),
-);
+const { buildCorsOptions } = require('./utils/cors.config');
+app.use(cors(buildCorsOptions()));
 
 // Body parsing middleware with size limits
 app.use(express.json({ limit: config.server?.bodyLimit || "1mb" }));
@@ -1289,7 +1282,7 @@ async function startServer(role, location, cronSchedule) {
   }
 
   const PORT = config.server?.port || 3000;
-  const HOST = config.server?.host || "0.0.0.0";
+  const HOST = config.server?.host || "::";
 
   server = app.listen(PORT, HOST, () => {
     logger.info(`Server running on http://${HOST}:${PORT}`, {

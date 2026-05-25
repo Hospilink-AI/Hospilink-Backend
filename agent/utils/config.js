@@ -4,6 +4,7 @@
  *
  * CONVERTED TO COMMONJS for backend compatibility
  */
+// Load .env — try repo root (local dev), fall back to cwd (Docker/ECS injects env vars directly)
 const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "../../.env") });
 
@@ -52,8 +53,8 @@ const config = {
     host: process.env.HOST || "0.0.0.0",
     trustProxy: process.env.TRUST_PROXY === "true" || isProd, // Essential for accurate IP logging behind reverse proxies
     corsOrigins: process.env.CORS_ORIGINS
-      ? process.env.CORS_ORIGINS.split(",")
-      : ["*"],
+      ? process.env.CORS_ORIGINS.split(',').map(o => o.trim())
+      : null, // null = allow all in dev; set CORS_ORIGINS in prod
     bodyLimit: "1mb", // Maximum JSON payload size
     requestTimeout: 120000, // 2 minutes before request times out
   },
@@ -273,7 +274,7 @@ const config = {
       },
       
       // Automated scheduling
-      scheduleInterval: '0 13 * * 6', // Every Saturday at 12:45 PM IST
+      scheduleInterval: '0 15 * * 2', // Every Tuesday at 3:00 PM on IST
       dataRetentionDays: 7, // Remove data after 7 days
       enabled: true // Enable automated agent
   }
