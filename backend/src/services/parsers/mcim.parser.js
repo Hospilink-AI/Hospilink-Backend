@@ -18,9 +18,9 @@ module.exports = (text) => {
     // --- REGISTRATION NUMBER ---
     // Format on card: "I-117477-A" (printed as REG. NO.)
     // OCR may also see the bare number "117477" above it
-    const regFull = normalized.match(/I[-\s]?(\d{4,7})[-\s]?[A-Z]/i);
+    const regFull = normalized.match(/[I1][-\s]?(\d{4,7})[-\s]?[A-Z]/i);
     if (regFull) {
-        registrationNumber = regFull[0].replace(/\s+/g, '').toUpperCase();
+        registrationNumber = regFull[0].replace(/\s+/g, '').replace(/^1-/, 'I-').toUpperCase();
     } else {
         // fallback: bare number near "REG" keyword
         const regBare = normalized.match(/(\d{5,7})\s*\n?\s*(?:REG\.?\s*NO\.?|I-)/i);
@@ -65,7 +65,7 @@ module.exports = (text) => {
     }
 
     // --- VALID THRU ---
-    const validMatch = normalized.match(/Valid\s+Thru\s*[:\-]\s*(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+    const validMatch = normalized.match(/(?:Valid\s*Thru|Valid\s*Upto|Valid\s*Until|Validity)\s*[:\-]?\s*(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
     if (validMatch) {
         validThru = validMatch[1].trim();
     }

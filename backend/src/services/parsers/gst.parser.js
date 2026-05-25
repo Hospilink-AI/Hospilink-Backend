@@ -14,7 +14,8 @@ module.exports = (text) => {
         if (!value) return "";
 
         return value
-            .replace(/[^A-Za-z\s.&-]/g, "")
+            .replace(/^[.\-:\s]+/, "") // remove leading OCR junk
+            .replace(/[^A-Za-z0-9\s.&-]/g, "")
             .replace(/\s+/g, " ")
             .trim()
             .toUpperCase()
@@ -29,26 +30,95 @@ module.exports = (text) => {
     }
 
     // LEGAL NAME
-    const legalLine = lines.find(l =>
-        l.toLowerCase().includes("legal name")
-    );
 
-    if (legalLine) {
-        const value = legalLine.replace(/.*legal name[:\s]*/i, "");
-        legalName = clean(value);
+    for (let i = 0; i < lines.length; i++) {
+
+        if (lines[i].toLowerCase().includes("legal name")) {
+
+            let value = lines[i]
+                .replace(/.*legal name[:\s]*/i, "")
+                .trim();
+
+            // next-line fallback for scanned PDFs
+            if ((!value || value === "." || value.length <= 2) && lines[i + 1]) {
+                value = lines[i + 1];
+            }
+
+            console.log("LEGAL CURRENT:", lines[i]);
+            console.log("LEGAL NEXT:", lines[i + 1]);
+            console.log("LEGAL NEXT 2:", lines[i + 2]);
+            console.log("LEGAL NEXT 3:", lines[i + 3]);
+            legalName = clean(value);
+
+            // fallback after clean
+            if (!legalName || legalName.length <= 2) {
+
+                for (let j = i + 1; j <= i + 5; j++) {
+
+                    if (!lines[j]) continue;
+
+                    const candidate = clean(lines[j]);
+
+                    console.log("LEGAL CANDIDATE:", candidate);
+
+                    // skip table row numbers
+                    if (/^\d+\.?$/.test(candidate)) {
+                        continue;
+                    }
+
+                    // skip labels
+                    if (
+                        candidate.includes("TRADE NAME") ||
+                        candidate.includes("CONSTITUTION") ||
+                        candidate.includes("ADDRESS") ||
+                        candidate.includes("BUSINESS")
+                    ) {
+                        continue;
+                    }
+
+                    // valid company name found
+                    if (
+                        candidate.length > 5 &&
+                        /LIMITED|PVT|PRIVATE/i.test(candidate)
+                    ) {
+                        legalName = candidate;
+                        break;
+                    }
+                }
+            }
+
+            break;
+        }
     }
 
-    // TRADE NAME 
-    const tradeLine = lines.find(l =>
-        l.toLowerCase().includes("trade name")
-    );
+    // TRADE NAME
 
-    if (tradeLine) {
-        const value = tradeLine
-            .replace(/.*trade name.*if any[:\s]*/i, "")
-            .replace(/.*trade name[:\s]*/i, "");
+    for (let i = 0; i < lines.length; i++) {
 
-        tradeName = clean(value);
+        if (lines[i].toLowerCase().includes("trade name")) {
+
+            let value = lines[i]
+                .replace(/.*trade name.*if any[:\s]*/i, "")
+                .replace(/.*trade name[:\s]*/i, "")
+                .trim();
+
+            // next-line fallback for scanned PDFs
+            if ((!value || value === "." || value.length <= 2) && lines[i + 1]) {
+                value = lines[i + 1];
+            }
+
+            tradeName = clean(value);
+
+            // fallback after clean
+            if (
+                (!tradeName || tradeName === "." || tradeName.length <= 2) &&
+                lines[i + 1]
+            ) {
+                tradeName = clean(lines[i + 1]);
+            }
+
+            break;
+        }
     }
 
     // BUSINESS TYPE
