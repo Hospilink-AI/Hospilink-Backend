@@ -7,6 +7,8 @@ const { extractTextFromBuffer } = require("./ocr.service");
 const { paginateArray } = require("../utils/pagination");
 const notificationEmitter = require('./notificationEmitter');
 const idfyService = require("./idfy.service");
+const { extractTextFromPDF } = require("./pdf.service");
+const { isDocumentExpired } = require("../utils/documentExpiryValidator");
 
 const getAllowedDocs = (role) => {
     const config = requiredDocsConfig[role];
@@ -174,19 +176,53 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         if (ocrSupportedDocs.includes(documentType)) {
 
             // OCR
-            extractedText = await extractTextFromBuffer(file.buffer, file.mimetype);
+            const isPDF = file.mimetype === "application/pdf";
+
+            extractedText = isPDF ? await extractTextFromPDF(file.buffer)
+                : await extractTextFromBuffer(file.buffer, file.mimetype, documentType);
 
             //Parse
             if (parserMap[documentType]) {
                 extractedData = parserMap[documentType](extractedText);
             }
             console.log("EXTRACTED DATA:", extractedData);
+            // EXPIRY VALIDATION
+
+            const expirySupportedDocs = [
+
+                "mcim-certificate",
+                "ncim-certificate",
+                "license-permit",
+                "rohini-certificate",
+                "nabh-certificate",
+                "cghs-certificate"
+
+            ];
+
+            if (
+                expirySupportedDocs.includes(documentType) &&
+                isDocumentExpired(extractedData)
+            ) {
+
+                verificationStatus = "rejected";
+
+                verificationMeta = {
+                    provider: "expiry-validator",
+                    status: "expired",
+                    verifiedAt: new Date()
+                };
+
+                console.log("DOCUMENT EXPIRED");
+            }
 
             // Hospital Certificate Verification 
             if (
-                documentType === "rohini-certificate" ||
-                documentType === "cghs-certificate" ||
-                documentType === "nabh-certificate"
+                verificationStatus !== "rejected" &&
+                (
+                    documentType === "rohini-certificate" ||
+                    documentType === "cghs-certificate" ||
+                    documentType === "nabh-certificate"
+                )
             ) {
                 try {
                     const hospitalVerificationService = require("./hospitalVerification.service");
@@ -336,8 +372,12 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             } = require("./qr.service");
 
             if (
-                documentType === "mcim-certificate" ||
-                documentType === "ncim-certificate"
+                verificationStatus !== "rejected" &&
+                (
+                    documentType === "mcim-certificate" ||
+                    documentType === "ncim-certificate" ||
+                    documentType === "license-permit"
+                )
             ) {
                 const parseMCIMHtml = require("./parsers/mcimHtml.parser");
                 const parseNCIMHtml = require("./parsers/ncimHtml.parser");
@@ -362,7 +402,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         if (html) {
                             let qrData = {};
 
-                            if (documentType === "mcim-certificate") {
+                            if (documentType === "mcim-certificate" || documentType === "license-permit") {
                                 qrData = parseMCIMHtml(html);
                             }
 
@@ -371,8 +411,8 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             }
 
                             const normalizedOCR = {
-                                name: extractedData.doctorName,
-                                registrationNumber: extractedData.registrationNumber
+                                name: extractedData.doctorName || extractedData.name,
+                                registrationNumber: extractedData.registrationNumber || extractedData.licenseNumber
                             };
 
                             const result = compareCertificateData(normalizedOCR, qrData);

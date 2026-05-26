@@ -1,97 +1,189 @@
-module.exports = (text) => {
+module.exports = (text = "") => {
 
-    const lines = text
+    console.log("NABH PARSER STARTED");
+
+    // NORMALIZATION
+
+    const normalized = text
+        .replace(/[|]/g, "I")
+        .replace(/[—–]/g, "-")
+        .replace(/\r/g, "")
+        .replace(/[ \t]+/g, " ")
+        .replace(/\n{2,}/g, "\n")
+        .trim();
+
+    const lines = normalized
         .split("\n")
-        .map(l => l.trim())
+        .map(line => line.trim())
         .filter(Boolean);
 
-    let hcoName = "";
-    let address = "";
-    let validFrom = "";
-    let validThru = "";
-    let certificateNumber = "";
+    // REMOVE NOISE
 
-    const clean = (v) =>
-        v?.replace(/[^\w\s,.-]/g, "")
-         .replace(/\s+/g, " ")
-         .trim();
-
-    // REMOVE NOISE LINES
-    const usefulLines = lines.filter(l =>
-        !/national accreditation/i.test(l) &&
-        !/quality council/i.test(l) &&
-        !/certificate of accreditation/i.test(l) &&
-        !/healthcare providers/i.test(l) &&
-        !/^\W+$/.test(l) &&
-        l.length > 8
+    const usefulLines = lines.filter(line =>
+        !/national accreditation/i.test(line) &&
+        !/quality council/i.test(line) &&
+        !/healthcare providers/i.test(line) &&
+        !/isqua/i.test(line) &&
+        !/phone:/i.test(line) &&
+        !/fax/i.test(line) &&
+        !/email:/i.test(line) &&
+        !/website:/i.test(line) &&
+        !/^\W+$/.test(line) &&
+        line.length > 2
     );
 
     console.log("USEFUL LINES:\n", usefulLines);
 
-    // SMART HOSPITAL DETECTION
+    // OUTPUT OBJECT
+
+    const data = {
+        hcoName: "",
+        address: "",
+        validFrom: "",
+        validThru: "",
+        certificateNumber: ""
+    };
+
+    // CLEAN FUNCTION
+
+    const clean = (value = "") =>
+        value
+            .replace(/[^\w\s,&./()-]/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
+
+    // HOSPITAL NAME EXTRACTION
+
+    let hospitalIndex = -1;
+
     for (let i = 0; i < usefulLines.length; i++) {
 
         const line = usefulLines[i];
-        if (/hospital|centre/i.test(line)) {
+
+        if (
+            /hospital|healthcare|clinic|centre|center/i.test(line)
+        ) {
+
+            // Skip noisy lines
             if (
-                /\d{3,}/.test(line) ||                
-                /^[^a-zA-Z]*$/.test(line) ||          
-                line.length < 15                      
+                /\d{5,}/.test(line) ||
+                /certificate/i.test(line) ||
+                line.length < 10
             ) {
                 continue;
             }
+
             const cleaned = clean(line);
-            if (
-                cleaned.split(" ").length >= 3 &&      
-                !/certificate/i.test(cleaned)
-            ) {
-                hcoName = cleaned;
 
-                //  ADDRESS 
-                const addrLines = [];
+            if (cleaned.split(" ").length >= 3) {
 
-                for (let j = i + 1; j < i + 5; j++) {
-                    const nextLine = usefulLines[j];
-
-                    if (!nextLine) break;
-
-                    if (
-                        /has been assessed/i.test(nextLine) ||
-                        /valid from/i.test(nextLine)
-                    ) break;
-
-                    addrLines.push(clean(nextLine));
-                }
-
-                address = addrLines.join(", ");
+                data.hcoName = cleaned;
+                hospitalIndex = i;
                 break;
             }
         }
     }
 
+    // ADDRESS EXTRACTION
+
+    if (hospitalIndex !== -1) {
+
+        const addrLines = [];
+
+        for (
+            let j = hospitalIndex + 1;
+            j < usefulLines.length;
+            j++
+        ) {
+
+            const nextLine = usefulLines[j];
+
+            if (!nextLine) break;
+
+            // STOP CONDITIONS
+            if (
+                /has been assessed/i.test(nextLine) ||
+                /entry level/i.test(nextLine) ||
+                /requirements/i.test(nextLine) ||
+                /valid from/i.test(nextLine) ||
+                /certificate no/i.test(nextLine) ||
+                /patient safety/i.test(nextLine)
+            ) {
+                break;
+            }
+
+            // Skip OCR junk
+            if (
+                nextLine.length < 5 ||
+                /^[A-Z\s]+Y$/i.test(nextLine)
+            ) {
+                continue;
+            }
+
+            addrLines.push(clean(nextLine));
+        }
+
+        data.address = addrLines
+            .join(", ")
+            .replace(/\s+/g, " ")
+            .replace(/,+/g, ",")
+            .trim();
+    }
+
     // DATE EXTRACTION
-    const dateRegex = /(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}/gi;
 
-    const allDates = text.match(dateRegex) || [];
+    const validFromMatch = normalized.match(
+        /Valid\s*from\s*[:\-]?\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
+    );
 
-    if (allDates.length >= 2) {
-        validFrom = allDates[allDates.length - 2];
-        validThru = allDates[allDates.length - 1];
+    if (validFromMatch) {
+        data.validFrom = validFromMatch[1];
     }
 
-    // CERTIFICATE NUMBER
-    const certMatch = text.match(/[A-Z]{1,3}-\d{4}-\d{3,4}/);
+    const validThruMatch = normalized.match(
+        /Valid\s*thru\s*[:\-]?\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
+    );
 
-    if (certMatch) {
-        certificateNumber = certMatch[0];
+    if (validThruMatch) {
+        data.validThru = validThruMatch[1];
     }
 
-    // FINAL OUTPUT
-    return {
-        hcoName,
-        address,
-        validFrom,
-        validThru,
-        certificateNumber
-    };
+    // CERTIFICATE NUMBER EXTRACTION
+
+    const certRegexes = [
+
+        /([A-Z]{0,10}HCO-\d{4}-\d{3,6})/i,
+
+        /Certificate\s*No\.?\s*[:\-]?\s*([A-Z0-9\-]+)/i
+    ];
+
+    for (const regex of certRegexes) {
+
+        const match = normalized.match(regex);
+
+        if (match) {
+
+            data.certificateNumber = match[1]
+                .replace(/\s+/g, "")
+                .toUpperCase();
+
+            break;
+        }
+    }
+
+    // FINAL CLEANUP
+
+    data.hcoName = data.hcoName
+        .replace(/\s*&\s*/g, " & ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    data.address = data.address
+        .replace(/\s+/g, " ")
+        .replace(/,+/g, ",")
+        .trim();
+
+    console.log("EXTRACTED DATA:", data);
+
+    return data;
 };
