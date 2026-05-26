@@ -207,6 +207,14 @@ const sanitizeString = (value) => {
 };
 
 
+// Strip /api/agent prefix when running behind ALB
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/agent')) {
+    req.url = req.url.replace('/api/agent', '') || '/';
+  }
+  next();
+});
+
 // get health check
 app.get("/v1/health", async (req, res) => {
   const dbStatus = getConnectionStatus();
