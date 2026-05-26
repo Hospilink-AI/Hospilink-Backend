@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const { earningsTemplate, receiptTemplate, activityLogsTemplate, activeDutiesTemplate } = require('./pdf.templates');
 
 async function generatePDF(res, html) {

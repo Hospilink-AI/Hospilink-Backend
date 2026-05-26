@@ -1862,23 +1862,16 @@ class AdminService {
                 );
             } catch (routeError) {
                 console.error('Error getting route directions:', routeError);
-                // Enhanced fallback with direct distance calculation
-                const distance = geocodingService.calculateStraightLineDistance(
-                    currentLocation.latitude,
-                    currentLocation.longitude,
-                    hospital.coordinates.coordinates.latitude,
-                    hospital.coordinates.coordinates.longitude
-                );
-                
+                // Fallback: set routeInfo to null when directions API fails
                 routeInfo = {
                     overviewPolyline: null,
                     stepPolylines: [],
-                    distance: distance,
+                    distance: null,
                     duration: null,
-                    distanceText: `${distance.toFixed(1)} km`,
+                    distanceText: null,
                     durationText: null,
                     steps: [],
-                    source: 'direct_calculation'
+                    source: 'error'
                 };
             }
 
