@@ -1,7 +1,18 @@
 FROM node:20-alpine
 
-# Install dumb-init for proper signal handling and curl for health checks
-RUN apk add --no-cache dumb-init curl
+# Install dumb-init, curl, and native build tools for canvas/sharp/gyp
+RUN apk add --no-cache \
+    dumb-init \
+    curl \
+    python3 \
+    make \
+    g++ \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    giflib-dev \
+    pixman-dev
+
 
 WORKDIR /app
 
