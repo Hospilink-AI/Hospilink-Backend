@@ -1,9 +1,7 @@
-FROM node:20-alpine
+FROM node:20-alpine AS builder
 
-# Install dumb-init, curl, and native build tools for canvas/sharp/gyp
+# Install build tools needed to compile native modules (canvas, sharp)
 RUN apk add --no-cache \
-    dumb-init \
-    curl \
     python3 \
     make \
     g++ \
@@ -13,15 +11,34 @@ RUN apk add --no-cache \
     giflib-dev \
     pixman-dev
 
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+# ---- Final image ----
+FROM node:20-alpine
+
+# Runtime libs for canvas/sharp + chromium for puppeteer + curl for health checks
+RUN apk add --no-cache \
+    dumb-init \
+    curl \
+    chromium \
+    cairo \
+    jpeg \
+    pango \
+    giflib \
+    pixman
+
+# Use system Chromium instead of bundled puppeteer Chromium (~250MB saved)
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 WORKDIR /app
 
-# Create non-root user
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001 -G nodejs
 
-# Install production dependencies
-COPY package*.json ./
-RUN npm ci --omit=dev
+# Copy built node_modules from builder stage
+COPY --from=builder /app/node_modules ./node_modules
 
 # Copy source code
 COPY --chown=nodejs:nodejs . .

@@ -9,13 +9,18 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 
 // Create S3 client
-const s3 = new S3Client({
-    region: process.env.AWS_REGION,
-    credentials: {
+// On ECS, credentials are picked up automatically from the task IAM role.
+// Explicit key/secret only used as fallback for local dev.
+const clientConfig = { region: process.env.AWS_REGION };
+
+if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+    clientConfig.credentials = {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-    }
-});
+    };
+}
+
+const s3 = new S3Client(clientConfig);
 
 
 // Upload file to S3
