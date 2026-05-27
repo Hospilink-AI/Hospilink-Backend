@@ -686,7 +686,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
     }
 
     // Validate allowed query parameters only
-    const allowedParams = ['search', 'role', 'availability', 'page', 'limit'];
+    const allowedParams = ['search', 'role', 'availability', 'status', 'page', 'limit'];
     const receivedParams = Object.keys(req.query);
 
     // Check for unexpected parameters
@@ -698,7 +698,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
         });
     }
 
-    const { search, role, availability, page = 1, limit = 10 } = req.query;
+    const { search, role, availability, status, page = 1, limit = 10 } = req.query;
 
     // Validate role parameter
     const allowedRoles = [
@@ -725,6 +725,15 @@ const validateMedicalStaffListQuery = (req, res, next) => {
         return res.status(400).json({
             success: false,
             message: `Availability parameter must be one of: ${allowedAvailability.join(', ')}`
+        });
+    }
+
+    // Validate status parameter
+    const allowedStatuses = ['pending', 'verified', 'rejected'];
+    if (status && !allowedStatuses.includes(status)) {
+        return res.status(400).json({
+            success: false,
+            message: `Status parameter must be one of: ${allowedStatuses.join(', ')}`
         });
     }
 
@@ -758,6 +767,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
         search: search || null,
         role: role || null,
         availability: availability || null,
+        status: status || null,
         page: pageNum,
         limit: limitNum
     };
