@@ -111,7 +111,7 @@ const syncDocumentsUploadedFlag = async (userId, userRole) => {
         // Invalidate profile cache so next GET /profile/me returns fresh data
         await cacheService.invalidateProfile(userObjectId.toString(), userRole);
 
-        console.log(`[syncDocumentsUploadedFlag] userId=${userId} role=${userRole} uploaded=${uploadedTypes} flag=${isDocumentsUploaded}`);
+        console.log(`[syncDocumentsUploadedFlag] userId=${userId} role=${userRole} flag=${isDocumentsUploaded}`);
     } catch (err) {
         const logger = require('../utils/logger');
         logger.error(`syncDocumentsUploadedFlag failed userId=${userId} role=${userRole}: ${err.message}`);
@@ -185,7 +185,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             if (parserMap[documentType]) {
                 extractedData = parserMap[documentType](extractedText);
             }
-            console.log("EXTRACTED DATA:", extractedData);
+            // Note: extractedData intentionally not logged — contains PII (Aadhaar, PAN, DOB)
             // EXPIRY VALIDATION
 
             const expirySupportedDocs = [
@@ -212,11 +212,10 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     verifiedAt: new Date()
                 };
 
-                console.log("DOCUMENT EXPIRED");
+                logger.info(`Document rejected: expired type=${documentType}`);
             }
 
-            // Hospital Certificate Verification 
-            if (
+            // Hospital Certificate Verification
                 verificationStatus !== "rejected" &&
                 (
                     documentType === "rohini-certificate" ||
@@ -233,7 +232,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         city: extractedData.location || extractedData.city
                     });
 
-                    console.log("HOSPITAL VERIFICATION RESULT:", result);
+                    logger.info(`Hospital verification result: status=${result.status} source=${result.source} type=${documentType}`);
 
                     verificationStatus = result.status;
 
@@ -281,8 +280,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             name: extractedData.name,
                             dob: formattedDOB
                         });
-
-                        console.log("IDFY PAN RESPONSE:", idfyResponse);
+                        // IDFY response not logged — may contain PII
                     }
 
                     // GST
@@ -293,8 +291,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         idfyResponse = await idfyService.verifyGST(
                             extractedData.registrationNumber
                         );
-
-                        console.log("IDFY GST RESPONSE:", idfyResponse);
+                        // IDFY response not logged — may contain PII
                     }
 
                     // CIN
@@ -305,12 +302,11 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         idfyResponse = await idfyService.verifyCIN(
                             extractedData.cin
                         );
-
-                        console.log("IDFY CIN RESPONSE:", idfyResponse);
+                        // IDFY response not logged — may contain PII
                     }
 
                     if (idfyResponse && idfyResponse.request_id) {
-                        console.log(" Stored requestId:", idfyResponse.request_id);
+                        logger.info(`IDFY task queued: type=${documentType} requestId=${idfyResponse.request_id}`);
 
                         verificationMeta = {
                             provider: "idfy",
@@ -325,7 +321,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             documentType
                         );
                     } else {
-                        console.log(" IDFY request_id missing:", idfyResponse);
+                        logger.warn(`IDFY request_id missing for type=${documentType}`);
                     }
 
                 } catch (err) {
@@ -344,9 +340,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     const idfyResponse = await idfyService.verifyAadhaarDigilocker(referenceId);
 
                     if (idfyResponse && idfyResponse.request_id) {
-
-                        console.log("AADHAAR REQUEST ID:", idfyResponse.request_id);
-                        console.log("REFERENCE ID:", referenceId);
+                        logger.info(`Aadhaar Digilocker task queued: requestId=${idfyResponse.request_id}`);
 
                         verificationMeta = {
                             provider: "idfy-digilocker",
@@ -390,9 +384,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 try {
                     qrRaw = await extractQRFromBuffer(file.buffer);
                     qrType = detectQRType(qrRaw);
-
-                    console.log("QR RAW:", qrRaw);
-                    console.log("QR TYPE:", qrType);
+                    // QR raw data not logged — may contain encoded PII
 
                     // URL QR
                     if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "url") {
@@ -431,7 +423,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     else if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "base64") {
 
                         const decoded = decodeBase64QR(qrRaw);
-                        console.log("DECODED QR:", decoded);
+                        // Decoded QR not logged — contains registration numbers
 
                         let ocrReg = extractedData.registrationNumber;
 
@@ -575,12 +567,12 @@ const processIdfyResultAsync = async (userDocId, requestId, documentType) => {
                     console.error('Failed to invalidate profile cache after IDFY result:', cacheErr.message);
                 }
 
-                console.log(" IDFY verified (event-based)");
+                logger.info(`IDFY verified (event-based): type=${documentType}`);
             }
 
             if (attempts >= maxAttempts) {
                 clearInterval(interval);
-                console.log(" Max attempts reached for IDFY");
+                logger.warn(`IDFY max polling attempts reached for requestId=${requestId}`);
             }
 
         } catch (err) {

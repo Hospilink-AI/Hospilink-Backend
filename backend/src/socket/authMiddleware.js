@@ -2,18 +2,20 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Hospital = require('../models/Hospital');
 const MedicalStaff = require('../models/MedicalStaff');
+const cacheService = require('../services/cache.service');
+const logger = require('../utils/logger');
 
 /**
- * Socket.IO authentication middleware
- * Validates JWT token and attaches user information to socket
+ * Socket.IO authentication middleware.
+ * Validates JWT token, checks the logout blacklist, and attaches
+ * user + role-specific profile to the socket.
  */
 async function authMiddleware(socket, next) {
     try {
-        // Extract token from multiple possible locations for compatibility
+        // ── 1. Extract token ──────────────────────────────────────────────────
         let token = socket.handshake.auth.token ||
             socket.handshake.headers.token;
 
-        // Also check for Authorization header format
         if (!token && socket.handshake.headers.authorization) {
             const authHeader = socket.handshake.headers.authorization;
             if (authHeader.startsWith('Bearer ')) {
@@ -22,74 +24,68 @@ async function authMiddleware(socket, next) {
         }
 
         if (!token) {
-            console.error('No token provided. Checked: auth.token, query.token, headers.token, headers.authorization');
             return next(new Error('Authentication token required'));
         }
 
-        // Avoid logging token content in production
-        if (process.env.NODE_ENV === 'development') {
-            console.log('Token received for authentication');
-        }
-
-        // Verify JWT token
+        // ── 2. Verify JWT signature ───────────────────────────────────────────
         if (!process.env.JWT_SECRET) {
-            console.error('JWT_SECRET environment variable is not configured');
+            logger.error('JWT_SECRET is not configured — cannot authenticate socket');
             return next(new Error('Server configuration error'));
         }
+
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
         if (!decoded || !decoded.id) {
-            console.error('Token decoded but no user ID found');
             return next(new Error('Invalid token'));
         }
 
-        console.log('Token decoded successfully for user:', decoded.id);
+        // ── 3. Check logout blacklist ─────────────────────────────────────────
+        // Mirrors the same check in the HTTP auth middleware so that a token
+        // invalidated via logout cannot be reused for WebSocket connections.
+        const isBlacklisted = await cacheService.get(`blacklist:${token}`);
+        if (isBlacklisted) {
+            logger.warn(`Socket connection rejected: blacklisted token for user ${decoded.id}`);
+            return next(new Error('Token has been invalidated. Please login again.'));
+        }
 
-        // Fetch user from database
+        // ── 4. Load user ──────────────────────────────────────────────────────
         const user = await User.findById(decoded.id).select('-password');
 
         if (!user) {
-            console.error('User not found in database:', decoded.id);
             return next(new Error('User not found'));
         }
 
-        console.log('User authenticated:', user._id, user.role);
-
-        // Attach user to socket
         socket.user = user;
 
-        // Fetch and attach role-specific profile
+        // ── 5. Attach role-specific profile ───────────────────────────────────
         if (user.role === 'hospital') {
             const hospital = await Hospital.findOne({ user: user._id });
-            if (hospital) {
-                socket.hospital = hospital;
-                console.log('Hospital profile attached:', hospital._id);
-            } else {
+            if (!hospital) {
                 return next(new Error('Hospital profile not found'));
             }
+            socket.hospital = hospital;
+
         } else if (user.role === 'staff') {
             const medicalStaff = await MedicalStaff.findOne({ user: user._id });
-            if (medicalStaff) {
-                socket.medicalStaff = medicalStaff;
-                console.log('Medical staff profile attached:', medicalStaff._id, medicalStaff.jobRole);
-            } else {
+            if (!medicalStaff) {
                 return next(new Error('Medical staff profile not found'));
             }
+            socket.medicalStaff = medicalStaff;
         }
 
         next();
+
     } catch (error) {
-        console.error('Socket authentication error:', error.message);
-        console.error('Error stack:', error.stack);
+        // Log full detail server-side, return generic message to client
+        logger.error(`Socket auth error: ${error.message}`);
 
         if (error.name === 'JsonWebTokenError') {
             return next(new Error('Invalid token'));
         }
         if (error.name === 'TokenExpiredError') {
-            return next(new Error('Authentication failed'));
+            return next(new Error('Token expired. Please login again.'));
         }
 
-        // Log the internal error server-side but return a generic message to the client
         return next(new Error('Authentication failed'));
     }
 }

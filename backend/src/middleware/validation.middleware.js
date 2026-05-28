@@ -39,10 +39,11 @@ const validateSignup = (req, res, next) => {
         errors.push('Password must contain at least one uppercase letter, one lowercase letter, and one number');
     }
 
-    // Role validation
-    const validRoles = ['admin', 'hospital', 'candidate', 'staff'];
+    // Role validation — 'admin' is intentionally excluded; admin accounts are created
+    // directly in the database and cannot be self-registered via this endpoint.
+    const validRoles = ['hospital', 'candidate', 'staff'];
     if (!role || !validRoles.includes(role)) {
-        errors.push('Valid role is required');
+        errors.push('Valid role is required. Allowed: hospital, candidate, staff');
     }
 
     if (errors.length > 0) {
@@ -347,10 +348,7 @@ const validateMedicalStaffProfile = (req, res, next) => {
 
 
 const validateHospitalProfile = (req, res, next) => {
-    // Debug logging
-    console.log('Request body:', req.body);
-    console.log('Received fields:', Object.keys(req.body));
-    
+    // Debug logging removed — req.body contains PII (email, phone, hospital name)
     const { hospitalLegalName, currentAddress, servicesAvailable, city, state, pincode, staffCount, phoneNumber, email, description } = req.body;
     const errors = [];
 
@@ -358,9 +356,6 @@ const validateHospitalProfile = (req, res, next) => {
     const allowedFields = ['hospitalLegalName', 'currentAddress', 'servicesAvailable', 'city', 'state', 'pincode', 'staffCount', 'phoneNumber', 'email', 'description'];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
-    
-    console.log('Destructured hospitalLegalName:', hospitalLegalName);
-    console.log('Type of hospitalLegalName:', typeof hospitalLegalName);
 
     if (unexpectedFields.length > 0) {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);

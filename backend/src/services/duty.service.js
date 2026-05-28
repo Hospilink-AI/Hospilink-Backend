@@ -1347,8 +1347,10 @@ class DutyService {
             }
 
             console.log(`Hospital viewing duty ${duty._id} - no distance calculation (status: ${duty.status})`);
+        } else if (userRole === 'admin') {
+            // Admin can view any duty — fall through to return below
         } else {
-            console.log(`Unknown user role: "${userRole}"`);
+            throw new Error('Access denied: insufficient role to view duty details');
         }
 
         // For hospital users (or when distance calculation fails), add review data and return

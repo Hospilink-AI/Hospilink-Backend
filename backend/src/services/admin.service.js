@@ -19,6 +19,13 @@ const logger = require('../utils/logger');
 const notificationEmitter = require('./notificationEmitter');
 const DashboardService = require('./dashboard.service');
 
+/**
+ * Escape all special regex characters in a user-supplied string before
+ * passing it to a MongoDB $regex query. Prevents ReDoS attacks where a
+ * crafted pattern like (a+)+$ causes catastrophic backtracking.
+ */
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 
 
 class AdminService {
@@ -651,7 +658,7 @@ class AdminService {
         const match = {};
         
         if (nameFilter) {
-            match.hospitalLegalName = { $regex: nameFilter.trim(), $options: 'i' };
+            match.hospitalLegalName = { $regex: escapeRegex(nameFilter.trim()), $options: 'i' };
         }
 
         const hospitals = await Hospital.find(match)
@@ -676,9 +683,9 @@ class AdminService {
         // Build match stage
         const match = {};
         if (status) match.verificationStatus = status;
-        if (city) match.city = { $regex: city.trim(), $options: 'i' };
+        if (city) match.city = { $regex: escapeRegex(city.trim()), $options: 'i' };
         if (search) {
-            const re = { $regex: search.trim(), $options: 'i' };
+            const re = { $regex: escapeRegex(search.trim()), $options: 'i' };
             match.$or = [{ hospitalLegalName: re }];
             // also allow searching by mongo _id string
             if (mongoose.Types.ObjectId.isValid(search.trim())) {
@@ -1118,9 +1125,9 @@ class AdminService {
             ...(search ? [{
                 $match: {
                     $or: [
-                        { fullName: { $regex: search.trim(), $options: 'i' } },
-                        { 'userInfo.email': { $regex: search.trim(), $options: 'i' } },
-                        { 'userInfo.name': { $regex: search.trim(), $options: 'i' } }
+                        { fullName: { $regex: escapeRegex(search.trim()), $options: 'i' } },
+                        { 'userInfo.email': { $regex: escapeRegex(search.trim()), $options: 'i' } },
+                        { 'userInfo.name': { $regex: escapeRegex(search.trim()), $options: 'i' } }
                     ]
                 }
             }] : []),
@@ -1212,7 +1219,7 @@ class AdminService {
         // Build match stage - only verified staff
         const match = { verificationStatus: 'verified' };
             
-        if (city) match.city = { $regex: city.trim(), $options: 'i' };
+        if (city) match.city = { $regex: escapeRegex(city.trim()), $options: 'i' };
         if (jobRole) match.jobRole = jobRole;
     
         const pipeline = [
@@ -1769,7 +1776,7 @@ class AdminService {
     async buildLocationFilter(location) {
         try {
             // Normalize location input
-            const normalizedLocation = location.toLowerCase().trim();
+            const normalizedLocation = escapeRegex(location.toLowerCase().trim());
             
             // Get all hospitals in specified city/region
             const hospitals = await Hospital.find({
@@ -2092,7 +2099,7 @@ class AdminService {
             let hospitalIds = null;
             if (hospitalName) {
                 const hospitals = await Hospital.find({
-                    hospitalLegalName: { $regex: hospitalName.trim(), $options: 'i' }
+                    hospitalLegalName: { $regex: escapeRegex(hospitalName.trim()), $options: 'i' }
                 }).select('_id');
                 
                 if (hospitals.length === 0) {

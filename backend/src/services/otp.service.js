@@ -1,14 +1,15 @@
+const crypto = require('crypto');
+
 class OTPService {
     static generateOTP() {
-        const length = process.env.OTP_LENGTH || 6;
-        const digits = '0123456789';
-        let OTP = '';
-        
-        for (let i = 0; i < length; i++) {
-            OTP += digits[Math.floor(Math.random() * 10)];
-        }
-        
-        return OTP;
+        const length = parseInt(process.env.OTP_LENGTH) || 6;
+        const max = Math.pow(10, length); // e.g. 1_000_000 for 6 digits
+
+        // crypto.randomInt(max) returns a cryptographically secure integer in [0, max)
+        const randomInt = crypto.randomInt(max);
+
+        // Zero-pad to ensure consistent length (e.g. 42 → "000042" for length 6)
+        return String(randomInt).padStart(length, '0');
     }
 
     static getOTPExpiry() {
