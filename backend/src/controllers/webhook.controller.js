@@ -1,4 +1,5 @@
 const Document = require("../models/Document");
+const cacheService = require('../services/cache.service');
 
 exports.handleAadhaarWebhook = async (req, res) => {
     try {
@@ -26,6 +27,21 @@ exports.handleAadhaarWebhook = async (req, res) => {
         );
 
         console.log("UPDATE RESULT:", result);
+
+        // Invalidate profile cache so GET /profile reflects the verified status
+        if (result.modifiedCount > 0) {
+            try {
+                const docRecord = await Document.findOne({
+                    "documents.verificationMeta.referenceId": requestId
+                }).select('userId userRole').lean();
+
+                if (docRecord) {
+                    await cacheService.invalidateProfile(docRecord.userId.toString(), docRecord.userRole);
+                }
+            } catch (cacheErr) {
+                console.error('Failed to invalidate profile cache after Aadhaar webhook:', cacheErr.message);
+            }
+        }
 
         console.log("AADHAAR VERIFIED SUCCESS");
 

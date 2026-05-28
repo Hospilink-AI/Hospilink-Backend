@@ -1046,9 +1046,9 @@ class DutyService {
         // Standard edit: check 30-minute rule
         const editValidation = duty.canEditDuty();
         if (!editValidation.allowed) {
-            // For emergency, give a more specific error
-            if (isEmergencyOrCritical) {
-                throw new Error('Emergency duties can only have their pricing edited. Use offeredRate only.');
+            // For emergency duties that are still available, suggest pricing-only edit
+            if (isEmergencyOrCritical && duty.status === 'available') {
+                throw new Error('Emergency duties can only have their pricing edited within 30 minutes of start time. Use offeredRate only.');
             }
             throw new Error(editValidation.reason);
         }
@@ -1063,6 +1063,21 @@ class DutyService {
         for (const field of allowedFields) {
             if (updateData[field] !== undefined) {
                 updates[field] = updateData[field];
+            }
+        }
+
+        // Validate the new start time is at least 15 minutes in the future.
+        // Use the incoming date if provided, otherwise fall back to the existing duty's date.
+        if (updates.startTime) {
+            const now = getCurrentIST();
+            const refDate = new Date(updates.date || duty.date);
+            const [startHours, startMinutes] = updates.startTime.split(':');
+            const istRefDate = toIST(refDate);
+            const newStartTime = new Date(istRefDate);
+            newStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
+            const bufferTime = new Date(newStartTime.getTime() - 15 * 60 * 1000);
+            if (bufferTime <= now) {
+                throw new Error('New start time must be at least 15 minutes in the future');
             }
         }
 

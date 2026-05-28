@@ -922,8 +922,8 @@ const validateDutyEdit = (req, res, next) => {
     }
     
     // Validate urgency if provided
-    if (req.body.urgency && !['low', 'medium', 'high', 'critical'].includes(req.body.urgency)) {
-        errors.push('Invalid urgency level');
+    if (req.body.urgency && !['low', 'medium', 'high', 'emergency'].includes(req.body.urgency)) {
+        errors.push('Invalid urgency level. Must be one of: low, medium, high, emergency');
     }
     
     // Validate offered_rate if provided
@@ -941,6 +941,31 @@ const validateDutyEdit = (req, res, next) => {
     
     if (req.body.end_time && !/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(req.body.end_time)) {
         errors.push('end_time must be in HH:MM format');
+    }
+
+    // If a new start_time is provided with a date, validate it is at least 15 minutes in the future.
+    // Both must be present — if only start_time is sent (no date), the service resolves it
+    // against the existing duty's date and will enforce the same rule there.
+    if (
+        req.body.start_time &&
+        /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(req.body.start_time) &&
+        req.body.date
+    ) {
+        const refDate = new Date(req.body.date);
+        const [startHours, startMinutes] = req.body.start_time.split(':');
+        const istRefDate = toIST(refDate);
+        const newStartTime = new Date(istRefDate);
+        newStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
+        const bufferTime = new Date(newStartTime.getTime() - 15 * 60 * 1000);
+        const now = getCurrentIST();
+        if (bufferTime <= now) {
+            errors.push('New start time must be at least 15 minutes in the future');
+        }
+    }
+
+    // If setting overnight duty to true, end_date must also be provided
+    if (req.body.is_overnight_duty === true && !req.body.end_date) {
+        errors.push('end_date is required when is_overnight_duty is true');
     }
     
     if (errors.length > 0) {

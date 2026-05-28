@@ -496,8 +496,9 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
     });
     await userDocs.save();
 
-    // Sync the isDocumentsUploaded flag non-blocking
-    syncDocumentsUploadedFlag(user._id, user.role).catch(() => { });
+    // Sync the isDocumentsUploaded flag — awaited so cache is invalidated
+    // before the response is returned to the client
+    await syncDocumentsUploadedFlag(user._id, user.role);
 
     let redirectUrl = null;
 
@@ -565,6 +566,14 @@ const processIdfyResultAsync = async (userDocId, requestId, documentType) => {
                 doc.verificationMeta.verifiedAt = new Date();
 
                 await userDoc.save();
+
+                // Invalidate profile cache so GET /profile reflects the new status
+                try {
+                    const cacheService = require('./cache.service');
+                    await cacheService.invalidateProfile(userDoc.userId.toString(), userDoc.userRole);
+                } catch (cacheErr) {
+                    console.error('Failed to invalidate profile cache after IDFY result:', cacheErr.message);
+                }
 
                 console.log(" IDFY verified (event-based)");
             }
@@ -696,6 +705,14 @@ exports.verifyDocument = async (documentId, adminId) => {
 
     await docRecord.save();
 
+    // Invalidate profile cache so GET /profile reflects the verified status
+    try {
+        const cacheService = require('./cache.service');
+        await cacheService.invalidateProfile(docRecord.userId._id.toString(), docRecord.userRole);
+    } catch (cacheErr) {
+        console.error('Failed to invalidate profile cache after document verification:', cacheErr.message);
+    }
+
     const result = {
         documentId: document._id,
         documentType: document.documentType,
@@ -751,6 +768,14 @@ exports.rejectDocument = async (documentId, adminId, reason) => {
     document.updatedAt = new Date();
 
     await docRecord.save();
+
+    // Invalidate profile cache so GET /profile reflects the rejected status
+    try {
+        const cacheService = require('./cache.service');
+        await cacheService.invalidateProfile(docRecord.userId._id.toString(), docRecord.userRole);
+    } catch (cacheErr) {
+        console.error('Failed to invalidate profile cache after document rejection:', cacheErr.message);
+    }
 
     const result = {
         documentId: document._id,
@@ -855,8 +880,9 @@ exports.deleteDocument = async (user, documentId) => {
 
     await docRecord.save();
 
-    // Sync the isDocumentsUploaded flag non-blocking
-    syncDocumentsUploadedFlag(user._id, user.role).catch(() => { });
+    // Sync the isDocumentsUploaded flag — awaited so cache is invalidated
+    // before the response is returned to the client
+    await syncDocumentsUploadedFlag(user._id, user.role);
 
     return true;
 };
