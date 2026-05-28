@@ -1090,16 +1090,17 @@ class AdminService {
     
 
     // GET /api/admin/medical-staff — paginated list with filters (search, role, availability)
-    async getMedicalStaffListWithFilters({ search, role, availability, page = 1, limit = 10 }) {
+    async getMedicalStaffListWithFilters({ search, role, availability, status, page = 1, limit = 10 }) {
         const { skip } = getPaginationParams(page, limit);
 
         // Build match stage
         const match = {};
-        
+
         if (role) match.jobRole = role;
         if (availability !== undefined && availability !== null && availability !== '') {
             match.isAvailable = availability === 'true' || availability === true;
         }
+        if (status) match.verificationStatus = status;
 
         const pipeline = [
             { $match: match },

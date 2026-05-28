@@ -266,12 +266,13 @@ exports.getMedicalStaffStats = asyncHandler(async (req, res) => {
 
 // GET /api/admin/medical-staff — paginated list with filters
 exports.getMedicalStaffList = asyncHandler(async (req, res) => {
-    const { search, role, availability, page, limit } = req.validatedQuery;
+    const { search, role, availability, status, page, limit } = req.validatedQuery;
 
     const result = await adminService.getMedicalStaffListWithFilters({
         search,
         role,
         availability,
+        status,
         page,
         limit
     });
