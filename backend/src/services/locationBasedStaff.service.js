@@ -92,18 +92,22 @@ class LocationBasedStaffService {
             throw new Error('Medical staff profile not found');
         }
 
-        // Get staff current location
+        console.log(`[AvailableJobs] Staff ID: ${staffId} | Job Role: ${medicalStaff.jobRole}`);
+
+        // Get staff current location (browser GPS from Redis, falls back to profile)
         const staffLocation = await this.getStaffCurrentLocation(staffId);
-        
+        console.log(`[AvailableJobs] Staff location → lat: ${staffLocation.latitude}, lng: ${staffLocation.longitude}`);
+
         // Get current date and time for filtering
         const now = new Date();
         const today = new Date(now.setHours(0, 0, 0, 0));
-        
+        const currentTime = new Date();
+
         // Build base query for available duties matching staff role
         const query = {
             status: 'available',
             staffRole: medicalStaff.jobRole,
-            date: { $gte: today } // Include today's duties and future
+            date: { $gte: today }
         };
 
         // Add additional filters
@@ -113,77 +117,113 @@ class LocationBasedStaffService {
             query.hospital = { $in: hospitals.map(h => h._id) };
         }
 
+        // Fetch all available duties for this staff's job role — no count cap
         const duties = await Duty.find(query)
             .populate('hospital', 'hospitalLegalName coordinates city state')
-            .sort({ date: 1, startTime: 1 })
-            .limit(50);
+            .sort({ date: 1, startTime: 1 });
 
-        // Calculate distances and filter within 50km using Google Maps API
-        // Also filter out duties that have already started
-        const currentTime = new Date();
-        const jobsWithDistance = [];
-        
+        console.log(`[AvailableJobs] Total duties fetched from DB: ${duties.length} (role: ${medicalStaff.jobRole})`);
+
+        // --- Step 1: Pre-filter before calling Google Maps ---
+        // Remove duties missing hospital coordinates or that have already started
+        const validDuties = [];
+
         for (const duty of duties) {
             if (!duty.hospital?.coordinates?.coordinates) {
+                console.log(`[AvailableJobs] Skipping duty ${duty._id} — missing hospital coordinates`);
                 continue;
             }
 
-            // Skip duties that have already started
-            // Compare duty date and start time with current date/time
             const dutyDate = new Date(duty.date);
             const dutyDateTime = new Date(dutyDate);
-            
+
             // Parse start time (format: "HH:MM" or "HH:MM AM/PM")
             const startTimeParts = duty.startTime.match(/(\d+):(\d+)\s*(AM|PM)?/i);
             if (startTimeParts) {
                 let hours = parseInt(startTimeParts[1]);
                 const minutes = parseInt(startTimeParts[2]);
                 const meridiem = startTimeParts[3];
-                
-                // Convert to 24-hour format if AM/PM is present
+
                 if (meridiem) {
-                    if (meridiem.toUpperCase() === 'PM' && hours !== 12) {
-                        hours += 12;
-                    } else if (meridiem.toUpperCase() === 'AM' && hours === 12) {
-                        hours = 0;
-                    }
+                    if (meridiem.toUpperCase() === 'PM' && hours !== 12) hours += 12;
+                    else if (meridiem.toUpperCase() === 'AM' && hours === 12) hours = 0;
                 }
-                
+
                 dutyDateTime.setHours(hours, minutes, 0, 0);
             }
-            
-            // Skip if duty has already started
+
             if (dutyDateTime <= currentTime) {
-                console.log(`Skipping duty ${duty._id} - already started at ${duty.startTime} on ${duty.date}`);
+                console.log(`[AvailableJobs] Skipping duty ${duty._id} — already started at ${duty.startTime} on ${duty.date}`);
                 continue;
             }
 
-            try {
-                const distanceResult = await geocodingService.calculateDistanceAndETA(
-                    staffLocation.latitude,
-                    staffLocation.longitude,
-                    duty.hospital.coordinates.coordinates.latitude,
-                    duty.hospital.coordinates.coordinates.longitude
-                );
+            validDuties.push(duty);
+        }
 
-                if (distanceResult.distance <= 50) {
-                    jobsWithDistance.push({
-                        ...duty.toObject(),
-                        distance: distanceResult.distance,
-                        duration: distanceResult.duration,
-                        distanceText: distanceResult.distanceText,
-                        durationText: distanceResult.durationText
-                    });
-                }
-            } catch (error) {
-                console.error('Error calculating distance for duty:', error);
-                // Skip this duty if distance calculation fails
+        console.log(`[AvailableJobs] Valid duties after pre-filter (has coords + not started): ${validDuties.length}`);
+
+        if (validDuties.length === 0) {
+            console.log(`[AvailableJobs] No valid duties found — returning empty result`);
+            return { jobs: [], staffLocation };
+        }
+
+        // --- Step 2: Build destinations array for batch API call ---
+        const destinations = validDuties.map(duty => ({
+            id: duty._id.toString(),
+            latitude: duty.hospital.coordinates.coordinates.latitude,
+            longitude: duty.hospital.coordinates.coordinates.longitude
+        }));
+
+        const batchSize = 25;
+        const expectedApiCalls = Math.ceil(destinations.length / batchSize);
+        console.log(`[AvailableJobs] Google Maps batch call — destinations: ${destinations.length} | batch size: ${batchSize} | expected API calls: ${expectedApiCalls}`);
+
+        // --- Step 3: Single batch call instead of N individual calls ---
+        const { resultMap, totalApiCalls } = await geocodingService.calculateBatchDistanceAndETA(
+            staffLocation.latitude,
+            staffLocation.longitude,
+            destinations
+        );
+
+        console.log(`[AvailableJobs] Google Maps API calls made: ${totalApiCalls} | successful results: ${resultMap.size}/${destinations.length}`);
+
+        // --- Step 4: Filter within 50km radius and build final result ---
+        const jobsWithDistance = [];
+        let outsideRadiusCount = 0;
+        let noResultCount = 0;
+
+        for (const duty of validDuties) {
+            const distanceResult = resultMap.get(duty._id.toString());
+
+            if (!distanceResult) {
+                console.log(`[AvailableJobs] No distance result for duty ${duty._id} — skipping`);
+                noResultCount++;
                 continue;
+            }
+
+            if (distanceResult.distance <= 50) {
+                jobsWithDistance.push({
+                    ...duty.toObject(),
+                    distance: distanceResult.distance,
+                    duration: distanceResult.duration,
+                    distanceText: distanceResult.distanceText,
+                    durationText: distanceResult.durationText
+                });
+            } else {
+                outsideRadiusCount++;
             }
         }
 
-        // Sort by distance
+        // Sort by distance (closest first)
         jobsWithDistance.sort((a, b) => a.distance - b.distance);
+
+        console.log(`[AvailableJobs] ✓ Summary:`);
+        console.log(`  DB fetched       : ${duties.length}`);
+        console.log(`  Valid (pre-filter): ${validDuties.length}`);
+        console.log(`  Within 50km      : ${jobsWithDistance.length}`);
+        console.log(`  Outside 50km     : ${outsideRadiusCount}`);
+        console.log(`  No API result    : ${noResultCount}`);
+        console.log(`  Google Maps calls: ${totalApiCalls}`);
 
         return {
             jobs: jobsWithDistance,
