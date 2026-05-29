@@ -22,6 +22,7 @@ const DashboardService = require('./dashboard.service');
 const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
 const notificationEmitter = require('./notificationEmitter');
+const s3Service = require('./s3.service');
 
 // Per-duty Redis lock TTL in seconds — prevents thundering herd
 const DUTY_ACCEPT_LOCK_TTL = 10;
@@ -239,7 +240,7 @@ class DutyService {
             Duty.find(match)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName averageRating totalRatings',
+                    select: 'fullName averageRating totalRatings profilePicture.s3Key',
                     populate: { path: 'user', select: 'name email' }
                 })
                 .select('staffRole startTime endTime date isOvernightDuty endDate status assignedTo totalPayment offeredRate completedAt cancelledAt expiredAt incompleteAt cancellation')
@@ -249,28 +250,38 @@ class DutyService {
             Duty.countDocuments(match)
         ]);
     
-        const formatted = duties.map(duty => {
+        const formatted = await Promise.all(duties.map(async (duty) => {
             const staff = duty.assignedTo;
             const hoursCompleted = calculateDutyDuration(
                 duty.date, duty.startTime, duty.endTime,
                 duty.isOvernightDuty, duty.endDate
             );
-    
-            // Format hours label e.g. "8 Hours" or "1.5 Hours"
-            const hoursLabel = hoursCompleted === 1
-                ? '1 Hour'
-                : `${Number.isInteger(hoursCompleted) ? hoursCompleted : hoursCompleted.toFixed(1)} Hours`;
-    
+
+            // Format duration using formatDuration helper 
+            const hoursLabel = formatDuration(hoursCompleted);
+
             // Get the relevant timestamp based on status
             const statusTimestamp = duty.completedAt || duty.cancelledAt || duty.expiredAt || duty.incompleteAt;
-    
+
+            // Generate presigned URL for profile picture if s3Key exists
+            let profilePictureUrl = null;
+            if (staff?.profilePicture?.s3Key) {
+                try {
+                    profilePictureUrl = await s3Service.generatePreSignedURL(staff.profilePicture.s3Key);
+                } catch (error) {
+                    console.error('Error generating presigned URL for profile picture:', error);
+                    profilePictureUrl = null;
+                }
+            }
+
             return {
                 dutyId: duty._id,
                 staff: staff ? {
                     name: staff.fullName || staff.user?.name || '—',
                     email: staff.user?.email || '—',
                     averageRating: staff.averageRating ?? 0,
-                    totalRatings: staff.totalRatings ?? 0
+                    totalRatings: staff.totalRatings ?? 0,
+                    profilePicture: profilePictureUrl
                 } : null,
                 staffRole: duty.staffRole,
                 shiftDuration: `${duty.startTime} - ${duty.endTime}`,
@@ -282,7 +293,7 @@ class DutyService {
                 statusTimestamp: statusTimestamp,
                 cancellation: duty.cancellation || null
             };
-        });
+        }));
     
         return {
             duties: formatted,
