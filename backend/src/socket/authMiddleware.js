@@ -42,7 +42,7 @@ async function authMiddleware(socket, next) {
         // ── 3. Check logout blacklist ─────────────────────────────────────────
         // Mirrors the same check in the HTTP auth middleware so that a token
         // invalidated via logout cannot be reused for WebSocket connections.
-        const isBlacklisted = await cacheService.get(`blacklist:${token}`);
+        const isBlacklisted = await cacheService.getStrict(`blacklist:${token}`);
         if (isBlacklisted) {
             logger.warn(`Socket connection rejected: blacklisted token for user ${decoded.id}`);
             return next(new Error('Token has been invalidated. Please login again.'));

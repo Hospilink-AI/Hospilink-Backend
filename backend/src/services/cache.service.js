@@ -13,6 +13,14 @@ class CacheService {
         }
     }
 
+    // Does NOT catch errors — callers must handle them.
+    // Use for security-critical reads where a Redis failure must not be treated as "not found".
+    async getStrict(key) {
+        const client = await redisClient.getClientAsync();
+        const value = await client.get(key);
+        return value ? JSON.parse(value) : null;
+    }
+
     async set(key, value, ttl = 3600) {
         try {
             const client = await redisClient.getClientAsync();

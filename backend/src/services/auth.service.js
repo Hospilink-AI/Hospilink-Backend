@@ -339,27 +339,28 @@ class AuthService {
     }
 
     async logout(token, userId) {
+        // Use remaining JWT lifetime as TTL so the blacklist entry never outlives the token
+        let blacklistTTL = 604800; // safe fallback: 7 days
         try {
-            // Use pipeline for logout operations
-            await cacheService.pipeline([
-                { 
-                    type: 'set', 
-                    key: `blacklist:${token}`, 
-                    value: true, 
-                    ttl: 604800 // 7 days — must match JWT_EXPIRES_IN to prevent reuse after logout
-                },
-                ...(userId ? [{ type: 'del', key: `session:${userId}` }] : [])
-            ]);
-            
-            logger.info(`User logged out: ${userId}`);
-            
-            return {
-                message: 'Logged out successfully'
-            };
-        } catch (error) {
-            logger.error(`Logout error: ${error.message}`);
+            const decoded = jwt.decode(token);
+            if (decoded?.exp) {
+                const remaining = decoded.exp - Math.floor(Date.now() / 1000);
+                if (remaining > 0) blacklistTTL = remaining;
+            }
+        } catch (_) {} // never block logout due to decode failure
+
+        const pipelineResult = await cacheService.pipeline([
+            { type: 'set', key: `blacklist:${token}`, value: true, ttl: blacklistTTL },
+            ...(userId ? [{ type: 'del', key: `session:${userId}` }] : [])
+        ]);
+
+        if (!pipelineResult) {
+            logger.error(`Logout pipeline failed for userId: ${userId}`);
             throw new Error('Failed to logout. Please try again.');
         }
+
+        logger.info(`User logged out: ${userId}`);
+        return { message: 'Logged out successfully' };
     }
 }
 

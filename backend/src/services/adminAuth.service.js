@@ -1,3 +1,4 @@
+const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const OTPService = require('./otp.service');
 const EmailService = require('./email.service');
@@ -309,27 +310,27 @@ class AdminAuthService {
 
 
     async logout(token, userId) {
+        let blacklistTTL = 604800; // safe fallback: 7 days
         try {
-            // Use pipeline for logout operations
-            await cacheService.pipeline([
-                { 
-                    type: 'set', 
-                    key: `blacklist:${token}`, 
-                    value: true, 
-                    ttl: 604800 // 7 days — must match JWT_EXPIRES_IN to prevent reuse after logout
-                },
-                ...(userId ? [{ type: 'del', key: `session:${userId}` }] : [])
-            ]);
-            
-            logger.info(`Admin logged out: ${userId}`);
-            
-            return {
-                message: 'Admin logged out successfully'
-            };
-        } catch (error) {
-            logger.error(`Admin logout error: ${error.message}`);
+            const decoded = jwt.decode(token);
+            if (decoded?.exp) {
+                const remaining = decoded.exp - Math.floor(Date.now() / 1000);
+                if (remaining > 0) blacklistTTL = remaining;
+            }
+        } catch (_) {}
+
+        const pipelineResult = await cacheService.pipeline([
+            { type: 'set', key: `blacklist:${token}`, value: true, ttl: blacklistTTL },
+            ...(userId ? [{ type: 'del', key: `session:${userId}` }] : [])
+        ]);
+
+        if (!pipelineResult) {
+            logger.error(`Admin logout pipeline failed for userId: ${userId}`);
             throw new Error('Failed to logout. Please try again.');
         }
+
+        logger.info(`Admin logged out: ${userId}`);
+        return { message: 'Admin logged out successfully' };
     }
     
 
