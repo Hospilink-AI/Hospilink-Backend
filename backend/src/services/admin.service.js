@@ -677,13 +677,23 @@ class AdminService {
 
 
     // GET /api/admin/hospitals — paginated, filtered hospital list
-    async getHospitalList({ search, status, city, page = 1, limit = 10 }) {
+    async getHospitalList({ search, status, city, location, page = 1, limit = 10 }) {
         const { skip } = getPaginationParams(page, limit);
 
         // Build match stage
         const match = {};
         if (status) match.verificationStatus = status;
         if (city) match.city = { $regex: escapeRegex(city.trim()), $options: 'i' };
+
+        // Location filter: regex across currentAddress and pincode
+        if (location) {
+            const locationRegex = { $regex: escapeRegex(location.trim()), $options: 'i' };
+            match.$or = [
+                { currentAddress: locationRegex },
+                { pincode: locationRegex }
+            ];
+        }
+
         if (search) {
             const re = { $regex: escapeRegex(search.trim()), $options: 'i' };
             match.$or = [{ hospitalLegalName: re }];
@@ -1097,7 +1107,7 @@ class AdminService {
     
 
     // GET /api/admin/medical-staff — paginated list with filters (search, role, availability)
-    async getMedicalStaffListWithFilters({ search, role, availability, status, page = 1, limit = 10 }) {
+    async getMedicalStaffListWithFilters({ search, role, availability, status, location, page = 1, limit = 10 }) {
         const { skip } = getPaginationParams(page, limit);
 
         // Build match stage
@@ -1108,6 +1118,15 @@ class AdminService {
             match.isAvailable = availability === 'true' || availability === true;
         }
         if (status) match.verificationStatus = status;
+
+        // Location filter: regex across currentAddress and pincode
+        if (location) {
+            const locationRegex = { $regex: escapeRegex(location), $options: 'i' };
+            match.$or = [
+                { currentAddress: locationRegex },
+                { pincode: locationRegex }
+            ];
+        }
 
         const pipeline = [
             { $match: match },
