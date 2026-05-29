@@ -9,6 +9,7 @@ const notificationEmitter = require('./notificationEmitter');
 const idfyService = require("./idfy.service");
 const { extractTextFromPDF } = require("./pdf.service");
 const { isDocumentExpired } = require("../utils/documentExpiryValidator");
+const logger = require('../utils/logger');
 
 const getAllowedDocs = (role) => {
     const config = requiredDocsConfig[role];
@@ -216,6 +217,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             }
 
             // Hospital Certificate Verification
+            if (
                 verificationStatus !== "rejected" &&
                 (
                     documentType === "rohini-certificate" ||
@@ -342,19 +344,52 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     if (idfyResponse && idfyResponse.request_id) {
                         logger.info(`Aadhaar Digilocker task queued: requestId=${idfyResponse.request_id}`);
 
+                        // Check if redirect_url is directly in the initial response
+                        let redirectUrl = idfyResponse.redirect_url || idfyResponse.redirect_uri || null;
+
+                        if (!redirectUrl) {
+                            // Poll up to 3 times with short delays — if IDFY fails fast, stop early
+                            for (let attempt = 1; attempt <= 3; attempt++) {
+                                await new Promise(res => setTimeout(res, 1500));
+                                const taskResult = await idfyService.getTaskResult(idfyResponse.request_id);
+                                const task = taskResult?.[0];
+
+                                // If IDFY already failed, no point continuing
+                                if (task?.status === "failed") {
+                                    logger.warn(`Aadhaar Digilocker task failed: ${task.error} - ${task.message}`);
+                                    break;
+                                }
+
+                                const sourceOutput = task?.result?.source_output;
+                                redirectUrl =
+                                    task?.result?.redirect_url ||
+                                    task?.result?.redirect_uri ||
+                                    sourceOutput?.redirect_url ||
+                                    sourceOutput?.redirect_uri ||
+                                    task?.redirect_url ||
+                                    null;
+
+                                if (redirectUrl) {
+                                    logger.info(`Aadhaar redirect_url obtained on attempt ${attempt}`);
+                                    break;
+                                }
+                            }
+                        }
+
                         verificationMeta = {
                             provider: "idfy-digilocker",
                             requestId: idfyResponse.request_id,
                             referenceId: referenceId,
                             status: "initiated",
                             type: "aadhaar-card",
+                            redirectUrl,
                             createdAt: new Date()
                         };
 
                     }
 
                 } catch (err) {
-                    console.error("Aadhaar verification error:", err.message);
+                    logger.error(`Aadhaar verification error: ${err.message}`);
                 }
             }
 
@@ -494,10 +529,10 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
     let redirectUrl = null;
 
-    if (verificationMeta?.requestId && documentType === "aadhaar-card") {
-        const result = await idfyService.getTaskResult(verificationMeta.requestId);
-
-        redirectUrl = result?.[0]?.result?.source_output?.redirect_url || null;
+    if (documentType === "aadhaar-card") {
+        // redirectUrl is stored in verificationMeta from the initial IDFY response.
+        // No need for a separate getTaskResult call — the URL is available immediately.
+        redirectUrl = verificationMeta?.redirectUrl || null;
     }
 
     return {
