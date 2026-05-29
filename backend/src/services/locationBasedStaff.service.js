@@ -20,6 +20,22 @@ class LocationBasedStaffService {
         };
     }
 
+
+
+    // Calculate using haversine
+    haversineDistance(lat1, lng1, lat2, lng2) {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLng = (lng2 - lng1) * Math.PI / 180;
+        const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+
+
     // Get nearby staff by role with optimized query
     async getNearbyStaffByRole(hospitalCoords, requiredRole, limit = 100) {
         const cacheKey = `nearby_staff:${requiredRole}:${Math.round(hospitalCoords.latitude*1000)}:${Math.round(hospitalCoords.longitude*1000)}`;
@@ -84,6 +100,8 @@ class LocationBasedStaffService {
             return [];
         }
     }
+
+
 
     // Get available jobs with distance for staff member
     async getAvailableJobsWithDistance(staffId, filters = {}) {
@@ -167,18 +185,69 @@ class LocationBasedStaffService {
             return { jobs: [], staffLocation };
         }
 
-        // --- Step 2: Build destinations array for batch API call ---
-        const destinations = validDuties.map(duty => ({
-            id: duty._id.toString(),
-            latitude: duty.hospital.coordinates.coordinates.latitude,
-            longitude: duty.hospital.coordinates.coordinates.longitude
+        // --- Step 2: Haversine pre-filter + deduplicate hospitals ---
+        // Haversine = straight-line distance (pure JS, no API call)
+        // Straight-line is always <= driving distance
+        // So if straight-line > 60km → driving is definitely > 50km → skip entirely
+        const HAVERSINE_THRESHOLD_KM = 60;
+        const nearbyHospitals = new Map();  // hospitalId → { lat, lng } — confirmed nearby
+        const skippedHospitals = new Set(); // hospitalId — confirmed too far
+        const nearbyDuties = [];
+        let haversineSkippedCount = 0;
+
+        for (const duty of validDuties) {
+            const hospitalId = duty.hospital._id.toString();
+
+            // Already confirmed far — skip without recalculating
+            if (skippedHospitals.has(hospitalId)) {
+                haversineSkippedCount++;
+                continue;
+            }
+
+            // Already confirmed nearby — no recalculation needed
+            if (nearbyHospitals.has(hospitalId)) {
+                nearbyDuties.push(duty);
+                continue;
+            }
+
+            // First time seeing this hospital — run haversine check
+            const hospitalLat = duty.hospital.coordinates.coordinates.latitude;
+            const hospitalLng = duty.hospital.coordinates.coordinates.longitude;
+            const straightLine = this.haversineDistance(
+                staffLocation.latitude, staffLocation.longitude,
+                hospitalLat, hospitalLng
+            );
+
+            if (straightLine > HAVERSINE_THRESHOLD_KM) {
+                console.log(`[AvailableJobs] Haversine skip: ${duty.hospital.hospitalLegalName} (${duty.hospital.city}) — ${straightLine.toFixed(1)}km straight-line > ${HAVERSINE_THRESHOLD_KM}km threshold`);
+                skippedHospitals.add(hospitalId);
+                haversineSkippedCount++;
+                continue;
+            }
+
+            nearbyHospitals.set(hospitalId, { lat: hospitalLat, lng: hospitalLng });
+            nearbyDuties.push(duty);
+        }
+
+        console.log(`[AvailableJobs] After haversine pre-filter: ${nearbyDuties.length} duties | ${nearbyHospitals.size} unique nearby hospitals | ${haversineSkippedCount} duties skipped`);
+
+        if (nearbyDuties.length === 0) {
+            console.log(`[AvailableJobs] No nearby duties — returning empty result`);
+            return { jobs: [], staffLocation };
+        }
+
+        // --- Step 3: Build destinations — 1 entry per unique hospital (not per duty) ---
+        const destinations = Array.from(nearbyHospitals.entries()).map(([id, coords]) => ({
+            id,                     // hospitalId as key — result looked up by hospitalId below
+            latitude: coords.lat,
+            longitude: coords.lng
         }));
 
         const batchSize = 25;
         const expectedApiCalls = Math.ceil(destinations.length / batchSize);
-        console.log(`[AvailableJobs] Google Maps batch call — destinations: ${destinations.length} | batch size: ${batchSize} | expected API calls: ${expectedApiCalls}`);
+        console.log(`[AvailableJobs] Google Maps batch call — unique hospitals: ${destinations.length} | duties: ${nearbyDuties.length} | expected API calls: ${expectedApiCalls}`);
 
-        // --- Step 3: Single batch call instead of N individual calls ---
+        // --- Step 4: Single batch call on unique hospitals only ---
         const { resultMap, totalApiCalls } = await geocodingService.calculateBatchDistanceAndETA(
             staffLocation.latitude,
             staffLocation.longitude,
@@ -187,16 +256,17 @@ class LocationBasedStaffService {
 
         console.log(`[AvailableJobs] Google Maps API calls made: ${totalApiCalls} | successful results: ${resultMap.size}/${destinations.length}`);
 
-        // --- Step 4: Filter within 50km radius and build final result ---
+        // --- Step 5: Filter within 50km and build final result ---
         const jobsWithDistance = [];
         let outsideRadiusCount = 0;
         let noResultCount = 0;
 
-        for (const duty of validDuties) {
-            const distanceResult = resultMap.get(duty._id.toString());
+        for (const duty of nearbyDuties) {
+            const hospitalId = duty.hospital._id.toString();
+            const distanceResult = resultMap.get(hospitalId); // lookup by hospitalId
 
             if (!distanceResult) {
-                console.log(`[AvailableJobs] No distance result for duty ${duty._id} — skipping`);
+                console.log(`[AvailableJobs] No distance result for hospital ${duty.hospital.hospitalLegalName} — skipping`);
                 noResultCount++;
                 continue;
             }
@@ -217,13 +287,15 @@ class LocationBasedStaffService {
         // Sort by distance (closest first)
         jobsWithDistance.sort((a, b) => a.distance - b.distance);
 
-        console.log(`[AvailableJobs] ✓ Summary:`);
-        console.log(`  DB fetched       : ${duties.length}`);
-        console.log(`  Valid (pre-filter): ${validDuties.length}`);
-        console.log(`  Within 50km      : ${jobsWithDistance.length}`);
-        console.log(`  Outside 50km     : ${outsideRadiusCount}`);
-        console.log(`  No API result    : ${noResultCount}`);
-        console.log(`  Google Maps calls: ${totalApiCalls}`);
+        console.log(`[AvailableJobs] Summary:`);
+        console.log(`  DB fetched            : ${duties.length}`);
+        console.log(`  Valid (pre-filter)    : ${validDuties.length}`);
+        console.log(`  Haversine skipped     : ${haversineSkippedCount} duties (hospital > ${HAVERSINE_THRESHOLD_KM}km straight-line)`);
+        console.log(`  Unique hospitals sent : ${destinations.length}`);
+        console.log(`  Within 50km           : ${jobsWithDistance.length}`);
+        console.log(`  Outside 50km          : ${outsideRadiusCount}`);
+        console.log(`  No API result         : ${noResultCount}`);
+        console.log(`  Google Maps calls     : ${totalApiCalls}`);
 
         return {
             jobs: jobsWithDistance,
@@ -231,6 +303,8 @@ class LocationBasedStaffService {
         };
     }
 
+
+    
     // Helper method to get staff current location
     async getStaffCurrentLocation(staffId) {
         try {
