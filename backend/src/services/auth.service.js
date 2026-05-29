@@ -346,7 +346,7 @@ class AuthService {
                     type: 'set', 
                     key: `blacklist:${token}`, 
                     value: true, 
-                    ttl: 86400 // 24 hours
+                    ttl: 604800 // 7 days — must match JWT_EXPIRES_IN to prevent reuse after logout
                 },
                 ...(userId ? [{ type: 'del', key: `session:${userId}` }] : [])
             ]);

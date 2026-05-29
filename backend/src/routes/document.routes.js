@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const upload = require("../middleware/upload.middleware");
+const { validateMagicBytes } = require("../middleware/upload.middleware");
 const controller = require("../controllers/document.controller");
 const { protect } = require("../middleware/auth.middleware");
 const { 
@@ -14,8 +15,9 @@ const {
 router.post(
     "/upload",
     protect,
-    upload.any(),
-    validateDocumentUpload,
+    upload.any(),           // 1. multer: size limit + MIME type header check
+    validateMagicBytes,     // 2. magic bytes: verify actual file content matches claimed type
+    validateDocumentUpload, // 3. business rules: allowed document types per role
     controller.uploadDocument
 );
 
