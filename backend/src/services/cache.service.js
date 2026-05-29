@@ -38,8 +38,24 @@ class CacheService {
     async invalidatePattern(pattern) {
         try {
             const client = await redisClient.getClientAsync();
-            const keys = await client.keys(pattern);
+
+            // SCAN instead of KEYS — non-blocking cursor iteration.
+            // KEYS blocks the entire Redis server for the full scan duration.
+            // SCAN processes a small batch per call, keeping Redis responsive.
+            const keys = [];
+            let cursor = '0';
+            do {
+                const [nextCursor, batch] = await client.scan(
+                    cursor,
+                    'MATCH', pattern,
+                    'COUNT', 100
+                );
+                cursor = nextCursor;
+                keys.push(...batch);
+            } while (cursor !== '0');
+
             if (keys.length > 0) {
+                // DEL accepts multiple keys — one round trip regardless of count
                 await client.del(...keys);
             }
             return keys.length;

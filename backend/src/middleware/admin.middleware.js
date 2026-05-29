@@ -605,7 +605,7 @@ const validateHospitalListQuery = (req, res, next) => {
     }
 
     // Validate allowed query parameters only
-    const allowedParams = ['search', 'status', 'city', 'page', 'limit'];
+    const allowedParams = ['search', 'status', 'city', 'location', 'page', 'limit'];
     const receivedParams = Object.keys(req.query);
 
     // Check for unexpected parameters
@@ -617,7 +617,7 @@ const validateHospitalListQuery = (req, res, next) => {
         });
     }
 
-    const { search, status, city, page = 1, limit = 10 } = req.query;
+    const { search, status, city, location, page = 1, limit = 10 } = req.query;
 
     // Validate status parameter
     const allowedStatuses = ['pending', 'verified', 'rejected'];
@@ -644,6 +644,22 @@ const validateHospitalListQuery = (req, res, next) => {
         });
     }
 
+    // Validate location parameter (searches city, state, pincode, currentAddress)
+    if (location) {
+        if (typeof location !== 'string' || location.trim().length < 2) {
+            return res.status(400).json({
+                success: false,
+                message: 'Location parameter must be a string with at least 2 characters'
+            });
+        }
+        if (location.trim().length > 100) {
+            return res.status(400).json({
+                success: false,
+                message: 'Location parameter cannot exceed 100 characters'
+            });
+        }
+    }
+
     // Validate page parameter
     const pageNum = parseInt(page);
     if (isNaN(pageNum) || pageNum < 1) {
@@ -666,6 +682,7 @@ const validateHospitalListQuery = (req, res, next) => {
         search: search || null,
         status: status || null,
         city: city || null,
+        location: location?.trim() || null,
         page: pageNum,
         limit: limitNum
     };
@@ -686,7 +703,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
     }
 
     // Validate allowed query parameters only
-    const allowedParams = ['search', 'role', 'availability', 'status', 'page', 'limit'];
+    const allowedParams = ['search', 'role', 'availability', 'status', 'location', 'page', 'limit'];
     const receivedParams = Object.keys(req.query);
 
     // Check for unexpected parameters
@@ -698,7 +715,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
         });
     }
 
-    const { search, role, availability, status, page = 1, limit = 10 } = req.query;
+    const { search, role, availability, status, location, page = 1, limit = 10 } = req.query;
 
     // Validate role parameter
     const allowedRoles = [
@@ -745,6 +762,22 @@ const validateMedicalStaffListQuery = (req, res, next) => {
         });
     }
 
+    // Validate location parameter (searches city, state, pincode, currentAddress)
+    if (location) {
+        if (typeof location !== 'string' || location.trim().length < 2) {
+            return res.status(400).json({
+                success: false,
+                message: 'Location parameter must be a string with at least 2 characters'
+            });
+        }
+        if (location.trim().length > 100) {
+            return res.status(400).json({
+                success: false,
+                message: 'Location parameter cannot exceed 100 characters'
+            });
+        }
+    }
+
     // Validate page parameter
     const pageNum = parseInt(page);
     if (isNaN(pageNum) || pageNum < 1) {
@@ -768,6 +801,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
         role: role || null,
         availability: availability || null,
         status: status || null,
+        location: location?.trim() || null,
         page: pageNum,
         limit: limitNum
     };

@@ -56,6 +56,7 @@ router.patch(
 
 router.post(
     '/duty/status-history',
+    authorize('staff', 'hospital', 'admin'),
     validateDutyStatusHistory,
     dutyController.getDutyStatusHistory
 );
@@ -84,7 +85,7 @@ router.get('/duties/active-duties', authorize('hospital'), requireHospitalVerifi
  
 router.get('/duties/duty-route-map/:dutyId', authorize('hospital'), requireHospitalVerification, validateHospitalDutyRouteMap, dutyController.getHospitalDutyRouteMap);
 
-router.get('/duties/:id', validateObjectId('id'), dutyController.getDutyDetail);
+router.get('/duties/:id', validateObjectId('id'), authorize('staff', 'hospital', 'admin'), dutyController.getDutyDetail);
 
 router.post('/duties/:id/route', authorize('staff'), requireStaffVerificationandisAvailable, dutyController.getDutyRoute);
 
