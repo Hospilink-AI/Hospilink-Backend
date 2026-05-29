@@ -119,11 +119,11 @@ class AuthService {
                     { type: 'del', key: `tempuser:${emailLower}` },
                     { type: 'set', key: `user:exists:${emailLower}`, value: true, ttl: 3600 },
                     { type: 'set', key: `user:${emailLower}`, value: { id: user._id, email: user.email, role: user.role, isEmailVerified: user.isEmailVerified }, ttl: 300 },
-                    { 
-                        type: 'set', 
-                        key: `session:${user._id}`, 
-                        value: { id: user._id, email: user.email, role: user.role }, 
-                        ttl: 86400 
+                    {
+                        type: 'set',
+                        key: `session:${user._id}`,
+                        value: { id: user._id, name: user.name, email: user.email, role: user.role },
+                        ttl: 86400
                     }
                 ]);
 
@@ -241,11 +241,11 @@ class AuthService {
 
         // Use pipeline for cache operations
         await cacheService.pipeline([
-            { 
-                type: 'set', 
-                key: `session:${user._id}`, 
-                value: { id: user._id, email: user.email, role: user.role }, 
-                ttl: 86400 
+            {
+                type: 'set',
+                key: `session:${user._id}`,
+                value: { id: user._id, name: user.name, email: user.email, role: user.role },
+                ttl: 86400
             },
             { 
                 type: 'set', 

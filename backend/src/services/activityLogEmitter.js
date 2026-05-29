@@ -299,7 +299,7 @@ class ActivityLogEmitter {
         const userId = user._id || user.id;
         const actor = {
             userId,
-            name: user.name,
+            name: user.name || user.email || 'Unknown',
             role: user.role,
             email: user.email
         };
