@@ -83,22 +83,6 @@ exports.adminLogout = asyncHandler(async (req, res) => {
 
 
 
-// show all hospitals GET /api/admin/hospitals
-exports.listHospitals = asyncHandler(async (req, res) => {
-    const hospitals = await Hospital.find({})
-        .populate('user', 'name email')
-        .select('hospitalLegalName currentAddress location staffCount user coordinates')
-        .sort({ hospitalLegalName: 1 });
-
-    res.status(200).json({
-        success: true,
-        count: hospitals.length,
-        data: hospitals
-    });
-});
-
-
-
 // create duty for hospital from admin panelPOST /api/admin/duties
 exports.createDutyForHospital = asyncHandler(async (req, res) => {
     const {
