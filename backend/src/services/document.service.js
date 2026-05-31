@@ -9,6 +9,7 @@ const notificationEmitter = require('./notificationEmitter');
 const idfyService = require("./idfy.service");
 const { extractTextFromPDF } = require("./pdf.service");
 const { isDocumentExpired } = require("../utils/documentExpiryValidator");
+const logger = require('../utils/logger');
 
 const getAllowedDocs = (role) => {
     const config = requiredDocsConfig[role];
@@ -111,7 +112,7 @@ const syncDocumentsUploadedFlag = async (userId, userRole) => {
         // Invalidate profile cache so next GET /profile/me returns fresh data
         await cacheService.invalidateProfile(userObjectId.toString(), userRole);
 
-        console.log(`[syncDocumentsUploadedFlag] userId=${userId} role=${userRole} uploaded=${uploadedTypes} flag=${isDocumentsUploaded}`);
+        console.log(`[syncDocumentsUploadedFlag] userId=${userId} role=${userRole} flag=${isDocumentsUploaded}`);
     } catch (err) {
         const logger = require('../utils/logger');
         logger.error(`syncDocumentsUploadedFlag failed userId=${userId} role=${userRole}: ${err.message}`);
@@ -185,7 +186,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             if (parserMap[documentType]) {
                 extractedData = parserMap[documentType](extractedText);
             }
-            console.log("EXTRACTED DATA:", extractedData);
+            // Note: extractedData intentionally not logged — contains PII (Aadhaar, PAN, DOB)
             // EXPIRY VALIDATION
 
             const expirySupportedDocs = [
@@ -212,10 +213,10 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     verifiedAt: new Date()
                 };
 
-                console.log("DOCUMENT EXPIRED");
+                logger.info(`Document rejected: expired type=${documentType}`);
             }
 
-            // Hospital Certificate Verification 
+            // Hospital Certificate Verification
             if (
                 verificationStatus !== "rejected" &&
                 (
@@ -233,7 +234,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         city: extractedData.location || extractedData.city
                     });
 
-                    console.log("HOSPITAL VERIFICATION RESULT:", result);
+                    logger.info(`Hospital verification result: status=${result.status} source=${result.source} type=${documentType}`);
 
                     verificationStatus = result.status;
 
@@ -281,8 +282,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             name: extractedData.name,
                             dob: formattedDOB
                         });
-
-                        console.log("IDFY PAN RESPONSE:", idfyResponse);
+                        // IDFY response not logged — may contain PII
                     }
 
                     // GST
@@ -293,8 +293,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         idfyResponse = await idfyService.verifyGST(
                             extractedData.registrationNumber
                         );
-
-                        console.log("IDFY GST RESPONSE:", idfyResponse);
+                        // IDFY response not logged — may contain PII
                     }
 
                     // CIN
@@ -305,12 +304,11 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         idfyResponse = await idfyService.verifyCIN(
                             extractedData.cin
                         );
-
-                        console.log("IDFY CIN RESPONSE:", idfyResponse);
+                        // IDFY response not logged — may contain PII
                     }
 
                     if (idfyResponse && idfyResponse.request_id) {
-                        console.log(" Stored requestId:", idfyResponse.request_id);
+                        logger.info(`IDFY task queued: type=${documentType} requestId=${idfyResponse.request_id}`);
 
                         verificationMeta = {
                             provider: "idfy",
@@ -325,7 +323,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             documentType
                         );
                     } else {
-                        console.log(" IDFY request_id missing:", idfyResponse);
+                        logger.warn(`IDFY request_id missing for type=${documentType}`);
                     }
 
                 } catch (err) {
@@ -344,9 +342,39 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     const idfyResponse = await idfyService.verifyAadhaarDigilocker(referenceId);
 
                     if (idfyResponse && idfyResponse.request_id) {
+                        logger.info(`Aadhaar Digilocker task queued: requestId=${idfyResponse.request_id}`);
 
-                        console.log("AADHAAR REQUEST ID:", idfyResponse.request_id);
-                        console.log("REFERENCE ID:", referenceId);
+                        // Check if redirect_url is directly in the initial response
+                        let redirectUrl = idfyResponse.redirect_url || idfyResponse.redirect_uri || null;
+
+                        if (!redirectUrl) {
+                            // Poll up to 3 times with short delays — if IDFY fails fast, stop early
+                            for (let attempt = 1; attempt <= 3; attempt++) {
+                                await new Promise(res => setTimeout(res, 1500));
+                                const taskResult = await idfyService.getTaskResult(idfyResponse.request_id);
+                                const task = taskResult?.[0];
+
+                                // If IDFY already failed, no point continuing
+                                if (task?.status === "failed") {
+                                    logger.warn(`Aadhaar Digilocker task failed: ${task.error} - ${task.message}`);
+                                    break;
+                                }
+
+                                const sourceOutput = task?.result?.source_output;
+                                redirectUrl =
+                                    task?.result?.redirect_url ||
+                                    task?.result?.redirect_uri ||
+                                    sourceOutput?.redirect_url ||
+                                    sourceOutput?.redirect_uri ||
+                                    task?.redirect_url ||
+                                    null;
+
+                                if (redirectUrl) {
+                                    logger.info(`Aadhaar redirect_url obtained on attempt ${attempt}`);
+                                    break;
+                                }
+                            }
+                        }
 
                         verificationMeta = {
                             provider: "idfy-digilocker",
@@ -354,13 +382,14 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             referenceId: referenceId,
                             status: "initiated",
                             type: "aadhaar-card",
+                            redirectUrl,
                             createdAt: new Date()
                         };
 
                     }
 
                 } catch (err) {
-                    console.error("Aadhaar verification error:", err.message);
+                    logger.error(`Aadhaar verification error: ${err.message}`);
                 }
             }
 
@@ -390,9 +419,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 try {
                     qrRaw = await extractQRFromBuffer(file.buffer);
                     qrType = detectQRType(qrRaw);
-
-                    console.log("QR RAW:", qrRaw);
-                    console.log("QR TYPE:", qrType);
+                    // QR raw data not logged — may contain encoded PII
 
                     // URL QR
                     if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "url") {
@@ -431,7 +458,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     else if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "base64") {
 
                         const decoded = decodeBase64QR(qrRaw);
-                        console.log("DECODED QR:", decoded);
+                        // Decoded QR not logged — contains registration numbers
 
                         let ocrReg = extractedData.registrationNumber;
 
@@ -496,15 +523,16 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
     });
     await userDocs.save();
 
-    // Sync the isDocumentsUploaded flag non-blocking
-    syncDocumentsUploadedFlag(user._id, user.role).catch(() => { });
+    // Sync the isDocumentsUploaded flag — awaited so cache is invalidated
+    // before the response is returned to the client
+    await syncDocumentsUploadedFlag(user._id, user.role);
 
     let redirectUrl = null;
 
-    if (verificationMeta?.requestId && documentType === "aadhaar-card") {
-        const result = await idfyService.getTaskResult(verificationMeta.requestId);
-
-        redirectUrl = result?.[0]?.result?.source_output?.redirect_url || null;
+    if (documentType === "aadhaar-card") {
+        // redirectUrl is stored in verificationMeta from the initial IDFY response.
+        // No need for a separate getTaskResult call — the URL is available immediately.
+        redirectUrl = verificationMeta?.redirectUrl || null;
     }
 
     return {
@@ -566,12 +594,20 @@ const processIdfyResultAsync = async (userDocId, requestId, documentType) => {
 
                 await userDoc.save();
 
-                console.log(" IDFY verified (event-based)");
+                // Invalidate profile cache so GET /profile reflects the new status
+                try {
+                    const cacheService = require('./cache.service');
+                    await cacheService.invalidateProfile(userDoc.userId.toString(), userDoc.userRole);
+                } catch (cacheErr) {
+                    console.error('Failed to invalidate profile cache after IDFY result:', cacheErr.message);
+                }
+
+                logger.info(`IDFY verified (event-based): type=${documentType}`);
             }
 
             if (attempts >= maxAttempts) {
                 clearInterval(interval);
-                console.log(" Max attempts reached for IDFY");
+                logger.warn(`IDFY max polling attempts reached for requestId=${requestId}`);
             }
 
         } catch (err) {
@@ -696,6 +732,14 @@ exports.verifyDocument = async (documentId, adminId) => {
 
     await docRecord.save();
 
+    // Invalidate profile cache so GET /profile reflects the verified status
+    try {
+        const cacheService = require('./cache.service');
+        await cacheService.invalidateProfile(docRecord.userId._id.toString(), docRecord.userRole);
+    } catch (cacheErr) {
+        console.error('Failed to invalidate profile cache after document verification:', cacheErr.message);
+    }
+
     const result = {
         documentId: document._id,
         documentType: document.documentType,
@@ -751,6 +795,14 @@ exports.rejectDocument = async (documentId, adminId, reason) => {
     document.updatedAt = new Date();
 
     await docRecord.save();
+
+    // Invalidate profile cache so GET /profile reflects the rejected status
+    try {
+        const cacheService = require('./cache.service');
+        await cacheService.invalidateProfile(docRecord.userId._id.toString(), docRecord.userRole);
+    } catch (cacheErr) {
+        console.error('Failed to invalidate profile cache after document rejection:', cacheErr.message);
+    }
 
     const result = {
         documentId: document._id,
@@ -855,8 +907,9 @@ exports.deleteDocument = async (user, documentId) => {
 
     await docRecord.save();
 
-    // Sync the isDocumentsUploaded flag non-blocking
-    syncDocumentsUploadedFlag(user._id, user.role).catch(() => { });
+    // Sync the isDocumentsUploaded flag — awaited so cache is invalidated
+    // before the response is returned to the client
+    await syncDocumentsUploadedFlag(user._id, user.role);
 
     return true;
 };

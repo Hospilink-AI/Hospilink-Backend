@@ -72,6 +72,33 @@ const errorHandler = (err, req, res, next) => {
     }
 };
 
+// Fields that must never appear in logs
+const SENSITIVE_BODY_FIELDS = [
+    'password',
+    'newPassword',
+    'confirmPassword',
+    'currentPassword',
+    'otp',
+    'token',
+    'secret',
+    'apiKey',
+    'privateKey',
+];
+
+/**
+ * Returns a shallow copy of body with sensitive fields replaced by '[REDACTED]'.
+ * Handles null/non-object bodies safely.
+ */
+const sanitizeBody = (body) => {
+    if (body === null || body === undefined) return body;
+    if (typeof body !== 'object' || Array.isArray(body)) return body;
+    const sanitized = { ...body };
+    for (const field of SENSITIVE_BODY_FIELDS) {
+        if (field in sanitized) sanitized[field] = '[REDACTED]';
+    }
+    return sanitized;
+};
+
 // Function to log errors
 const logError = (err, req) => {
     const errorLog = {
@@ -84,10 +111,10 @@ const logError = (err, req) => {
         errorMessage: err.message,
         statusCode: err.statusCode,
         stack: err.stack,
-        body: req.body,
+        body: sanitizeBody(req.body),
         params: req.params,
         query: req.query,
-        user: req.user || 'Anonymous'
+        user: req.user ? { id: req.user._id || req.user.id, role: req.user.role } : 'Anonymous'
     };
 
     if (err.statusCode >= 500) {

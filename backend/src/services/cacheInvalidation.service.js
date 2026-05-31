@@ -188,13 +188,14 @@ class CacheInvalidationService {
             
             // Fetch fresh data from database
             const staff = await MedicalStaff.findOne({ user: userId })
-                .select('verificationStatus rejectionReason')
+                .select('verificationStatus rejectionReason isAvailable')
                 .lean();
                 
             if (staff) {
                 const freshData = {
-                    status: staff.verificationStatus,
-                    rejectionReason: staff.rejectionReason
+                    verificationStatus: staff.verificationStatus,
+                    rejectionReason: staff.rejectionReason,
+                    isAvailable: staff.isAvailable
                 };
                 
                 // Set fresh cache with 5-minute TTL
