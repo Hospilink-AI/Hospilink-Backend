@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 # Install build tools needed to compile native modules (canvas, sharp)
 RUN apk add --no-cache \
@@ -16,7 +16,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 # ---- Final image ----
-FROM node:20-alpine
+FROM node:24-alpine
 
 # Runtime libs for canvas/sharp + chromium for puppeteer + curl for health checks
 RUN apk add --no-cache \
