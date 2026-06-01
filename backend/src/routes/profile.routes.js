@@ -10,8 +10,7 @@ const {
     validateProfileUpdate,
     validateStaffAvailability,
     validateNearbyStaff,
-    validateDashboardLocationPermission,
-    validateDashboardLocationUpdate
+    validateDashboardLocationPermission
 } = require('../middleware/validation.middleware');
 const { staffAvailabilityRateLimit } = require('../middleware/rateLimit.middleware');
 const upload = require('../middleware/upload.middleware');
@@ -82,16 +81,12 @@ router.post('/dashboard/location-permission',
     dashboardController.checkDashboardLocationPermission
 );
 
-router.put('/dashboard/update-location',
-    authorize('staff'),
-    validateDashboardLocationUpdate,
-    dashboardController.updateCurrentLocation
-);
-
 router.get('/dashboard/location-status',
     authorize('staff'),
     dashboardController.getLocationStatus
 );
+
+
 
 // Delete profile picture
 router.delete(
