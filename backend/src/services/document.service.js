@@ -186,6 +186,118 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 extractedData = parserMap[documentType](extractedText);
             }
             console.log("EXTRACTED DATA:", extractedData);
+
+            //Parse
+            if (parserMap[documentType]) {
+                extractedData = parserMap[documentType](extractedText);
+            }
+
+            console.log("EXTRACTED DATA:", extractedData);
+
+            // ==========================================
+            // DOCUMENT TYPE VALIDATION
+            // ==========================================
+
+            if (documentType === "aadhaar-card") {
+
+                const upperText = extractedText.toUpperCase();
+
+                const isAadhaar =
+                    upperText.includes("UNIQUE IDENTIFICATION AUTHORITY OF INDIA") ||
+                    upperText.includes("AADHAAR") ||
+                    upperText.includes("GOVERNMENT OF INDIA");
+
+                if (!isAadhaar) {
+
+                    await deleteFromS3(key);
+
+                    throw new Error(
+                        "Uploaded file is not an Aadhaar Card. Please upload a valid Aadhaar card."
+                    );
+                }
+
+                const aadhaarNumber =
+                    extractedData?.aadhaarNumber?.replace(/\s/g, "");
+
+                if (
+                    !aadhaarNumber ||
+                    !/^\d{12}$/.test(aadhaarNumber)
+                ) {
+                    await deleteFromS3(key);
+
+                    throw new Error(
+                        "Invalid Aadhaar Card uploaded. Please upload a valid Aadhaar card."
+                    );
+                }
+            }
+
+            if (documentType === "pan-card") {
+
+                const upperText = extractedText.toUpperCase();
+
+                const isPanCard =
+                    upperText.includes("INCOME TAX DEPARTMENT") ||
+                    upperText.includes("PERMANENT ACCOUNT NUMBER");
+
+                if (!isPanCard) {
+
+                    await deleteFromS3(key);
+
+                    throw new Error(
+                        "Uploaded file is not a PAN Card. Please upload a valid PAN card."
+                    );
+                }
+
+                const panNumber =
+                    extractedData?.panNumber?.replace(/\s/g, "").toUpperCase();
+
+                if (
+                    !panNumber ||
+                    !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber)
+                ) {
+
+                    await deleteFromS3(key);
+
+                    throw new Error(
+                        "Invalid PAN Card uploaded. Please upload a valid PAN card."
+                    );
+                }
+            }
+
+            if (documentType === "gst-certificate") {
+
+                const gstNumber =
+                    extractedData?.registrationNumber?.replace(/\s/g, "").toUpperCase();
+
+                if (
+                    !gstNumber ||
+                    !/^\d{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]{3}$/.test(gstNumber)
+                ) {
+                    await deleteFromS3(key);
+
+                    throw new Error(
+                        "Invalid GST Certificate uploaded. Please upload a valid GST certificate."
+                    );
+                }
+            }
+
+            if (documentType === "cin-certificate") {
+
+                const cin =
+                    extractedData?.cin?.replace(/\s/g, "").toUpperCase();
+
+                if (
+                    !cin ||
+                    !/^[A-Z]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$/.test(cin)
+                ) {
+                    await deleteFromS3(key);
+
+                    throw new Error(
+                        "Invalid CIN Certificate uploaded. Please upload a valid Certificate of Incorporation."
+                    );
+                }
+            }
+
             // EXPIRY VALIDATION
 
             const expirySupportedDocs = [
@@ -424,6 +536,30 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             type: "aadhaar-card",
                             createdAt: new Date()
                         };
+                        let redirectUrl = null;
+
+                        for (let i = 0; i < 5; i++) {
+
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+
+                            const taskResult = await idfyService.getTaskResult(
+                                idfyResponse.request_id
+                            );
+
+                            console.log(
+                                "AADHAAR POLL:",
+                                JSON.stringify(taskResult, null, 2)
+                            );
+
+                            redirectUrl =
+                                taskResult?.[0]?.result?.source_output?.redirect_url ||
+                                taskResult?.[0]?.result?.redirect_url ||
+                                taskResult?.[0]?.source_output?.redirect_url;
+
+                            if (redirectUrl) {
+                                break;
+                            }
+                        }
 
                     }
 
@@ -656,9 +792,21 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
     let redirectUrl = null;
 
     if (verificationMeta?.requestId && documentType === "aadhaar-card") {
-        const result = await idfyService.getTaskResult(verificationMeta.requestId);
 
-        redirectUrl = result?.[0]?.result?.source_output?.redirect_url || null;
+        const result = await idfyService.getTaskResult(
+            verificationMeta.requestId
+        );
+
+        console.log(
+            "AADHAAR TASK RESULT:",
+            JSON.stringify(result, null, 2)
+        );
+
+        redirectUrl =
+            result?.[0]?.result?.source_output?.redirect_url ||
+            result?.[0]?.result?.redirect_url ||
+            result?.[0]?.source_output?.redirect_url ||
+            null;
     }
 
     return {
