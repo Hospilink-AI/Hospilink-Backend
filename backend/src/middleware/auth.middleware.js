@@ -15,11 +15,15 @@ exports.protect = asyncHandler(async (req, res, next) => {
         throw new UnauthorizedError('Access denied. No token provided.');
     }
     
-    // Check if token is blacklisted
-    const blacklistKey = `blacklist:${token}`;
-    const isBlacklisted = await cacheService.get(blacklistKey);
-    if (isBlacklisted) {
-        throw new UnauthorizedError('Token has been invalidated. Please login again.');
+    // Fail-closed: if Redis is unavailable, deny access rather than risk accepting a blacklisted token
+    try {
+        const isBlacklisted = await cacheService.getStrict(`blacklist:${token}`);
+        if (isBlacklisted) {
+            throw new UnauthorizedError('Token has been invalidated. Please login again.');
+        }
+    } catch (err) {
+        if (err instanceof UnauthorizedError) throw err;
+        throw new UnauthorizedError('Authentication service unavailable. Please try again.');
     }
     
     try {
