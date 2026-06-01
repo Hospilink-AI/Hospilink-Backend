@@ -17,16 +17,16 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: |
             backend/package-lock.json
             agent/package-lock.json
 
       - name: Install backend dependencies
-        run: npm ci
+        run: npm install --omit=optional
         working-directory: backend
 
       - name: Install agent dependencies
-        run: npm ci
+        run: npm install --omit=optional
         working-directory: agent

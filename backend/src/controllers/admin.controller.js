@@ -68,36 +68,17 @@ exports.adminResendOTP = asyncHandler(async (req, res) => {
 
 // Admin logout - POST /api/admin/logout
 exports.adminLogout = asyncHandler(async (req, res) => {
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization.split(' ')[1]; 
     const userId = req.user?.id || req.user?._id;
 
-    // Log logout before processing
+    const result = await AdminAuthService.logout(token, userId);
+
     if (req.user) {
         activityLogEmitter.logUserLogout(req.user, req)
             .catch(err => console.error('Error logging logout:', err));
     }
 
-    const result = await AdminAuthService.logout(token, userId);
-    res.status(200).json({
-        success: true,
-        ...result
-    });
-});
-
-
-
-// show all hospitals GET /api/admin/hospitals
-exports.listHospitals = asyncHandler(async (req, res) => {
-    const hospitals = await Hospital.find({})
-        .populate('user', 'name email')
-        .select('hospitalLegalName currentAddress location staffCount user coordinates')
-        .sort({ hospitalLegalName: 1 });
-
-    res.status(200).json({
-        success: true,
-        count: hospitals.length,
-        data: hospitals
-    });
+    res.status(200).json({ success: true, ...result });
 });
 
 

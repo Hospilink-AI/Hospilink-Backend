@@ -13,6 +13,7 @@ const {
 } = require('../utils/helpers');
 const geocodingService = require('./geocoding.service');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
+const { ALLOWED_ROLES } = require('../utils/constants');
 const User = require('../models/User');
 const {
     generateEarningsPDF,
@@ -22,6 +23,7 @@ const DashboardService = require('./dashboard.service');
 const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
 const notificationEmitter = require('./notificationEmitter');
+const s3Service = require('./s3.service');
 
 // Per-duty Redis lock TTL in seconds — prevents thundering herd
 const DUTY_ACCEPT_LOCK_TTL = 10;
@@ -239,7 +241,7 @@ class DutyService {
             Duty.find(match)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName averageRating totalRatings',
+                    select: 'fullName averageRating totalRatings profilePicture.s3Key',
                     populate: { path: 'user', select: 'name email' }
                 })
                 .select('staffRole startTime endTime date isOvernightDuty endDate status assignedTo totalPayment offeredRate completedAt cancelledAt expiredAt incompleteAt cancellation')
@@ -249,28 +251,38 @@ class DutyService {
             Duty.countDocuments(match)
         ]);
     
-        const formatted = duties.map(duty => {
+        const formatted = await Promise.all(duties.map(async (duty) => {
             const staff = duty.assignedTo;
             const hoursCompleted = calculateDutyDuration(
                 duty.date, duty.startTime, duty.endTime,
                 duty.isOvernightDuty, duty.endDate
             );
-    
-            // Format hours label e.g. "8 Hours" or "1.5 Hours"
-            const hoursLabel = hoursCompleted === 1
-                ? '1 Hour'
-                : `${Number.isInteger(hoursCompleted) ? hoursCompleted : hoursCompleted.toFixed(1)} Hours`;
-    
+
+            // Format duration using formatDuration helper 
+            const hoursLabel = formatDuration(hoursCompleted);
+
             // Get the relevant timestamp based on status
             const statusTimestamp = duty.completedAt || duty.cancelledAt || duty.expiredAt || duty.incompleteAt;
-    
+
+            // Generate presigned URL for profile picture if s3Key exists
+            let profilePictureUrl = null;
+            if (staff?.profilePicture?.s3Key) {
+                try {
+                    profilePictureUrl = await s3Service.generatePreSignedURL(staff.profilePicture.s3Key);
+                } catch (error) {
+                    console.error('Error generating presigned URL for profile picture:', error);
+                    profilePictureUrl = null;
+                }
+            }
+
             return {
                 dutyId: duty._id,
                 staff: staff ? {
                     name: staff.fullName || staff.user?.name || '—',
                     email: staff.user?.email || '—',
                     averageRating: staff.averageRating ?? 0,
-                    totalRatings: staff.totalRatings ?? 0
+                    totalRatings: staff.totalRatings ?? 0,
+                    profilePicture: profilePictureUrl
                 } : null,
                 staffRole: duty.staffRole,
                 shiftDuration: `${duty.startTime} - ${duty.endTime}`,
@@ -282,7 +294,7 @@ class DutyService {
                 statusTimestamp: statusTimestamp,
                 cancellation: duty.cancellation || null
             };
-        });
+        }));
     
         return {
             duties: formatted,
@@ -488,49 +500,88 @@ class DutyService {
             return upcomingDuties;
         }
 
-        console.log(`Using ${locationSource} location for upcoming duties - staff ${userId}:`, { lat: staffLat, lng: staffLng });
+        console.log(`[UpcomingDuties] Using ${locationSource} location for staff ${userId}: lat=${staffLat}, lng=${staffLng}`);
 
-        // Calculate distance for each upcoming duty
-        const dutiesWithDistance = [];
+        // --- Step 1: Separate duties with and without coordinates ---
+        const dutiesWithCoords = [];
+        const dutiesWithoutCoords = [];
+
         for (const duty of upcomingDuties) {
-            if (!duty.hospital.coordinates ||
-                !duty.hospital.coordinates.coordinates ||
-                !duty.hospital.coordinates.coordinates.latitude ||
-                !duty.hospital.coordinates.coordinates.longitude) {
-                dutiesWithDistance.push({
-                    ...duty.toObject(),
-                    distance: null,
-                    duration: null
-                });
-                continue;
-            }
-
-            const hospitalLat = duty.hospital.coordinates.coordinates.latitude;
-            const hospitalLng = duty.hospital.coordinates.coordinates.longitude;
-
-            try {
-                const distanceInfo = await geocodingService.calculateDistanceAndETA(
-                    staffLat, staffLng, hospitalLat, hospitalLng
-                );
-
-                dutiesWithDistance.push({
-                    ...duty.toObject(),
-                    distance: distanceInfo.distance,
-                    duration: distanceInfo.duration,
-                    distanceText: distanceInfo.distanceText,
-                    durationText: distanceInfo.durationText,
-                });
-            } catch (error) {
-                console.error('Failed to calculate distance for duty:', error.message);
-                dutiesWithDistance.push({
-                    ...duty.toObject(),
-                    distance: null,
-                    duration: null,
-                    distanceText: 'Distance unavailable',
-                    durationText: 'ETA unavailable'
-                });
+            if (
+                duty.hospital?.coordinates?.coordinates?.latitude &&
+                duty.hospital?.coordinates?.coordinates?.longitude
+            ) {
+                dutiesWithCoords.push(duty);
+            } else {
+                dutiesWithoutCoords.push(duty);
             }
         }
+
+        console.log(`[UpcomingDuties] Duties with coordinates: ${dutiesWithCoords.length} | Without coordinates: ${dutiesWithoutCoords.length}`);
+
+        // --- Step 2: Build destinations array for batch call ---
+        const destinations = dutiesWithCoords.map(duty => ({
+            id: duty._id.toString(),
+            latitude: duty.hospital.coordinates.coordinates.latitude,
+            longitude: duty.hospital.coordinates.coordinates.longitude
+        }));
+
+        const batchSize = 25;
+        const expectedApiCalls = Math.ceil(destinations.length / batchSize);
+        console.log(`[UpcomingDuties] Google Maps batch call — destinations: ${destinations.length} | batch size: ${batchSize} | expected API calls: ${expectedApiCalls}`);
+
+        // --- Step 3: Single batch call instead of N individual calls ---
+        let resultMap = new Map();
+        let totalApiCalls = 0;
+
+        try {
+            ({ resultMap, totalApiCalls } = await geocodingService.calculateBatchDistanceAndETA(
+                staffLat, staffLng, destinations
+            ));
+            console.log(`[UpcomingDuties] Google Maps API calls made: ${totalApiCalls} | successful results: ${resultMap.size}/${destinations.length}`);
+        } catch (error) {
+            console.error(`[UpcomingDuties] Batch distance calculation failed: ${error.message}`);
+        }
+
+        // --- Step 4: Build final result ---
+        const dutiesWithDistance = [];
+
+        // Duties that had coordinates — attach distance from resultMap
+        for (const duty of dutiesWithCoords) {
+            const distanceResult = resultMap.get(duty._id.toString());
+            dutiesWithDistance.push({
+                ...duty.toObject(),
+                distance: distanceResult?.distance ?? null,
+                duration: distanceResult?.duration ?? null,
+                distanceText: distanceResult?.distanceText ?? 'Distance unavailable',
+                durationText: distanceResult?.durationText ?? 'ETA unavailable'
+            });
+        }
+
+        // Duties that had no coordinates — attach nulls
+        for (const duty of dutiesWithoutCoords) {
+            dutiesWithDistance.push({
+                ...duty.toObject(),
+                distance: null,
+                duration: null,
+                distanceText: 'Distance unavailable',
+                durationText: 'ETA unavailable'
+            });
+        }
+
+        // Sort by date and startTime (earliest first)
+        dutiesWithDistance.sort((a, b) => {
+            const dateCompare = new Date(a.date) - new Date(b.date);
+            if (dateCompare !== 0) return dateCompare;
+            return a.startTime.localeCompare(b.startTime);
+        });
+
+        console.log(`[UpcomingDuties] ✓ Summary:`);
+        console.log(`  DB fetched           : ${duties.length}`);
+        console.log(`  After time filter    : ${upcomingDuties.length}`);
+        console.log(`  With coordinates     : ${dutiesWithCoords.length}`);
+        console.log(`  Without coordinates  : ${dutiesWithoutCoords.length}`);
+        console.log(`  Google Maps calls    : ${totalApiCalls}`);
 
         return dutiesWithDistance;
     }
@@ -1920,19 +1971,7 @@ class DutyService {
 
             // Add role filter if specified
             if (role) {
-                const allowedRoles = [
-                    'rmo', 'dmo', 'general_physician', 'intensivist', 'emergency_doctor',
-                    'anesthetist', 'pediatrician', 'gynecologist', 'orthopedic_surgeon',
-                    'general_surgeon', 'radiologist', 'pathologist', 'staff_nurse',
-                    'icu_nurse', 'emergency_nurse', 'ot_nurse', 'dialysis_nurse', 'nicu_nurse',
-                    'lab_technician', 'radiology_technician', 'ot_technician', 'dialysis_technician',
-                    'cath_lab_technician', 'icu_technician', 'ward_boy', 'ayah', 'opd_attendant',
-                    'emergency_attendant', 'patient_care_taker', 'pharmacist', 'pharmacy_assistant',
-                    'biomedical_engineer', 'housekeeping_staff', 'security_guard', 'ambulance_driver',
-                    'receptionist', 'billing_executive', 'medical_records_staff', 'hr_accounts'
-                ];
-
-                if (!allowedRoles.includes(role)) {
+                if (!ALLOWED_ROLES.includes(role)) {
                     throw new Error(`Invalid role: ${role}`);
                 }
                 query.staffRole = role;

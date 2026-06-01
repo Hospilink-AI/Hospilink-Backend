@@ -109,20 +109,17 @@ class AuthController {
     
 
     logout = asyncHandler(async (req, res) => {
-        const token = req.headers.authorization?.split(' ')[1];
-        const userId = req.user?.id;
-        
-        // Log logout before processing
+        const token = req.headers.authorization.split(' ')[1]; 
+        const userId = req.user?.id || req.user?._id;
+
+        const result = await AuthService.logout(token, userId);
+
         if (req.user) {
             activityLogEmitter.logUserLogout(req.user, req)
                 .catch(err => console.error('Error logging logout:', err));
         }
-        
-        const result = await AuthService.logout(token, userId);
-        res.status(200).json({
-            success: true,
-            ...result
-        });
+
+        res.status(200).json({ success: true, ...result });
     });
 
 
