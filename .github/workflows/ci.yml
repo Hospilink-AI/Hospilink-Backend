@@ -24,9 +24,9 @@ jobs:
             agent/package-lock.json
 
       - name: Install backend dependencies
-        run: npm ci
+        run: npm install --omit=optional
         working-directory: backend
 
       - name: Install agent dependencies
-        run: npm ci
+        run: npm install --omit=optional
         working-directory: agent
