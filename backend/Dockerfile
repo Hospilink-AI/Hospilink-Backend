@@ -13,7 +13,7 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --omit=dev --omit=optional
+RUN npm install --omit=dev
 
 # ---- Final image ----
 FROM node:24-alpine
