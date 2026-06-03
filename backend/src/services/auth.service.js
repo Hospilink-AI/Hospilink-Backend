@@ -5,6 +5,7 @@ const logger = require('../utils/logger');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const cacheService = require('./cache.service');
+const notificationDelivery = require('./notificationDelivery.service');
 const { 
     ConflictError, 
     NotFoundError, 
@@ -333,6 +334,17 @@ class AuthService {
             { type: 'del', key: tokenKey },
             { type: 'del', key: `session:${cached.userId}` }
         ]);
+
+        // Notify the user their password was changed
+        notificationDelivery.createAndDeliver(
+            cached.userId,
+            'PASSWORD_CHANGED',
+            {
+                title: 'Password Changed',
+                message: 'Your password was successfully reset. If this wasn\'t you, contact support immediately.',
+                timestamp: new Date().toISOString()
+            }
+        ).catch(err => logger.error(`Failed to send password changed notification: ${err.message}`));
 
         logger.info(`Password reset successful for userId: ${cached.userId}`);
         return { message: 'Password reset successful. Please sign in with your new password.' };
