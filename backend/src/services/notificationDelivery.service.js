@@ -31,7 +31,8 @@ const FCM_TITLES = {
     NEW_STAFF_REGISTRATION: 'New Staff',
     DUTY_UNASSIGNED_15MIN: 'Duty Unassigned Alert',
     DUTY_UNFILLED_CRITICAL: 'Critical: Duty Unfilled',
-    EMERGENCY_ADMIN_ALERT: 'Emergency Alert'
+    EMERGENCY_ADMIN_ALERT: 'Emergency Alert',
+    PASSWORD_CHANGED: 'Password Changed'
 };
 
 class NotificationDeliveryService {

@@ -85,37 +85,27 @@ exports.getAvailabilityStatus = asyncHandler(async (req, res) => {
 
 
 
-// Check location permission when accessing dashboard
+// Grant or revoke dashboard location permission (permission flag only).
+// Actual coordinates are sent via WebSocket dashboard:location:grant event.
 exports.checkDashboardLocationPermission = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const { latitude, longitude, permissionGranted } = req.body;
+    const { permissionGranted } = req.body;
 
-    const result = await DashboardService.checkDashboardLocationPermission(
-        userId,
-        { latitude, longitude },
-        permissionGranted
-    );
+    if (permissionGranted) {
+        await DashboardService.grantDashboardLocationPermission(userId);
+        return res.status(200).json({
+            success: true,
+            permissionGranted: true,
+            message: 'Permission granted. Send location via WebSocket dashboard:location:grant event.',
+            timestamp: new Date().toISOString()
+        });
+    }
 
+    await DashboardService.revokeDashboardLocationPermission(userId);
     res.status(200).json({
         success: true,
-        ...result,
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Update current location on subsequent dashboard visits
-exports.updateCurrentLocation = asyncHandler(async (req, res) => {
-    const userId = req.user.id;
-    const { latitude, longitude } = req.body;
-
-    const result = await DashboardService.updateCurrentLocation(
-        userId,
-        { latitude, longitude }
-    );
-
-    res.status(200).json({
-        success: true,
-        ...result,
+        permissionGranted: false,
+        message: 'Location permission revoked',
         timestamp: new Date().toISOString()
     });
 });

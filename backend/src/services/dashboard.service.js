@@ -212,159 +212,105 @@ class DashboardService {
 
 
 
-    // Check and store location permission for dashboard
-    async checkDashboardLocationPermission(userId, locationData, permissionGranted) {
-        try {
-            const cacheKey = `dashboard:location:${userId}`;
-            
-            if (permissionGranted) {
-                // Validate coordinates
-                geocodingService.validateCoordinates(locationData.latitude, locationData.longitude);
-                
-                const locationInfo = {
-                    permissionGranted: true,
-                    currentLocation: {
-                        latitude: locationData.latitude,
-                        longitude: locationData.longitude,
-                        updatedAt: new Date().toISOString(),
-                        source: 'browser'
-                    },
-                    lastUpdated: new Date().toISOString()
-                };
-                
-                // Store in Redis with 24-hour TTL
-                const client = await redisClient.getClientAsync();
-                await client.setex(cacheKey, 86400, JSON.stringify(locationInfo));
-                
-                return {
-                    success: true,
-                    permissionGranted: true,
-                    message: 'Location permission granted for dashboard',
-                    location: locationInfo.currentLocation
-                };
-            } else {
-                // Permission denied - remove from cache
-                const client = await redisClient.getClientAsync();
-                await client.del(cacheKey);
-                
-                return {
-                    success: true,
-                    permissionGranted: false,
-                    message: 'Location permission denied for dashboard',
-                    location: null
-                };
-            }
-        } catch (error) {
-            throw new Error(`Dashboard location permission check failed: ${error.message}`);
-        }
+    // --- Dashboard Location (WebSocket-driven, 2-min TTL) ---
+
+    _locationPermissionKey(userId) {
+        return `dashboard:location:permission:${userId}`;
     }
-    
 
+    _locationDataKey(userId) {
+        return `dashboard:location:${userId}`;
+    }
 
-    // Get cached location permission status
+    // Called by HTTP API — stores permission flag only (30-day TTL, survives disconnects)
+    async grantDashboardLocationPermission(userId) {
+        const client = await redisClient.getClientAsync();
+        await client.setex(this._locationPermissionKey(userId), 60 * 60 * 24 * 30, 'true');
+    }
+
+    // Called by HTTP API or WebSocket revoke — clears both permission and location
+    async revokeDashboardLocationPermission(userId) {
+        const client = await redisClient.getClientAsync();
+        await Promise.all([
+            client.del(this._locationPermissionKey(userId)),
+            client.del(this._locationDataKey(userId))
+        ]);
+    }
+
+    async isDashboardLocationPermitted(userId) {
+        const client = await redisClient.getClientAsync();
+        return (await client.get(this._locationPermissionKey(userId))) === 'true';
+    }
+
+    // Called by WebSocket every 30 seconds — resets the 2-min TTL on each update
+    async setDashboardLocationViaSocket(userId, latitude, longitude) {
+        geocodingService.validateCoordinates(latitude, longitude);
+
+        const permitted = await this.isDashboardLocationPermitted(userId);
+        if (!permitted) {
+            throw new Error('Location permission not granted');
+        }
+
+        const client = await redisClient.getClientAsync();
+        const locationData = {
+            latitude,
+            longitude,
+            updatedAt: new Date().toISOString(),
+            source: 'websocket'
+        };
+
+        // 2-minute TTL: auto-expires if staff goes offline and stops sending updates
+        await client.setex(this._locationDataKey(userId), 120, JSON.stringify(locationData));
+        return locationData;
+    }
+
+    // Get the live location (null if staff offline or TTL expired)
+    async getDashboardLocation(userId) {
+        const client = await redisClient.getClientAsync();
+        const raw = await client.get(this._locationDataKey(userId));
+        return raw ? JSON.parse(raw) : null;
+    }
+
+    // Backward-compatible — used by getStaffLocationForDuties and getLocationStatus endpoint
     async getCachedLocationPermission(userId) {
-        try {
-            const cacheKey = `dashboard:location:${userId}`;
-            const client = await redisClient.getClientAsync();
-            const cached = await client.get(cacheKey);
-            
-            if (cached) {
-                const locationData = JSON.parse(cached);
-                return {
-                    permissionGranted: locationData.permissionGranted,
-                    currentLocation: locationData.currentLocation,
-                    cached: true,
-                    lastUpdated: locationData.lastUpdated
-                };
-            }
-            
-            return {
-                permissionGranted: false,
-                currentLocation: null,
-                cached: false
-            };
-        } catch (error) {
-            console.error('Error getting cached location permission:', error);
-            return {
-                permissionGranted: false,
-                currentLocation: null,
-                cached: false
-            };
-        }
+        const client = await redisClient.getClientAsync();
+        const [permittedRaw, locationRaw] = await Promise.all([
+            client.get(this._locationPermissionKey(userId)),
+            client.get(this._locationDataKey(userId))
+        ]);
+
+        const permissionGranted = permittedRaw === 'true';
+        const currentLocation = locationRaw ? JSON.parse(locationRaw) : null;
+
+        return {
+            permissionGranted,
+            currentLocation,
+            cached: !!currentLocation
+        };
     }
-    
 
-
-    // Update current location (for subsequent dashboard visits)
-    async updateCurrentLocation(userId, locationData) {
-        try {
-            const cacheKey = `dashboard:location:${userId}`;
-            const client = await redisClient.getClientAsync();
-            
-            // Check if permission was previously granted
-            const existing = await client.get(cacheKey);
-            if (!existing) {
-                throw new Error('No location permission found. Please grant permission first.');
-            }
-            
-            const existingData = JSON.parse(existing);
-            if (!existingData.permissionGranted) {
-                throw new Error('Location permission was denied. Please grant permission first.');
-            }
-            
-            // Validate new coordinates
-            geocodingService.validateCoordinates(locationData.latitude, locationData.longitude);
-            
-            // Update location
-            const updatedLocationInfo = {
-                permissionGranted: true,
-                currentLocation: {
-                    latitude: locationData.latitude,
-                    longitude: locationData.longitude,
-                    updatedAt: new Date().toISOString(),
-                    source: 'browser'
-                },
-                lastUpdated: new Date().toISOString()
-            };
-            
-            // Update cache
-            await client.setex(cacheKey, 86400, JSON.stringify(updatedLocationInfo));
-            
-            return {
-                success: true,
-                message: 'Location updated successfully',
-                location: updatedLocationInfo.currentLocation
-            };
-        } catch (error) {
-            throw new Error(`Location update failed: ${error.message}`);
-        }
-    }
-    
-
-    
-    // Get staff location with fallback logic
+    // Get staff location with fallback logic (used by duty-assignment features)
     async getStaffLocationForDuties(userId) {
         try {
-            // First check dashboard location cache
-            const dashboardLocation = await this.getCachedLocationPermission(userId);
-            
-            if (dashboardLocation.permissionGranted && dashboardLocation.currentLocation) {
+            const location = await this.getDashboardLocation(userId);
+
+            if (location) {
                 return {
-                    location: dashboardLocation.currentLocation,
-                    source: 'browser',
+                    location,
+                    source: 'websocket',
                     permissionGranted: true
                 };
             }
-            
+
             // Fallback to profile location
             const staff = await MedicalStaff.findOne({ user: userId })
                 .select('coordinates')
                 .lean();
-            
+
             if (!staff || !staff.coordinates || !staff.coordinates.coordinates) {
-                throw new Error('Staff location not found. Please update your profile or grant location permission.');
+                throw new Error('Staff location not found. Please grant location permission on the dashboard.');
             }
-            
+
             return {
                 location: {
                     latitude: staff.coordinates.coordinates.latitude,

@@ -1424,45 +1424,26 @@ const validateDocumentIdParam = (req, res, next) => {
 
 
 
-// Validation for dashboard location permission
+// Validation for dashboard location permission (permission flag only — coordinates come via WebSocket)
 const validateDashboardLocationPermission = (req, res, next) => {
-    const { permissionGranted, latitude, longitude } = req.body;
+    const { permissionGranted } = req.body;
     const errors = [];
 
-    // Check for unexpected fields
-    const allowedFields = ['permissionGranted', 'latitude', 'longitude'];
-    const receivedFields = Object.keys(req.body);
-    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
-
+    const allowedFields = ['permissionGranted'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
     if (unexpectedFields.length > 0) {
-        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed: ${allowedFields.join(', ')}`);
     }
 
-    // Permission granted validation
     if (permissionGranted === undefined || typeof permissionGranted !== 'boolean') {
         errors.push('permissionGranted must be a boolean (true or false)');
-    }
-
-    // If permission granted, validate coordinates
-    if (permissionGranted === true) {
-        if (!latitude || typeof latitude !== 'number') {
-            errors.push('Latitude is required and must be a number when permission is granted');
-        } else if (latitude < -90 || latitude > 90) {
-            errors.push('Latitude must be between -90 and 90');
-        }
-
-        if (!longitude || typeof longitude !== 'number') {
-            errors.push('Longitude is required and must be a number when permission is granted');
-        } else if (longitude < -180 || longitude > 180) {
-            errors.push('Longitude must be between -180 and 180');
-        }
     }
 
     if (errors.length > 0) {
         return res.status(400).json({
             success: false,
             message: 'Validation failed',
-            errors: errors
+            errors
         });
     }
 
