@@ -188,13 +188,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             }
             console.log("EXTRACTED DATA:", extractedData);
 
-            //Parse
-            if (parserMap[documentType]) {
-                extractedData = parserMap[documentType](extractedText);
-            }
-
-            console.log("EXTRACTED DATA:", extractedData);
-
             // ==========================================
             // DOCUMENT TYPE VALIDATION
             // ==========================================
@@ -217,8 +210,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     );
                 }
 
-                const aadhaarNumber =
-                    extractedData?.aadhaarNumber?.replace(/\s/g, "");
+                const aadhaarNumber = String(extractedData?.aadhaarNumber || "").replace(/\s/g, "");
 
                 if (
                     !aadhaarNumber ||
@@ -249,8 +241,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     );
                 }
 
-                const panNumber =
-                    extractedData?.panNumber?.replace(/\s/g, "").toUpperCase();
+                const panNumber = String(extractedData?.panNumber || "").replace(/\s/g, "").toUpperCase();
 
                 if (
                     !panNumber ||
@@ -267,8 +258,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
             if (documentType === "gst-certificate") {
 
-                const gstNumber =
-                    extractedData?.registrationNumber?.replace(/\s/g, "").toUpperCase();
+                const gstNumber = String(extractedData?.registrationNumber || "").replace(/\s/g, "").toUpperCase();
 
                 if (
                     !gstNumber ||
@@ -284,8 +274,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
             if (documentType === "cin-certificate") {
 
-                const cin =
-                    extractedData?.cin?.replace(/\s/g, "").toUpperCase();
+                const cin = String(extractedData?.cin || "").replace(/\s/g, "").toUpperCase();
 
                 if (
                     !cin ||
@@ -329,6 +318,12 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     verifiedAt: new Date(),
                     rejectionReason: `Document expired on ${expiredDate}`
                 };
+                // Remove uploaded file from S3
+                try {
+                    await deleteFromS3(key);
+                } catch (s3Err) {
+                    logger.error(`Failed to delete expired document from S3: ${s3Err.message}`);
+                }
 
                 throw new Error(
                     `Document verification failed. This document expired on ${expiredDate}. Please upload a valid non-expired document.`);
@@ -497,11 +492,15 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             type: documentType,
                             createdAt: new Date()
                         };
-                        processIdfyResultAsync(
-                            userDocs._id,
-                            idfyResponse.request_id,
-                            documentType
-                        );
+                        try {
+                            processIdfyResultAsync(
+                                userDocs._id,
+                                idfyResponse.request_id,
+                                documentType
+                            );
+                        } catch (err) {
+                            logger.error(err.message);
+                        }
                     } else {
                         logger.warn(`IDFY request_id missing for type=${documentType}`);
                     }
@@ -521,40 +520,43 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
                     const idfyResponse = await idfyService.verifyAadhaarDigilocker(referenceId);
 
+                    console.log("AADHAAR CREATE RESPONSE:", JSON.stringify(idfyResponse, null, 2));
                     if (idfyResponse && idfyResponse.request_id) {
                         logger.info(`Aadhaar Digilocker task queued: requestId=${idfyResponse.request_id}`);
 
                         // Check if redirect_url is directly in the initial response
-                        let redirectUrl = idfyResponse.redirect_url || idfyResponse.redirect_uri || null;
+                        // let redirectUrl = idfyResponse.redirect_url || idfyResponse.redirect_uri || null;
 
-                        if (!redirectUrl) {
-                            // Poll up to 3 times with short delays — if IDFY fails fast, stop early
-                            for (let attempt = 1; attempt <= 3; attempt++) {
-                                await new Promise(res => setTimeout(res, 1500));
-                                const taskResult = await idfyService.getTaskResult(idfyResponse.request_id);
-                                const task = taskResult?.[0];
+                        // if (!redirectUrl) {
+                        //     // Poll up to 3 times with short delays — if IDFY fails fast, stop early
+                        //     for (let attempt = 1; attempt <= 3; attempt++) {
+                        //         await new Promise(res => setTimeout(res, 1500));
+                        //         const taskResult = await idfyService.getTaskResult(idfyResponse.request_id);
+                        //         const task = taskResult?.[0];
 
-                                // If IDFY already failed, no point continuing
-                                if (task?.status === "failed") {
-                                    logger.warn(`Aadhaar Digilocker task failed: ${task.error} - ${task.message}`);
-                                    break;
-                                }
+                        //         // If IDFY already failed, no point continuing
+                        //         if (task?.status === "failed") {
+                        //             logger.warn(`Aadhaar Digilocker task failed: ${task.error} - ${task.message}`);
+                        //             break;
+                        //         }
 
-                                const sourceOutput = task?.result?.source_output;
-                                redirectUrl =
-                                    task?.result?.redirect_url ||
-                                    task?.result?.redirect_uri ||
-                                    sourceOutput?.redirect_url ||
-                                    sourceOutput?.redirect_uri ||
-                                    task?.redirect_url ||
-                                    null;
+                        //         const sourceOutput = task?.result?.source_output;
+                        //         redirectUrl =
+                        //             task?.result?.redirect_url ||
+                        //             task?.result?.redirect_uri ||
+                        //             sourceOutput?.redirect_url ||
+                        //             sourceOutput?.redirect_uri ||
+                        //             task?.redirect_url ||
+                        //             null;
 
-                                if (redirectUrl) {
-                                    logger.info(`Aadhaar redirect_url obtained on attempt ${attempt}`);
-                                    break;
-                                }
-                            }
-                        }
+                        //         if (redirectUrl) {
+                        //             logger.info(`Aadhaar redirect_url obtained on attempt ${attempt}`);
+                        //             break;
+                        //         }
+                        //     }
+                        // }
+
+                        let redirectUrl = null;
 
                         verificationMeta = {
                             provider: "idfy-digilocker",
@@ -562,10 +564,9 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             referenceId: referenceId,
                             status: "initiated",
                             type: "aadhaar-card",
-                            redirectUrl,
+                            redirectUrl: null,
                             createdAt: new Date()
                         };
-                        let redirectUrl = null;
 
                         for (let i = 0; i < 5; i++) {
 
