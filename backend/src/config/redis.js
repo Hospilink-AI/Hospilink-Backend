@@ -53,14 +53,24 @@ class RedisConfig {
         };
 
         if (enableTLS) {
-            config.tls = { 
-                rejectUnauthorized: false,  // Accept self-signed certificates
+            const tlsOptions = {
+                rejectUnauthorized: true,   // Always verify the server certificate
                 minVersion: 'TLSv1.2',
                 maxVersion: 'TLSv1.3',
-                // Additional compatibility settings
-                checkServerIdentity: () => undefined  // Skip hostname verification
             };
-            logger.info('Redis TLS enabled');
+
+            // Optional: load a custom CA bundle (e.g. for self-signed certs in dev).
+            // Set REDIS_TLS_CA_PATH=/path/to/ca.crt in .env to use it.
+            // In production (AWS ElastiCache) leave this unset — the system trust
+            // store already includes Amazon Root CA.
+            if (process.env.REDIS_TLS_CA_PATH) {
+                const fs = require('fs');
+                tlsOptions.ca = fs.readFileSync(process.env.REDIS_TLS_CA_PATH);
+                logger.info(`Redis TLS: using custom CA from ${process.env.REDIS_TLS_CA_PATH}`);
+            }
+
+            config.tls = tlsOptions;
+            logger.info('Redis TLS enabled (certificate verification ON)');
         }
         return config;
     }

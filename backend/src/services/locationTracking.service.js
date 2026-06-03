@@ -32,7 +32,7 @@ class LocationTrackingService {
                 lastUpdated: Date.now()
             };
 
-            const key = `hospilink:staff_location:${staffId}`;
+            const key = `staff_location:${staffId}`;
             await redis.setex(key, this.LOCATION_TTL, JSON.stringify(locationData));
             logger.info(`Stored initial location for staff ${staffId}, duty ${dutyId}`);
             return locationData;
@@ -48,7 +48,7 @@ class LocationTrackingService {
     async updateStaffLocation(staffId, coordinates, additionalData = {}) {
         try {
             const redis = await redisClient.getClientAsync();
-            const key = `hospilink:staff_location:${staffId}`;
+            const key = `staff_location:${staffId}`;
 
             // Get existing location data
             const existingData = await this.getStaffLocation(staffId);
@@ -107,7 +107,7 @@ class LocationTrackingService {
     async getStaffLocation(staffId) {
         try {
             const redis = await redisClient.getClientAsync();
-            const key = `hospilink:staff_location:${staffId}`;
+            const key = `staff_location:${staffId}`;
             const data = await redis.get(key);
             return data ? JSON.parse(data) : null;
         } catch (error) {
@@ -210,7 +210,7 @@ class LocationTrackingService {
             locationData.status = 'arrived';
             locationData.arrivalTime = Date.now();
 
-            const key = `hospilink:staff_location:${staffId}`;
+            const key = `staff_location:${staffId}`;
             await redis.setex(key, this.LOCATION_TTL, JSON.stringify(locationData));
 
             // Get staff details
@@ -274,7 +274,7 @@ class LocationTrackingService {
             await redis.setex(cleanupKey, this.CLEANUP_TTL, JSON.stringify(cleanupData));
 
             // Set main location key for deletion
-            const mainKey = `hospilink:staff_location:${staffId}`;
+            const mainKey = `staff_location:${staffId}`;
             await redis.expire(mainKey, this.CLEANUP_TTL);
 
             // Leave WebSocket tracking room
@@ -312,17 +312,35 @@ class LocationTrackingService {
     async getActiveTrackingSessions() {
         try {
             const redis = await redisClient.getClientAsync();
-            const keys = await redis.keys('hospilink:staff_location:*');
-            const sessions = [];
 
-            for (const key of keys) {
-                const data = await redis.get(key);
-                if (data) {
-                    sessions.push(JSON.parse(data));
-                }
-            }
+            // Use SCAN instead of KEYS — non-blocking cursor iteration.
+            // Note: the Redis client is configured with keyPrefix='hospilink:',
+            // so keys are stored as 'hospilink:staff_location:<id>'.
+            // We match without the manual prefix here since the client adds it.
+            const pattern = 'staff_location:*';
+            const keys = [];
+            let cursor = '0';
+            do {
+                const [nextCursor, batch] = await redis.scan(
+                    cursor,
+                    'MATCH', pattern,
+                    'COUNT', 100
+                );
+                cursor = nextCursor;
+                keys.push(...batch);
+            } while (cursor !== '0');
 
-            return sessions;
+            if (keys.length === 0) return [];
+
+            // Fetch all values in one pipeline round trip
+            const pipeline = redis.pipeline();
+            keys.forEach(key => pipeline.get(key));
+            const results = await pipeline.exec();
+
+            return results
+                .filter(([err, data]) => !err && data)
+                .map(([, data]) => JSON.parse(data));
+
         } catch (error) {
             logger.error('Error getting active tracking sessions:', error);
             return [];

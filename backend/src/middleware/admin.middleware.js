@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { body, validationResult } = require('express-validator');
+const { ALLOWED_ROLES } = require('../utils/constants');
 
 
 
@@ -605,7 +606,7 @@ const validateHospitalListQuery = (req, res, next) => {
     }
 
     // Validate allowed query parameters only
-    const allowedParams = ['search', 'status', 'city', 'page', 'limit'];
+    const allowedParams = ['search', 'status', 'city', 'location', 'page', 'limit'];
     const receivedParams = Object.keys(req.query);
 
     // Check for unexpected parameters
@@ -617,7 +618,7 @@ const validateHospitalListQuery = (req, res, next) => {
         });
     }
 
-    const { search, status, city, page = 1, limit = 10 } = req.query;
+    const { search, status, city, location, page = 1, limit = 10 } = req.query;
 
     // Validate status parameter
     const allowedStatuses = ['pending', 'verified', 'rejected'];
@@ -644,6 +645,22 @@ const validateHospitalListQuery = (req, res, next) => {
         });
     }
 
+    // Validate location parameter (searches city, state, pincode, currentAddress)
+    if (location) {
+        if (typeof location !== 'string' || location.trim().length < 2) {
+            return res.status(400).json({
+                success: false,
+                message: 'Location parameter must be a string with at least 2 characters'
+            });
+        }
+        if (location.trim().length > 100) {
+            return res.status(400).json({
+                success: false,
+                message: 'Location parameter cannot exceed 100 characters'
+            });
+        }
+    }
+
     // Validate page parameter
     const pageNum = parseInt(page);
     if (isNaN(pageNum) || pageNum < 1) {
@@ -666,6 +683,7 @@ const validateHospitalListQuery = (req, res, next) => {
         search: search || null,
         status: status || null,
         city: city || null,
+        location: location?.trim() || null,
         page: pageNum,
         limit: limitNum
     };
@@ -686,7 +704,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
     }
 
     // Validate allowed query parameters only
-    const allowedParams = ['search', 'role', 'availability', 'status', 'page', 'limit'];
+    const allowedParams = ['search', 'role', 'availability', 'status', 'location', 'page', 'limit'];
     const receivedParams = Object.keys(req.query);
 
     // Check for unexpected parameters
@@ -698,24 +716,13 @@ const validateMedicalStaffListQuery = (req, res, next) => {
         });
     }
 
-    const { search, role, availability, status, page = 1, limit = 10 } = req.query;
+    const { search, role, availability, status, location, page = 1, limit = 10 } = req.query;
 
-    // Validate role parameter
-    const allowedRoles = [
-        'rmo', 'dmo', 'general_physician', 'intensivist', 'emergency_doctor',
-        'anesthetist', 'pediatrician', 'gynecologist', 'orthopedic_surgeon',
-        'general_surgeon', 'radiologist', 'pathologist', 'staff_nurse',
-        'icu_nurse', 'emergency_nurse', 'ot_nurse', 'dialysis_nurse', 'nicu_nurse',
-        'lab_technician', 'radiology_technician', 'ot_technician', 'dialysis_technician',
-        'cath_lab_technician', 'icu_technician', 'ward_boy', 'ayah', 'opd_attendant',
-        'emergency_attendant', 'patient_care_taker', 'pharmacist', 'pharmacy_assistant',
-        'biomedical_engineer', 'housekeeping_staff', 'security_guard', 'ambulance_driver',
-        'receptionist', 'billing_executive', 'medical_records_staff', 'hr_accounts'
-    ];
-    if (role && !allowedRoles.includes(role)) {
+
+    if (role && !ALLOWED_ROLES.includes(role)) {
         return res.status(400).json({
             success: false,
-            message: `Role parameter must be one of: ${allowedRoles.join(', ')}`
+            message: `Role parameter must be one of: ${ALLOWED_ROLES.join(', ')}`
         });
     }
 
@@ -745,6 +752,22 @@ const validateMedicalStaffListQuery = (req, res, next) => {
         });
     }
 
+    // Validate location parameter (searches city, state, pincode, currentAddress)
+    if (location) {
+        if (typeof location !== 'string' || location.trim().length < 2) {
+            return res.status(400).json({
+                success: false,
+                message: 'Location parameter must be a string with at least 2 characters'
+            });
+        }
+        if (location.trim().length > 100) {
+            return res.status(400).json({
+                success: false,
+                message: 'Location parameter cannot exceed 100 characters'
+            });
+        }
+    }
+
     // Validate page parameter
     const pageNum = parseInt(page);
     if (isNaN(pageNum) || pageNum < 1) {
@@ -768,6 +791,7 @@ const validateMedicalStaffListQuery = (req, res, next) => {
         role: role || null,
         availability: availability || null,
         status: status || null,
+        location: location?.trim() || null,
         page: pageNum,
         limit: limitNum
     };
@@ -810,22 +834,10 @@ const validateMedicalStaffListVerified = (req, res, next) => {
         });
     }
  
-    // Validate jobRole parameter (optional)
-    const allowedRoles = [
-        'rmo', 'dmo', 'general_physician', 'intensivist', 'emergency_doctor',
-        'anesthetist', 'pediatrician', 'gynecologist', 'orthopedic_surgeon',
-        'general_surgeon', 'radiologist', 'pathologist', 'staff_nurse',
-        'icu_nurse', 'emergency_nurse', 'ot_nurse', 'dialysis_nurse', 'nicu_nurse',
-        'lab_technician', 'radiology_technician', 'ot_technician', 'dialysis_technician',
-        'cath_lab_technician', 'icu_technician', 'ward_boy', 'ayah', 'opd_attendant',
-        'emergency_attendant', 'patient_care_taker', 'pharmacist', 'pharmacy_assistant',
-        'biomedical_engineer', 'housekeeping_staff', 'security_guard', 'ambulance_driver',
-        'receptionist', 'billing_executive', 'medical_records_staff', 'hr_accounts'
-    ];
-    if (jobRole && !allowedRoles.includes(jobRole)) {
+    if (jobRole && !ALLOWED_ROLES.includes(jobRole)) {
         return res.status(400).json({
             success: false,
-            message: `Job role parameter must be one of: ${allowedRoles.join(', ')}`
+            message: `Job role parameter must be one of: ${ALLOWED_ROLES.join(', ')}`
         });
     }
  

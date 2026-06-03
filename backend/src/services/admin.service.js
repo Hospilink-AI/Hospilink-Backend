@@ -8,6 +8,7 @@ const User = require('../models/User');
 const { generatePreSignedURL } = require('./s3.service');
 const { calculateDutyDuration, formatDuration, formatRoleForDisplay } = require('../utils/helpers');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
+const { ALLOWED_ROLES } = require('../utils/constants');
 const geocodingService = require('./geocoding.service');
 const locationTrackingService = require('./locationTracking.service');
 const redisClient = require('../config/redis');
@@ -18,6 +19,13 @@ const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
 const notificationEmitter = require('./notificationEmitter');
 const DashboardService = require('./dashboard.service');
+
+/**
+ * Escape all special regex characters in a user-supplied string before
+ * passing it to a MongoDB $regex query. Prevents ReDoS attacks where a
+ * crafted pattern like (a+)+$ causes catastrophic backtracking.
+ */
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 
 
@@ -651,7 +659,7 @@ class AdminService {
         const match = {};
         
         if (nameFilter) {
-            match.hospitalLegalName = { $regex: nameFilter.trim(), $options: 'i' };
+            match.hospitalLegalName = { $regex: escapeRegex(nameFilter.trim()), $options: 'i' };
         }
 
         const hospitals = await Hospital.find(match)
@@ -670,15 +678,25 @@ class AdminService {
 
 
     // GET /api/admin/hospitals — paginated, filtered hospital list
-    async getHospitalList({ search, status, city, page = 1, limit = 10 }) {
+    async getHospitalList({ search, status, city, location, page = 1, limit = 10 }) {
         const { skip } = getPaginationParams(page, limit);
 
         // Build match stage
         const match = {};
         if (status) match.verificationStatus = status;
-        if (city) match.city = { $regex: city.trim(), $options: 'i' };
+        if (city) match.city = { $regex: escapeRegex(city.trim()), $options: 'i' };
+
+        // Location filter: regex across currentAddress and pincode
+        if (location) {
+            const locationRegex = { $regex: escapeRegex(location.trim()), $options: 'i' };
+            match.$or = [
+                { currentAddress: locationRegex },
+                { pincode: locationRegex }
+            ];
+        }
+
         if (search) {
-            const re = { $regex: search.trim(), $options: 'i' };
+            const re = { $regex: escapeRegex(search.trim()), $options: 'i' };
             match.$or = [{ hospitalLegalName: re }];
             // also allow searching by mongo _id string
             if (mongoose.Types.ObjectId.isValid(search.trim())) {
@@ -1090,7 +1108,7 @@ class AdminService {
     
 
     // GET /api/admin/medical-staff — paginated list with filters (search, role, availability)
-    async getMedicalStaffListWithFilters({ search, role, availability, status, page = 1, limit = 10 }) {
+    async getMedicalStaffListWithFilters({ search, role, availability, status, location, page = 1, limit = 10 }) {
         const { skip } = getPaginationParams(page, limit);
 
         // Build match stage
@@ -1101,6 +1119,15 @@ class AdminService {
             match.isAvailable = availability === 'true' || availability === true;
         }
         if (status) match.verificationStatus = status;
+
+        // Location filter: regex across currentAddress and pincode
+        if (location) {
+            const locationRegex = { $regex: escapeRegex(location), $options: 'i' };
+            match.$or = [
+                { currentAddress: locationRegex },
+                { pincode: locationRegex }
+            ];
+        }
 
         const pipeline = [
             { $match: match },
@@ -1118,9 +1145,9 @@ class AdminService {
             ...(search ? [{
                 $match: {
                     $or: [
-                        { fullName: { $regex: search.trim(), $options: 'i' } },
-                        { 'userInfo.email': { $regex: search.trim(), $options: 'i' } },
-                        { 'userInfo.name': { $regex: search.trim(), $options: 'i' } }
+                        { fullName: { $regex: escapeRegex(search.trim()), $options: 'i' } },
+                        { 'userInfo.email': { $regex: escapeRegex(search.trim()), $options: 'i' } },
+                        { 'userInfo.name': { $regex: escapeRegex(search.trim()), $options: 'i' } }
                     ]
                 }
             }] : []),
@@ -1212,7 +1239,7 @@ class AdminService {
         // Build match stage - only verified staff
         const match = { verificationStatus: 'verified' };
             
-        if (city) match.city = { $regex: city.trim(), $options: 'i' };
+        if (city) match.city = { $regex: escapeRegex(city.trim()), $options: 'i' };
         if (jobRole) match.jobRole = jobRole;
     
         const pipeline = [
@@ -1673,22 +1700,7 @@ class AdminService {
 
             // Role-based filtering
             if (role) {
-                const allowedRoles = [
-                    'rmo', 'dmo', 'general_physician', 'intensivist', 'emergency_doctor',
-                    'anesthetist', 'pediatrician', 'gynecologist', 'orthopedic_surgeon',
-                    'general_surgeon', 'radiologist', 'pathologist',
-                    'staff_nurse', 'icu_nurse', 'emergency_nurse', 'ot_nurse',
-                    'dialysis_nurse', 'nicu_nurse',
-                    'lab_technician', 'radiology_technician', 'ot_technician',
-                    'dialysis_technician', 'cath_lab_technician', 'icu_technician',
-                    'ward_boy', 'ayah', 'opd_attendant', 'emergency_attendant',
-                    'patient_care_taker',
-                    'pharmacist', 'pharmacy_assistant', 'biomedical_engineer',
-                    'housekeeping_staff', 'security_guard', 'ambulance_driver',
-                    'receptionist', 'billing_executive', 'medical_records_staff', 'hr_accounts'
-                ];
-
-                if (!allowedRoles.includes(role)) {
+                if (!ALLOWED_ROLES.includes(role)) {
                     throw new Error(`Invalid role: ${role}`);
                 }
                 query.staffRole = role;
@@ -1769,7 +1781,7 @@ class AdminService {
     async buildLocationFilter(location) {
         try {
             // Normalize location input
-            const normalizedLocation = location.toLowerCase().trim();
+            const normalizedLocation = escapeRegex(location.toLowerCase().trim());
             
             // Get all hospitals in specified city/region
             const hospitals = await Hospital.find({
@@ -2092,7 +2104,7 @@ class AdminService {
             let hospitalIds = null;
             if (hospitalName) {
                 const hospitals = await Hospital.find({
-                    hospitalLegalName: { $regex: hospitalName.trim(), $options: 'i' }
+                    hospitalLegalName: { $regex: escapeRegex(hospitalName.trim()), $options: 'i' }
                 }).select('_id');
                 
                 if (hospitals.length === 0) {

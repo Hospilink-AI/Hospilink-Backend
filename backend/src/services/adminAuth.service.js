@@ -1,3 +1,4 @@
+const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const OTPService = require('./otp.service');
 const EmailService = require('./email.service');
@@ -85,9 +86,42 @@ class AdminAuthService {
 
     async verifyOTP(email, otp, req = null) {
         try {
+            const emailLower = email.toLowerCase();
+
+            // ── Attempt counter ───────────────────────────────────────────────
+            // Keyed to the email so it survives across requests.
+            // TTL matches the OTP window (10 min) so it auto-clears when the
+            // OTP expires anyway.
+            const attemptsKey = `admin_otp_attempts:${emailLower}`;
+            const redis = await redisClient.getClientAsync();
+
+            const attempts = await redis.incr(attemptsKey);
+            // Set TTL only on first increment (atomic: only sets if key is new)
+            if (attempts === 1) {
+                await redis.expire(attemptsKey, 600); // 10 minutes — matches OTP TTL
+            }
+
+            const MAX_ATTEMPTS = 5;
+            if (attempts > MAX_ATTEMPTS) {
+                // Invalidate the OTP so the admin must start over
+                const redisKey = `admin_otp:${emailLower}`;
+                await Promise.all([
+                    redis.del(redisKey),
+                    redis.del(attemptsKey),
+                    User.updateOne(
+                        { email: emailLower, role: 'admin' },
+                        { $unset: { otp: 1 } }
+                    )
+                ]);
+                logger.warn(`Admin OTP locked out after ${MAX_ATTEMPTS} failed attempts: ${emailLower}`);
+                throw new UnauthorizedError(
+                    'Too many failed attempts. Your OTP has been invalidated. Please sign in again to receive a new OTP.'
+                );
+            }
+
             // Find admin user first 
             const admin = await User.findOne({ 
-                email: email.toLowerCase(), 
+                email: emailLower, 
                 role: 'admin' 
             });
             
@@ -96,8 +130,7 @@ class AdminAuthService {
             }
 
             // Check Redis first (fast path)
-            const redisKey = `admin_otp:${email}`;
-            const redis = await redisClient.getClientAsync();
+            const redisKey = `admin_otp:${emailLower}`;
             const redisData = await redis.get(redisKey);
 
             let isValidOTP = false;
@@ -108,28 +141,34 @@ class AdminAuthService {
                 const parsedData = JSON.parse(redisData);
                 isValidOTP = parsedData.otp === otp;
                 verificationSource = 'redis';
-                logger.info(`OTP verification from Redis for: ${email}`);
             } else {
                 // Fallback to Database path
                 isValidOTP = admin.verifyOTP(otp);
                 verificationSource = 'database';
-                logger.info(`OTP verification from Database for: ${email}`);
             }
 
             if (!isValidOTP) {
-                throw new UnauthorizedError('Invalid or expired OTP');
+                const remaining = MAX_ATTEMPTS - attempts;
+                logger.warn(`Admin OTP failed for ${emailLower} — attempt ${attempts}/${MAX_ATTEMPTS}`);
+                throw new UnauthorizedError(
+                    remaining > 0
+                        ? `Invalid or expired OTP. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`
+                        : 'Invalid or expired OTP.'
+                );
             }
 
-            // Clear OTP from both systems in parallel
+            // ── OTP is valid — clear attempt counter and OTP ──────────────────
             await Promise.all([
                 redis.del(redisKey),
+                redis.del(attemptsKey),
                 User.updateOne({ _id: admin._id }, { $unset: { otp: 1 } })
             ]);
-            // Generate JWT token immediately
+
+            // Generate JWT token
             const token = require('jsonwebtoken').sign(
                 { id: admin._id, role: admin.role },
                 process.env.JWT_SECRET,
-                { expiresIn: process.env.JWT_EXPIRES_IN}
+                { expiresIn: process.env.JWT_EXPIRES_IN }
             );
 
             // Device tracking + alert email — fully non-blocking
@@ -143,15 +182,11 @@ class AdminAuthService {
                         const deviceId = deviceInfoService.generateDeviceId(deviceInfo.ip, deviceInfo.userAgent);
 
                         const existingDevice = admin.loginDevices?.find(d => d.deviceId === deviceId);
-                        let devicesUpdate;
 
                         if (existingDevice) {
-                            devicesUpdate = {
-                                $set: { 'loginDevices.$[dev].lastLoginAt': new Date() }
-                            };
                             await User.updateOne(
                                 { _id: admin._id },
-                                devicesUpdate,
+                                { $set: { 'loginDevices.$[dev].lastLoginAt': new Date() } },
                                 { arrayFilters: [{ 'dev.deviceId': deviceId }] }
                             );
                         } else {
@@ -187,7 +222,7 @@ class AdminAuthService {
                         EmailService.sendAdminLoginAlertEmail(
                             admin.name, admin.email, deviceInfo.deviceName, locationString, loginTime
                         ).then(sent => {
-                            if (sent) logger.info(`Admin login alert sent to ${process.env.ADMIN_LOGIN_ALERT_EMAIL} for ${admin.email}`);
+                            if (sent) logger.info(`Admin login alert sent for ${admin.email}`);
                         }).catch(err => logger.error(`Admin login alert email failed: ${err.message}`));
                     } catch (err) {
                         logger.error(`Device tracking error: ${err.message}`);
@@ -275,47 +310,47 @@ class AdminAuthService {
 
 
     async logout(token, userId) {
+        let blacklistTTL = 604800; // safe fallback: 7 days
         try {
-            // Use pipeline for logout operations
-            await cacheService.pipeline([
-                { 
-                    type: 'set', 
-                    key: `blacklist:${token}`, 
-                    value: true, 
-                    ttl: 86400 // 24 hours
-                },
-                ...(userId ? [{ type: 'del', key: `session:${userId}` }] : [])
-            ]);
-            
-            logger.info(`Admin logged out: ${userId}`);
-            
-            return {
-                message: 'Admin logged out successfully'
-            };
-        } catch (error) {
-            logger.error(`Admin logout error: ${error.message}`);
+            const decoded = jwt.decode(token);
+            if (decoded?.exp) {
+                const remaining = decoded.exp - Math.floor(Date.now() / 1000);
+                if (remaining > 0) blacklistTTL = remaining;
+            }
+        } catch (_) {}
+
+        const pipelineResult = await cacheService.pipeline([
+            { type: 'set', key: `blacklist:${token}`, value: true, ttl: blacklistTTL },
+            ...(userId ? [{ type: 'del', key: `session:${userId}` }] : [])
+        ]);
+
+        if (!pipelineResult) {
+            logger.error(`Admin logout pipeline failed for userId: ${userId}`);
             throw new Error('Failed to logout. Please try again.');
         }
+
+        logger.info(`Admin logged out: ${userId}`);
+        return { message: 'Admin logged out successfully' };
     }
     
 
-    // Rate limiting helper (3 OTP requests per hour)
+    // Rate limiting helper — max 3 OTP send requests per hour per email
     async _checkRateLimit(email) {
-        const rateLimitKey = `admin_rate_limit:${email}`;
+        const rateLimitKey = `admin_rate_limit:${email.toLowerCase()}`;
         const redis = await redisClient.getClientAsync();
-        
+
         try {
-            // Use pipeline for atomic operations
-            const pipeline = redis.pipeline();
-            pipeline.incr(rateLimitKey);
-            
-            if (await redis.exists(rateLimitKey) === 0) {
-                pipeline.expire(rateLimitKey, 3600);
-            }
-            
-            const results = await pipeline.exec();
-            const currentCount = results[0][1];
-            
+            // Atomic increment + set-expiry-on-first-write using a Lua script.
+            // This avoids the TOCTOU race in the old incr→exists→expire pattern.
+            const luaScript = `
+                local current = redis.call('INCR', KEYS[1])
+                if current == 1 then
+                    redis.call('EXPIRE', KEYS[1], ARGV[1])
+                end
+                return current
+            `;
+            const currentCount = await redis.eval(luaScript, 1, rateLimitKey, 3600);
+
             if (currentCount > 3) {
                 const ttl = await redis.ttl(rateLimitKey);
                 const minutesLeft = Math.ceil(ttl / 60);
@@ -323,9 +358,10 @@ class AdminAuthService {
                     `Too many OTP requests. Please try again after ${minutesLeft} minutes.`
                 );
             }
-        } catch (redisError) {
-            logger.error(`Redis rate limit error: ${redisError.message}`);
-            // If Redis fails, allow the request but log the error
+        } catch (err) {
+            if (err instanceof ValidationError) throw err;
+            logger.error(`Redis rate limit error: ${err.message}`);
+            // If Redis is unavailable, allow the request through rather than blocking admin access
         }
     }
 }

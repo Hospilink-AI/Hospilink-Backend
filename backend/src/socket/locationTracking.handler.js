@@ -1,6 +1,7 @@
 const locationTrackingService = require('../services/locationTracking.service');
 const roomManager = require('./roomManager');
 const logger = require('../utils/logger');
+const Duty = require('../models/Duty');
 
 
 class LocationTrackingHandler {
@@ -48,21 +49,46 @@ class LocationTrackingHandler {
 
     // handle tracking start for a staff member
     async handleTrackingStart(socket, data) {
-        const { staffId, dutyId, hospitalId, coordinates } = data;
+        const { staffId, dutyId, coordinates } = data;
+        // Note: hospitalId from the client payload is intentionally ignored.
+        // We look it up server-side from the duty record to prevent a staff
+        // member from broadcasting their location to an arbitrary hospital.
         const userId = socket.user._id.toString();
 
-        // Get MedicalStaff record to validate ownership
+        // Validate the socket belongs to the staff member making the request
         const medicalStaff = socket.medicalStaff;
         if (!medicalStaff || medicalStaff._id.toString() !== staffId) {
             throw new Error('Unauthorized: You can only start tracking for yourself');
         }
 
-        // Use User ID for location tracking (consistent with admin.service.js)
-        await locationTrackingService.storeInitialLocation(userId, dutyId, hospitalId, coordinates);
+        // Look up the duty server-side to get the authoritative hospitalId
+        const duty = await Duty.findById(dutyId)
+            .select('hospital assignedTo status')
+            .lean();
+
+        if (!duty) {
+            throw new Error('Duty not found');
+        }
+
+        // Verify this duty is actually assigned to this staff member
+        if (!duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
+            throw new Error('Unauthorized: This duty is not assigned to you');
+        }
+
+        // Only allow tracking for active duty statuses
+        const trackableStatuses = ['assigned', 'enroute', 'in-progress'];
+        if (!trackableStatuses.includes(duty.status)) {
+            throw new Error(`Cannot start tracking for a duty with status: ${duty.status}`);
+        }
+
+        // Use the server-side hospitalId — never trust the client value
+        const verifiedHospitalId = duty.hospital.toString();
+
+        await locationTrackingService.storeInitialLocation(userId, dutyId, verifiedHospitalId, coordinates);
 
         // Join tracking room with User ID
         const trackingRoom = roomManager.joinTrackingRoom(socket, userId, dutyId);
-        const hospitalTrackingRoom = roomManager.joinHospitalTrackingRoom(socket, hospitalId);
+        const hospitalTrackingRoom = roomManager.joinHospitalTrackingRoom(socket, verifiedHospitalId);
 
         socket.emit('tracking_started', {
             success: true,
@@ -71,7 +97,7 @@ class LocationTrackingHandler {
             updateInterval: 2000
         });
 
-        logger.info(`Tracking started for user ${userId}, staff ${staffId}, duty ${dutyId}`);
+        logger.info(`Tracking started for user ${userId}, staff ${staffId}, duty ${dutyId}, hospital ${verifiedHospitalId}`);
     }
 
 

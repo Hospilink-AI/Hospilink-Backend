@@ -39,10 +39,11 @@ const validateSignup = (req, res, next) => {
         errors.push('Password must contain at least one uppercase letter, one lowercase letter, and one number');
     }
 
-    // Role validation
-    const validRoles = ['admin', 'hospital', 'candidate', 'staff'];
+    // Role validation — 'admin' is intentionally excluded; admin accounts are created
+    // directly in the database and cannot be self-registered via this endpoint.
+    const validRoles = ['hospital', 'candidate', 'staff'];
     if (!role || !validRoles.includes(role)) {
-        errors.push('Valid role is required');
+        errors.push('Valid role is required. Allowed: hospital, candidate, staff');
     }
 
     if (errors.length > 0) {
@@ -347,10 +348,7 @@ const validateMedicalStaffProfile = (req, res, next) => {
 
 
 const validateHospitalProfile = (req, res, next) => {
-    // Debug logging
-    console.log('Request body:', req.body);
-    console.log('Received fields:', Object.keys(req.body));
-    
+    // Debug logging removed — req.body contains PII (email, phone, hospital name)
     const { hospitalLegalName, currentAddress, servicesAvailable, city, state, pincode, staffCount, phoneNumber, email, description } = req.body;
     const errors = [];
 
@@ -358,9 +356,6 @@ const validateHospitalProfile = (req, res, next) => {
     const allowedFields = ['hospitalLegalName', 'currentAddress', 'servicesAvailable', 'city', 'state', 'pincode', 'staffCount', 'phoneNumber', 'email', 'description'];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
-    
-    console.log('Destructured hospitalLegalName:', hospitalLegalName);
-    console.log('Type of hospitalLegalName:', typeof hospitalLegalName);
 
     if (unexpectedFields.length > 0) {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
@@ -922,8 +917,8 @@ const validateDutyEdit = (req, res, next) => {
     }
     
     // Validate urgency if provided
-    if (req.body.urgency && !['low', 'medium', 'high', 'critical'].includes(req.body.urgency)) {
-        errors.push('Invalid urgency level');
+    if (req.body.urgency && !['low', 'medium', 'high', 'emergency'].includes(req.body.urgency)) {
+        errors.push('Invalid urgency level. Must be one of: low, medium, high, emergency');
     }
     
     // Validate offered_rate if provided
@@ -941,6 +936,31 @@ const validateDutyEdit = (req, res, next) => {
     
     if (req.body.end_time && !/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(req.body.end_time)) {
         errors.push('end_time must be in HH:MM format');
+    }
+
+    // If a new start_time is provided with a date, validate it is at least 15 minutes in the future.
+    // Both must be present — if only start_time is sent (no date), the service resolves it
+    // against the existing duty's date and will enforce the same rule there.
+    if (
+        req.body.start_time &&
+        /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(req.body.start_time) &&
+        req.body.date
+    ) {
+        const refDate = new Date(req.body.date);
+        const [startHours, startMinutes] = req.body.start_time.split(':');
+        const istRefDate = toIST(refDate);
+        const newStartTime = new Date(istRefDate);
+        newStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
+        const bufferTime = new Date(newStartTime.getTime() - 15 * 60 * 1000);
+        const now = getCurrentIST();
+        if (bufferTime <= now) {
+            errors.push('New start time must be at least 15 minutes in the future');
+        }
+    }
+
+    // If setting overnight duty to true, end_date must also be provided
+    if (req.body.is_overnight_duty === true && !req.body.end_date) {
+        errors.push('end_date is required when is_overnight_duty is true');
     }
     
     if (errors.length > 0) {
@@ -1404,45 +1424,26 @@ const validateDocumentIdParam = (req, res, next) => {
 
 
 
-// Validation for dashboard location permission
+// Validation for dashboard location permission (permission flag only — coordinates come via WebSocket)
 const validateDashboardLocationPermission = (req, res, next) => {
-    const { permissionGranted, latitude, longitude } = req.body;
+    const { permissionGranted } = req.body;
     const errors = [];
 
-    // Check for unexpected fields
-    const allowedFields = ['permissionGranted', 'latitude', 'longitude'];
-    const receivedFields = Object.keys(req.body);
-    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
-
+    const allowedFields = ['permissionGranted'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
     if (unexpectedFields.length > 0) {
-        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed: ${allowedFields.join(', ')}`);
     }
 
-    // Permission granted validation
     if (permissionGranted === undefined || typeof permissionGranted !== 'boolean') {
         errors.push('permissionGranted must be a boolean (true or false)');
-    }
-
-    // If permission granted, validate coordinates
-    if (permissionGranted === true) {
-        if (!latitude || typeof latitude !== 'number') {
-            errors.push('Latitude is required and must be a number when permission is granted');
-        } else if (latitude < -90 || latitude > 90) {
-            errors.push('Latitude must be between -90 and 90');
-        }
-
-        if (!longitude || typeof longitude !== 'number') {
-            errors.push('Longitude is required and must be a number when permission is granted');
-        } else if (longitude < -180 || longitude > 180) {
-            errors.push('Longitude must be between -180 and 180');
-        }
     }
 
     if (errors.length > 0) {
         return res.status(400).json({
             success: false,
             message: 'Validation failed',
-            errors: errors
+            errors
         });
     }
 

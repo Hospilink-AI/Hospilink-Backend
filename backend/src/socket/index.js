@@ -3,6 +3,7 @@ const { createAdapter } = require('@socket.io/redis-adapter');
 const mongoose = require('mongoose');
 const authMiddleware = require('./authMiddleware');
 const roomManager = require('./roomManager');
+const { registerDashboardLocationHandlers } = require('./dashboardLocation.handler');
 const notificationService = require('../services/notificationService');
 const Duty = require('../models/Duty');
 const { getPubSubClients } = require('../config/redis');
@@ -63,9 +64,10 @@ async function initializeSocket(server) {
             // Join user to their personal room
             roomManager.joinUserRoom(socket, user._id.toString());
 
-            // Join staff to role-based room
+            // Join staff to role-based room + register dashboard location handlers
             if (user.role === 'staff' && socket.medicalStaff) {
                 roomManager.joinRoleRoom(socket, user.role, socket.medicalStaff.jobRole);
+                registerDashboardLocationHandlers(socket);
             }
 
             // Handle admin tracking room
