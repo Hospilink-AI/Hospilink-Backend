@@ -52,11 +52,21 @@ const protect = async (req, res, next) => {
         next();
 
     } catch (error) {
-        logger.warn('Agent access denied - invalid token', { 
+        logger.warn('Agent access denied - invalid token', {
             error: error.message,
-            ip: req.ip 
+            errorName: error.name,
+            jwtSecretSet: !!process.env.JWT_SECRET,
+            ip: req.ip
         });
-        
+
+        if (error.name === 'TokenExpiredError') {
+            return res.status(401).json({
+                status: 'error',
+                code: 'TOKEN_EXPIRED',
+                message: 'Authentication token has expired. Please login again.'
+            });
+        }
+
         return res.status(401).json({
             status: 'error',
             code: 'INVALID_TOKEN',
@@ -117,7 +127,7 @@ const requireMedicalStaff = async (req, res, next) => {
             staffId: medicalStaff._id,
             name: medicalStaff.fullName,
             role: medicalStaff.jobRole,
-            location: `${medicalStaff.city}, ${medicalStaff.area}`
+            location: `${medicalStaff.currentAddress}, ${medicalStaff.city}, ${medicalStaff.state}, ${medicalStaff.pincode}`
         });
 
         next();
