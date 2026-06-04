@@ -1008,35 +1008,35 @@ const validatePagination = (req, res, next) => {
 
 
 
-// Validation for review submission
+// Validation for review submission (hospital -> staff)
 const validateReviewSubmission = (req, res, next) => {
-    const { rating, comment, staffId } = req.body;
+    const { rating, review, duty_id } = req.body;
     const errors = [];
-    
+
     // Check for unexpected fields
-    const allowedFields = ['rating', 'comment', 'staffId'];
+    const allowedFields = ['rating', 'review', 'duty_id'];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
-    
+
     if (unexpectedFields.length > 0) {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
     }
-    
+
     // Rating validation
     if (rating === undefined || typeof rating !== 'number' || rating < 1 || rating > 5) {
         errors.push('Rating must be a number between 1 and 5');
     }
-    
-    // Comment validation
-    if (comment && (typeof comment !== 'string' || comment.length > 1000)) {
-        errors.push('Comment must be a string with maximum 1000 characters');
+
+    // Review validation
+    if (review && (typeof review !== 'string' || review.length > 1000)) {
+        errors.push('Review must be a string with maximum 1000 characters');
     }
-    
-    // Staff ID validation
-    if (!staffId || !/^[0-9a-fA-F]{24}$/.test(staffId)) {
-        errors.push('Valid staffId is required');
+
+    // Duty ID validation
+    if (!duty_id || !/^[0-9a-fA-F]{24}$/.test(duty_id)) {
+        errors.push('Valid duty_id is required');
     }
-    
+
     if (errors.length > 0) {
         return res.status(400).json({
             success: false,
@@ -1044,7 +1044,7 @@ const validateReviewSubmission = (req, res, next) => {
             errors: errors
         });
     }
-    
+
     next();
 };
 
