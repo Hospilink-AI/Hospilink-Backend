@@ -17,7 +17,7 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 const isProd = NODE_ENV === "production";
 
 function validateConfig() {
-  const required = ["SEARCHAPI_KEY", "GEMINI_API_KEY", "MONGODB_URI"];
+  const required = ["SEARCHAPI_KEY", "GEMINI_API_KEY", "MONGODB_URI", "JWT_SECRET"];
   const missing = required.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
