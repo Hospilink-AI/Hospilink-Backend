@@ -1046,7 +1046,7 @@ class DutyService {
 
         const duties = await Duty.find({
             assignedTo: medicalStaff._id,
-            status: { $in: ['assigned', 'enroute', 'in-progress'] }
+            status: { $in: ['enroute', 'in-progress'] }
         })
             .populate({
                 path: 'hospital',
@@ -1662,27 +1662,31 @@ class DutyService {
 
 
 
-    async getCompletedDutiesForStaff(staffUserId, page = 1, limit = 10) {
+    async getCompletedDutiesForStaff(staffUserId, page = 1, limit = 10, statusFilter = null) {
+        const TERMINAL_STATUSES = ['completed', 'cancelled', 'incomplete'];
+
+        if (statusFilter && !TERMINAL_STATUSES.includes(statusFilter)) {
+            throw new Error(`Invalid status filter. Allowed values: ${TERMINAL_STATUSES.join(', ')}`);
+        }
+
         try {
-            // Find the medical staff profile for this user
             const staff = await MedicalStaff.findOne({ user: staffUserId });
             if (!staff) {
                 throw new Error('Medical staff profile not found');
             }
 
-            // Import pagination utilities
             const paginationParams = getPaginationParams(page, limit);
 
-            // Get total count for pagination metadata
+            const statusQuery = statusFilter ? statusFilter : { $in: TERMINAL_STATUSES };
+
             const totalDuties = await Duty.countDocuments({
                 assignedTo: staff._id,
-                status: 'completed'
+                status: statusQuery
             });
 
-            // Find completed duties with pagination
             const duties = await Duty.find({
                 assignedTo: staff._id,
-                status: 'completed'
+                status: statusQuery
             })
                 .populate('hospital', 'hospitalLegalName currentAddress city state pincode')
                 .populate({
@@ -1692,29 +1696,26 @@ class DutyService {
                         select: 'name email role'
                     }
                 })
-                .sort({ completedAt: -1 }) // Most recent first
+                .sort({ completedAt: -1, cancelledAt: -1, expiredAt: -1, incompleteAt: -1 })
                 .skip(paginationParams.skip)
                 .limit(paginationParams.limit);
 
-            // Fetch reviews for these duties in single query (optimized)
+            // Fetch reviews for completed duties only (in single batch query)
             const dutyIds = duties.map(duty => duty._id);
             const reviews = await Review.find({
                 duty: { $in: dutyIds }
             }).select('duty rating review createdAt');
 
-            // Create lookup map for O(1) access
             const reviewMap = {};
             reviews.forEach(review => {
                 reviewMap[review.duty.toString()] = review;
             });
 
-            // Calculate summary statistics
             let totalHours = 0;
             let totalEarnings = 0;
             let lastDutyDate = null;
 
             const dutiesWithDetails = duties.map(duty => {
-                // Calculate duration for this duty
                 const duration = calculateDutyDuration(
                     duty.date,
                     duty.startTime,
@@ -1723,12 +1724,16 @@ class DutyService {
                     duty.endDate
                 );
 
-                totalHours += duration;
-                totalEarnings += duty.totalPayment || 0;
+                // Only accumulate hours and earnings for completed duties
+                if (duty.status === 'completed') {
+                    totalHours += duration;
+                    totalEarnings += duty.totalPayment || 0;
+                }
 
-                // Track the most recent duty date
-                if (!lastDutyDate || duty.completedAt > lastDutyDate) {
-                    lastDutyDate = duty.completedAt;
+                // Use the most relevant status timestamp for lastDutyDate
+                const dutyTimestamp = duty.completedAt || duty.cancelledAt || duty.expiredAt || duty.incompleteAt;
+                if (!lastDutyDate || dutyTimestamp > lastDutyDate) {
+                    lastDutyDate = dutyTimestamp;
                 }
 
                 return {
@@ -1754,7 +1759,11 @@ class DutyService {
                         duty.endDate
                     ),
                     assignedAt: duty.assignedAt,
-                    completedAt: duty.completedAt,
+                    completedAt: duty.completedAt || null,
+                    cancelledAt: duty.cancelledAt || null,
+                    expiredAt: duty.expiredAt || null,
+                    incompleteAt: duty.incompleteAt || null,
+                    cancellation: duty.cancellation || null,
                     statusHistory: duty.statusHistory,
                     rating: reviewMap[duty._id.toString()] ? {
                         rating: reviewMap[duty._id.toString()].rating,

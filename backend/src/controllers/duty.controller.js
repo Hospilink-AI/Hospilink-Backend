@@ -868,11 +868,19 @@ exports.getAvailableJobsWithDistance = asyncHandler(async (req, res) => {
 exports.getCompletedDuties = asyncHandler(async (req, res) => {
     const userId = req.user.id;
 
-    // Extract pagination parameters from query
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
+    const { status } = req.query;
 
-    const result = await DutyService.getCompletedDutiesForStaff(userId, page, limit);
+    const ALLOWED_STATUSES = ['completed', 'cancelled', 'incomplete'];
+    if (status && !ALLOWED_STATUSES.includes(status)) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid status filter. Allowed values: ${ALLOWED_STATUSES.join(', ')}`
+        });
+    }
+
+    const result = await DutyService.getCompletedDutiesForStaff(userId, page, limit, status || null);
 
     res.status(200).json({
         success: true,
@@ -886,6 +894,8 @@ exports.getCompletedDuties = asyncHandler(async (req, res) => {
         pagination: result.pagination
     });
 });
+
+
 
 exports.getStatement = asyncHandler(async (req, res) => {
     const userId = req.user.id;
