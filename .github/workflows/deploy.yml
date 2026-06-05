@@ -3,6 +3,11 @@ name: Deploy to AWS ECS
 on:
   push:
     branches: [main]
+    paths:
+      # Workflow only activates when backend or agent files change.
+      # Pushes that only touch docs, scripts, root configs, etc. are ignored entirely.
+      - 'backend/**'
+      - 'agent/**'
 
 permissions:
   id-token: write
@@ -14,8 +19,32 @@ env:
   ECS_CLUSTER: hospilink
 
 jobs:
+  # ─── Detect which folders changed ────────────────────────────────────────────
+  changes:
+    name: Detect changed folders
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      agent: ${{ steps.filter.outputs.agent }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            agent:
+              - 'agent/**'
+
+  # ─── Backend ─────────────────────────────────────────────────────────────────
   deploy-backend:
     name: Deploy Backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -55,8 +84,11 @@ jobs:
             --services hospilink-backend \
             --region $AWS_REGION
 
+  # ─── Agent ───────────────────────────────────────────────────────────────────
   deploy-agent:
     name: Deploy Agent
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

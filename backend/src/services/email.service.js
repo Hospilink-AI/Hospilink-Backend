@@ -7,6 +7,9 @@ class EmailService {
             host: process.env.EMAIL_HOST,
             port: process.env.EMAIL_PORT,
             secure: false,
+            pool: true,          // reuse SMTP connections — avoids per-request TCP+TLS handshake
+            maxConnections: 5,
+            maxMessages: 100,
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_PASS
