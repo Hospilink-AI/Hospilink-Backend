@@ -61,13 +61,11 @@ class AuthService {
         // Store OTP separately for faster verification
         await cacheService.setTempUserOTP(email, { code: otp, expiresAt: otpExpiry }, 600);
 
-        try {
-            await EmailService.sendOTPEmail(email, otp, userData.name);
-        } catch (emailError) {
-            await cacheService.deleteTempUser(email);
-            await cacheService.del(`otp:${email}`);
-            throw new Error('Failed to send OTP email. Please try again.');
-        }
+        // Fire-and-forget — temp user and OTP are already persisted in Redis.
+        // If delivery fails the user can hit "resend OTP"; no need to block the
+        // signup response on SMTP latency.
+        EmailService.sendOTPEmail(email, otp, userData.name)
+            .catch(err => logger.error(`Failed to send signup OTP email to ${email}: ${err.message}`));
 
         logger.info(`New user registered: ${email}`);
         
@@ -186,8 +184,9 @@ class AuthService {
             }
         ]);
 
-        // Send new OTP email
-        await EmailService.sendOTPEmail(tempUser.email, otp, tempUser.name);
+        // Send new OTP email — fire-and-forget, OTP is already updated in Redis
+        EmailService.sendOTPEmail(tempUser.email, otp, tempUser.name)
+            .catch(err => logger.error(`Failed to resend OTP email to ${tempUser.email}: ${err.message}`));
 
         logger.info(`OTP resent to: ${tempUser.email}`);
         
