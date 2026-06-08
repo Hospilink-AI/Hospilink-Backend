@@ -32,7 +32,16 @@ const dutySchema = new mongoose.Schema({
             'receptionist', 'billing_executive', 'medical_records_staff', 'hr_accounts'
         ]
     },
+    dutySubType: {
+        type: String,
+        enum: {
+            values: ['ward', 'icu', 'casualty'],
+            message: 'dutySubType must be one of: ward, icu, casualty'
+        },
+        default: undefined
+    },
     date: {
+
         type: Date,
         required: [true, 'Start date is required']
     },

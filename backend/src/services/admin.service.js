@@ -2216,6 +2216,123 @@ class AdminService {
             throw error;
         }
     }
+
+
+    
+    // Create duty for hospital from admin panel
+    // POST /api/admin/duties
+    async createDutyForHospital(hospitalId, dutyPayload) {
+        const {
+            staff_role,
+            date,
+            end_date,
+            start_time,
+            end_time,
+            urgency,
+            description,
+            offered_rate,
+            is_overnight_duty,
+            staff_count,
+            duty_sub_type
+        } = dutyPayload;
+
+        // Fetch and validate hospital
+        const hospital = await Hospital.findById(hospitalId)
+            .select('hospitalLegalName currentAddress city state pincode coordinates servicesAvailable staffCount isProfileComplete verificationStatus user')
+            .populate('user', '_id name');
+
+        if (!hospital) {
+            const error = new Error('Hospital not found');
+            error.statusCode = 404;
+            throw error;
+        }
+
+        // Check hospital verification status
+        if (hospital.verificationStatus !== 'verified') {
+            const statusMessages = {
+                pending: 'Cannot create duty: hospital verification is still pending.',
+                rejected: 'Cannot create duty: hospital has been rejected and is not verified.'
+            };
+            const message = statusMessages[hospital.verificationStatus] || 'Cannot create duty: hospital is not verified.';
+            const error = new Error(message);
+            error.statusCode = 403;
+            throw error;
+        }
+
+        // Determine number of duties to create (default to 1 if staff_count not provided)
+        const numberOfDuties = staff_count ? parseInt(staff_count) : 1;
+
+        const dutyData = {
+            staffRole: staff_role,
+            date,
+            endDate: end_date,
+            startTime: start_time,
+            endTime: end_time,
+            urgency,
+            description,
+            offeredRate: offered_rate,
+            isOvernightDuty: is_overnight_duty || false,
+            ...(staff_role === 'rmo' && { dutySubType: duty_sub_type })
+        };
+
+        // Create multiple duties based on staff_count
+        const createdDuties = [];
+        for (let i = 0; i < numberOfDuties; i++) {
+            // Use the hospital's own user ID so existing service logic works unchanged
+            const DutyService = require('./duty.service');
+            const result = await DutyService.createDuty(dutyData, hospital.user._id);
+            createdDuties.push(result.duty);
+        }
+
+        // Notify matching staff + hospital (same as hospital flow)
+        try {
+            const matchingStaff = await MedicalStaff.find({
+                jobRole: staff_role,
+                isAvailable: true
+            }).populate('user', '_id');
+
+            // Filter out staff with null user references and map to user IDs
+            const staffUserIds = matchingStaff
+                .filter(s => s.user && s.user._id)
+                .map(s => s.user._id.toString());
+
+            const hospitalUserId = hospital.user._id.toString();
+
+            // Send notifications for all created duties
+            for (const duty of createdDuties) {
+                await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, hospitalUserId);
+            }
+
+            // Notify all admins if this is an emergency duty
+            if (urgency === 'emergency') {
+                const admins = await User.find({ role: 'admin' }).select('_id');
+                if (admins.length) {
+                    const adminIds = admins.map(a => a._id.toString());
+                    
+                    // Send emergency alerts for all created duties
+                    for (const duty of createdDuties) {
+                        await notificationEmitter.emitEmergencyAdminAlert(duty, hospital, adminIds, 'emergency_created');
+
+                        const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+                        if (alertEmail) {
+                            require('./email.service').sendEmergencyAdminAlertEmail(
+                                alertEmail, 'Admin', duty, hospital, 'emergency_created'
+                            ).catch(err => logger.error(`Error sending emergency alert email: ${err.message}`));
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            logger.error('Admin createDuty: notification error - ' + err.message);
+        }
+
+        return {
+            success: true,
+            duties: createdDuties,
+            count: createdDuties.length,
+            message: `Successfully created ${createdDuties.length} duty`
+        };
+    }
 }
 
 module.exports = new AdminService();

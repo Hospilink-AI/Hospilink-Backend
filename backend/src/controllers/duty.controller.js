@@ -40,8 +40,10 @@ exports.createDuty = asyncHandler(async (req, res) => {
         description,
         offered_rate,
         is_overnight_duty,
-        staff_count
+        staff_count,
+        duty_sub_type
     } = req.body;
+
 
     // Use hospital user ID from the authenticated user (JWT)
     const userId = req.user.id;
@@ -58,8 +60,10 @@ exports.createDuty = asyncHandler(async (req, res) => {
         urgency,
         description,
         offeredRate: offered_rate,
-        isOvernightDuty: is_overnight_duty || false
+        isOvernightDuty: is_overnight_duty || false,
+        ...(staff_role === 'rmo' && { dutySubType: duty_sub_type })
     };
+
 
     // Create multiple duties based on staff_count
     const createdDuties = [];
