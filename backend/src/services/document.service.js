@@ -10,6 +10,11 @@ const idfyService = require("./idfy.service");
 const { extractTextFromPDF } = require("./pdf.service");
 const { isDocumentExpired } = require("../utils/documentExpiryValidator");
 const logger = require('../utils/logger');
+const {
+    ValidationError,
+    NotFoundError,
+    ConflictError
+} = require('../middleware/error.middleware');
 
 const getAllowedDocs = (role) => {
     const config = requiredDocsConfig[role];
@@ -29,7 +34,7 @@ const validateDocumentType = (role, documentType) => {
     const allowedDocs = getAllowedDocs(role);
 
     if (!allowedDocs.includes(documentType)) {
-        throw new Error(
+        throw new ValidationError(
             `Invalid documentType "${documentType}" for role "${role}". Allowed types: ${allowedDocs.join(", ")}`
         );
     }
@@ -149,7 +154,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 // Continue with upload even if S3 delete fails
             }
         } else {
-            throw new Error(`${documentType} already uploaded. Use replace=true to update.`);
+            throw new ConflictError(`${documentType} already uploaded. Use replace=true to update.`);
         }
     }
 
@@ -205,7 +210,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
                     await deleteFromS3(key);
 
-                    throw new Error(
+                    throw new ValidationError(
                         "Uploaded file is not an Aadhaar Card. Please upload a valid Aadhaar card."
                     );
                 }
@@ -218,7 +223,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 ) {
                     await deleteFromS3(key);
 
-                    throw new Error(
+                    throw new ValidationError(
                         "Invalid Aadhaar Card uploaded. Please upload a valid Aadhaar card."
                     );
                 }
@@ -236,7 +241,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
                     await deleteFromS3(key);
 
-                    throw new Error(
+                    throw new ValidationError(
                         "Uploaded file is not a PAN Card. Please upload a valid PAN card."
                     );
                 }
@@ -250,7 +255,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
                     await deleteFromS3(key);
 
-                    throw new Error(
+                    throw new ValidationError(
                         "Invalid PAN Card uploaded. Please upload a valid PAN card."
                     );
                 }
@@ -266,7 +271,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 ) {
                     await deleteFromS3(key);
 
-                    throw new Error(
+                    throw new ValidationError(
                         "Invalid GST Certificate uploaded. Please upload a valid GST certificate."
                     );
                 }
@@ -282,7 +287,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 ) {
                     await deleteFromS3(key);
 
-                    throw new Error(
+                    throw new ValidationError(
                         "Invalid CIN Certificate uploaded. Please upload a valid Certificate of Incorporation."
                     );
                 }
@@ -325,7 +330,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                     logger.error(`Failed to delete expired document from S3: ${s3Err.message}`);
                 }
 
-                throw new Error(
+                throw new ValidationError(
                     `Document verification failed. This document expired on ${expiredDate}. Please upload a valid non-expired document.`);
             }
 
@@ -390,7 +395,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
                     await deleteFromS3(key);
 
-                    throw new Error(
+                    throw new ValidationError(
                         mdvsResult.message ||
                         "Invalid document uploaded for selected document type."
                     );
@@ -982,13 +987,13 @@ exports.getDocumentById = async (user, documentId) => {
     });
 
     if (!docRecord) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     const doc = docRecord.documents.id(documentId);
 
     if (!doc || doc.isDeleted) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     const signedUrl = await generatePreSignedURL(doc.s3Key);
@@ -1013,21 +1018,21 @@ exports.verifyDocument = async (documentId, adminId) => {
     }).populate('userId', 'name email');
 
     if (!docRecord) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     const document = docRecord.documents.id(documentId);
 
     if (!document) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     if (document.isDeleted) {
-        throw new Error("Document is deleted");
+        throw new ConflictError("Document is deleted");
     }
 
     if (document.verificationStatus === "verified") {
-        throw new Error("Document already verified");
+        throw new ConflictError("Document already verified");
     }
 
     document.verificationStatus = "verified";
@@ -1075,22 +1080,22 @@ exports.rejectDocument = async (documentId, adminId, reason) => {
     }).populate('userId', 'name email');
 
     if (!docRecord) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     const document = docRecord.documents.id(documentId);
 
     if (!document) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     if (document.isDeleted) {
-        throw new Error("Document is deleted");
+        throw new ConflictError("Document is deleted");
     }
 
     // Prevent rejecting already verified documents
     if (document.verificationStatus === "verified") {
-        throw new Error("Verified document cannot be rejected");
+        throw new ConflictError("Verified document cannot be rejected");
     }
 
     document.verificationStatus = "rejected";
@@ -1192,17 +1197,17 @@ exports.deleteDocument = async (user, documentId) => {
     });
 
     if (!docRecord) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     const document = docRecord.documents.id(documentId);
 
     if (!document) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     if (document.isDeleted) {
-        throw new Error("Document already deleted");
+        throw new ConflictError("Document already deleted");
     }
     await deleteFromS3(document.s3Key);
 

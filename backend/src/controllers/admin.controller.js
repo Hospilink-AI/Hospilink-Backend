@@ -101,19 +101,12 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
 
 // GET /api/admin/dashboard-stats - Get dashboard overview statistics
 exports.getDashboardStats = asyncHandler(async (req, res) => {
-    try {
-        const result = await adminService.getDashboardStats();
+    const result = await adminService.getDashboardStats();
 
-        res.status(200).json({
-            success: true,
-            data: result
-        });
-    } catch (error) {
-        res.status(400).json({
-            success: false,
-            message: error.message
-        });
-    }
+    res.status(200).json({
+        success: true,
+        data: result
+    });
 });
 
 
@@ -126,19 +119,12 @@ exports.getHospitalStats = asyncHandler(async (req, res) => {
 
 // GET /api/admin/staff-stats - Get staff statistics grouped by role
 exports.getStaffStatistics = asyncHandler(async (req, res) => {
-    try {
-        const result = await adminService.getStaffStatistics();
+    const result = await adminService.getStaffStatistics();
 
-        res.status(200).json({
-            success: true,
-            data: result
-        });
-    } catch (error) {
-        res.status(400).json({
-            success: false,
-            message: error.message
-        });
-    }
+    res.status(200).json({
+        success: true,
+        data: result
+    });
 });
 
 
@@ -325,7 +311,7 @@ exports.rejectDocument = asyncHandler(async (req, res) => {
         req
     ).catch(() => {});
 
-    res.status(200).json({ success: true, message: 'Document rejected', data: result });
+    res.status(200).json({ success: true, message: 'Document rejected successfully', data: result });
 });
 
 
@@ -334,28 +320,21 @@ exports.getActiveDuties = asyncHandler(async (req, res) => {
     // Use validated query parameters from middleware
     const { role, location, status, page, limit } = req.validatedQuery;
 
-    try {
-        const result = await adminService.getActiveDuties({
-            role,
-            location,
-            status,
-            page,
-            limit
-        });
+    const result = await adminService.getActiveDuties({
+        role,
+        location,
+        status,
+        page,
+        limit
+    });
 
-        res.status(200).json({
-            success: true,
-            data: result.duties,
-            pagination: result.pagination,
-            filters: result.filters,
-            summary: result.summary
-        });
-    } catch (error) {
-        res.status(400).json({
-            success: false,
-            message: error.message
-        });
-    }
+    res.status(200).json({
+        success: true,
+        data: result.duties,
+        pagination: result.pagination,
+        filters: result.filters,
+        summary: result.summary
+    });
 });
 
 
@@ -475,7 +454,7 @@ exports.getDutyRouteMap = asyncHandler(async (req, res) => {
         console.error(`Error in getDutyRouteMap for duty ${dutyId}:`, error);
 
         // Enhanced error response
-        res.status(error.message.includes('not found') ? 404 : 400).json({
+        res.status(error.statusCode || 500).json({
             success: false,
             message: error.message,
             code: error.code || 'DUTY_ROUTE_MAP_ERROR',
@@ -524,7 +503,7 @@ exports.verifyHospital = asyncHandler(async (req, res) => {
         req
     ).catch(() => {});
 
-    res.status(200).json({ success: true, message: 'Hospital verified', data: result });
+    res.status(200).json({ success: true, message: 'Hospital verified successfully', data: result });
 });
 
 
@@ -548,20 +527,13 @@ exports.rejectHospital = asyncHandler(async (req, res) => {
 
 // GET /api/admin/overnight-duties - Get live overnight duties
 exports.getOvernightDuties = asyncHandler(async (req, res) => {
-    try {
-        const result = await adminService.getOvernightDuties();
+    const result = await adminService.getOvernightDuties();
 
-        res.status(200).json({
-            success: true,
-            data: result.duties,
-            count: result.count
-        });
-    } catch (error) {
-        res.status(400).json({
-            success: false,
-            message: error.message
-        });
-    }
+    res.status(200).json({
+        success: true,
+        data: result.duties,
+        count: result.count
+    });
 });
 
 
@@ -569,28 +541,21 @@ exports.getOvernightDuties = asyncHandler(async (req, res) => {
 exports.getDutyHistory = asyncHandler(async (req, res) => {
     const { date, startDate, endDate, hospitalName, page, limit } = req.validatedQuery;
 
-    try {
-        const result = await adminService.getDutyHistory({
-            date,
-            startDate,
-            endDate,
-            hospitalName,
-            page,
-            limit
-        });
+    const result = await adminService.getDutyHistory({
+        date,
+        startDate,
+        endDate,
+        hospitalName,
+        page,
+        limit
+    });
 
-        res.status(200).json({
-            success: true,
-            data: result.duties,
-            pagination: result.pagination,
-            filters: result.filters
-        });
-    } catch (error) {
-        res.status(400).json({
-            success: false,
-            message: error.message
-        });
-    }
+    res.status(200).json({
+        success: true,
+        data: result.duties,
+        pagination: result.pagination,
+        filters: result.filters
+    });
 });
 
 
