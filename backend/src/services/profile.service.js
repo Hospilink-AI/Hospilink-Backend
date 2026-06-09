@@ -13,6 +13,7 @@ const notificationEmitter = require('./notificationEmitter');
 const emailService = require('./email.service');
 const requiredDocsConfig = require('../config/requiredDocs');
 const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');
+const logger = require('../utils/logger');
 const { formatRoleForDisplay } = require('../utils/helpers');
 const DashboardService = require('./dashboard.service');
 
@@ -112,17 +113,13 @@ class ProfileService {
                 // Don't fail the registration if notification fails
             }
 
-            // Send profile creation confirmation email
-            try {
-                await emailService.sendProfileCreatedConfirmationEmail(
-                    user.email,
-                    medicalStaffProfile.fullName || user.name,
-                    'staff'
-                );
-            } catch (emailError) {
-                console.error('Error sending profile creation email:', emailError);
-                // Don't fail the registration if email fails
-            }
+            // Send profile creation confirmation email — fire-and-forget,
+            // profile is already saved so SMTP latency should not affect the response.
+            emailService.sendProfileCreatedConfirmationEmail(
+                user.email,
+                medicalStaffProfile.fullName || user.name,
+                'staff'
+            ).catch(err => logger.error(`Failed to send staff profile confirmation email to ${user.email}: ${err.message}`));
 
             return {
                 success: true,
@@ -272,17 +269,13 @@ class ProfileService {
                 // Don't fail the registration if notification fails
             }
 
-            // Send profile creation confirmation email
-            try {
-                await emailService.sendProfileCreatedConfirmationEmail(
-                    user.email,
-                    hospitalProfile.hospitalLegalName || user.name,
-                    'hospital'
-                );
-            } catch (emailError) {
-                console.error('Error sending profile creation email:', emailError);
-                // Don't fail the registration if email fails
-            }
+            // Send profile creation confirmation email — fire-and-forget,
+            // profile is already saved so SMTP latency should not affect the response.
+            emailService.sendProfileCreatedConfirmationEmail(
+                user.email,
+                hospitalProfile.hospitalLegalName || user.name,
+                'hospital'
+            ).catch(err => logger.error(`Failed to send hospital profile confirmation email to ${user.email}: ${err.message}`));
 
             return {
                 success: true,

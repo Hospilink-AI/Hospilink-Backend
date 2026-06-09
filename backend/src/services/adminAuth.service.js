@@ -49,8 +49,9 @@ class AdminAuthService {
                 timestamp: new Date().toISOString()
             };
 
-            // Parallel storage operations + immediate email sending
-            const [redisResult, saveResult] = await Promise.all([
+            // Parallel storage operations — respond as soon as OTP is saved,
+            // then deliver the email in the background (non-blocking).
+            await Promise.all([
                 // Store in Redis
                 redisClient.getClientAsync().then(redis => 
                     redis.setex(redisKey, 600, JSON.stringify(otpData))
@@ -62,13 +63,12 @@ class AdminAuthService {
                 )
             ]);
 
-            try {
-                await EmailService.sendAdminOTPEmail(admin.email, otp, admin.name);
-                logger.info(`Admin signin OTP sent to: ${admin.email}`);
-            } catch (err) {
-                logger.error(`Failed to send admin OTP email: ${err.message}`);
-                throw new Error('Failed to send OTP email. Please try again.');
-            }
+            // Send email after OTP is persisted — fire-and-forget so SMTP latency
+            // doesn't add to the API response time. If delivery fails, the admin
+            // can use the resend endpoint; the OTP is already stored.
+            EmailService.sendAdminOTPEmail(admin.email, otp, admin.name)
+                .then(() => logger.info(`Admin signin OTP sent to: ${admin.email}`))
+                .catch(err => logger.error(`Failed to send admin OTP email: ${err.message}`));
 
             
             return {
@@ -292,12 +292,10 @@ class AdminAuthService {
                 )
             ]);
 
-            try {
-                await EmailService.sendAdminOTPEmail(admin.email, otp, admin.name);
-            } catch (err) {
-                logger.error(`Failed to send admin OTP email: ${err.message}`);
-                throw new Error('Failed to send OTP email. Please try again.');
-            }
+            // Fire-and-forget — OTP is already persisted, no need to block on SMTP
+            EmailService.sendAdminOTPEmail(admin.email, otp, admin.name)
+                .then(() => logger.info(`Admin resend OTP sent to: ${admin.email}`))
+                .catch(err => logger.error(`Failed to send admin OTP email: ${err.message}`));
             
             return {
                 message: 'OTP resent successfully'
