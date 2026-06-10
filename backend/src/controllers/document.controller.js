@@ -48,8 +48,9 @@ exports.uploadDocument = async (req, res) => {
                 ).catch(() => { });
             }
 
-            res.status(200).json({
+            res.status(201).json({
                 success: true,
+                message: 'Documents uploaded successfully',
                 count: results.length,
                 data: results
             });
@@ -67,12 +68,7 @@ exports.uploadDocument = async (req, res) => {
 
     } catch (error) {
 
-        const statusCode =
-            error.message.includes("does not match")
-                ? 400
-                : 500;
-
-        res.status(statusCode).json({
+        res.status(error.statusCode || 500).json({
             success: false,
             message: error.message
         });
@@ -97,7 +93,7 @@ exports.getDocuments = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
+        res.status(error.statusCode || 500).json({
             success: false,
             message: error.message
         });
@@ -122,7 +118,7 @@ exports.getDocumentById = async (req, res) => {
 
     } catch (error) {
 
-        res.status(404).json({
+        res.status(error.statusCode || 500).json({
             success: false,
             message: error.message
         });
@@ -148,7 +144,7 @@ exports.verifyDocument = async (req, res) => {
             req
         ).catch(() => { });
 
-        res.json({
+        res.status(200).json({
             success: true,
             message: "Document verified successfully",
             data: result
@@ -156,7 +152,7 @@ exports.verifyDocument = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
+        res.status(error.statusCode || 500).json({
             success: false,
             message: error.message
         });
@@ -190,14 +186,15 @@ exports.rejectDocument = async (req, res) => {
             req
         ).catch(() => { });
 
-        res.json({
+        res.status(200).json({
             success: true,
+            message: "Document rejected successfully",
             data: result
         });
 
     } catch (error) {
 
-        res.status(500).json({
+        res.status(error.statusCode || 500).json({
             success: false,
             message: error.message
         });
@@ -213,7 +210,7 @@ exports.getRequiredDocuments = async (req, res) => {
         const status =
             await documentService.getRequiredDocumentsStatus(req.user);
 
-        res.json({
+        res.status(200).json({
             success: true,
             message: "Required documents status",
             data: status
@@ -247,14 +244,14 @@ exports.deleteDocument = async (req, res) => {
             req
         ).catch(() => { });
 
-        res.json({
+        res.status(200).json({
             success: true,
-            message: "Document deleted"
+            message: "Document deleted successfully"
         });
 
     } catch (error) {
 
-        res.status(500).json({
+        res.status(error.statusCode || 500).json({
             success: false,
             message: error.message
         });

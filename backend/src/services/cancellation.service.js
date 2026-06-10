@@ -2,6 +2,12 @@ const Duty = require('../models/Duty');
 const Hospital = require('../models/Hospital');
 const MedicalStaff = require('../models/MedicalStaff');
 const { getCurrentIST, toIST } = require('../utils/helpers');
+const {
+    ValidationError,
+    NotFoundError,
+    ConflictError,
+    ForbiddenError
+} = require('../middleware/error.middleware');
 
 class CancellationService {
 
@@ -131,23 +137,31 @@ class CancellationService {
             });
 
         if (!duty) {
-            throw new Error('Duty not found');
+            throw new NotFoundError('Duty not found');
         }
 
         // For hospital users, verify they own this duty
         const hospital = await Hospital.findOne({ user: user._id });
         if (!hospital) {
-            throw new Error('Hospital profile not found');
+            throw new NotFoundError('Hospital profile not found');
         }
         // Check if this duty belongs to this hospital
         if (duty.hospital._id.toString() !== hospital._id.toString()) {
-            throw new Error('You can only cancel your own duties');
+            throw new ForbiddenError('You can only cancel your own duties');
         }
 
         // Validate cancellation
         const validation = await this.validateCancellation(duty, user, reason, reasonText);
         if (!validation.allowed) {
-            throw new Error(validation.error);
+            if (validation.error.includes('already cancelled') ||
+                validation.error.includes('Cannot cancel a completed duty') ||
+                validation.error.includes('can only cancel duties with status')) {
+                throw new ConflictError(validation.error);
+            }
+            if (validation.error.includes('Only hospital users can cancel duties')) {
+                throw new ForbiddenError(validation.error);
+            }
+            throw new ValidationError(validation.error);
         }
 
         // Update duty status to cancelled

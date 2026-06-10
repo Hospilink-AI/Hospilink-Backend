@@ -6,11 +6,12 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const cacheService = require('./cache.service');
 const notificationDelivery = require('./notificationDelivery.service');
-const { 
-    ConflictError, 
-    NotFoundError, 
+const {
+    AppError,
+    ConflictError,
+    NotFoundError,
     ValidationError,
-    UnauthorizedError 
+    UnauthorizedError
 } = require('../middleware/error.middleware');
 
 
@@ -84,7 +85,7 @@ class AuthService {
         // Acquire distributed lock to prevent race conditions
         const lockAcquired = await cacheService.acquireLock(lockKey, 5);
         if (!lockAcquired) {
-            throw new ValidationError('Verification in progress. Please wait.');
+            throw new ValidationError('Verification already in progress. Try again in a few seconds.');
         }
         
         try {
@@ -148,7 +149,7 @@ class AuthService {
                 };
             } catch (error) {
                 logger.error(`Error moving user from temp to permanent: ${error.message}`);
-                throw new Error('Failed to verify email. Please try again.');
+                throw new AppError('Failed to verify email. Please try again.', 500);
             }
         } finally {
             // Always release the lock
@@ -209,7 +210,7 @@ class AuthService {
             // Single database query with password 
             user = await User.findOne({ email: emailLower }).select('+password');
             if (!user) {
-                throw new NotFoundError('User not found. Please sign up first.');
+                throw new UnauthorizedError('Invalid email or password.');
             }
             // Cache only non-sensitive data
             await cacheService.set(cacheKey, {
@@ -229,7 +230,7 @@ class AuthService {
         
         const isPasswordValid = await user.comparePassword(password);
         if (!isPasswordValid) {
-            throw new UnauthorizedError('Invalid password');
+            throw new UnauthorizedError('Invalid email or password.');
         }
 
         // Generate JWT token

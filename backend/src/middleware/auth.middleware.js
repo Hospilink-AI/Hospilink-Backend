@@ -64,7 +64,7 @@ exports.protect = asyncHandler(async (req, res, next) => {
 exports.authorize = (...roles) => {
     return (req, res, next) => {
         if (!roles.includes(req.user.role)) {
-            return next(new ForbiddenError(`User role ${req.user.role} is not authorized to access this route`));
+            return next(new ForbiddenError("You don't have permission to do that."));
         }
         next();
     };
