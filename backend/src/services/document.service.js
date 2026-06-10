@@ -191,7 +191,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             if (parserMap[documentType]) {
                 extractedData = parserMap[documentType](extractedText);
             }
-            console.log("EXTRACTED DATA:", extractedData);
 
             // ==========================================
             // DOCUMENT TYPE VALIDATION
@@ -581,11 +580,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                                 idfyResponse.request_id
                             );
 
-                            console.log(
-                                "AADHAAR POLL:",
-                                JSON.stringify(taskResult, null, 2)
-                            );
-
                             redirectUrl =
                                 taskResult?.[0]?.result?.source_output?.redirect_url ||
                                 taskResult?.[0]?.result?.redirect_url ||
@@ -831,11 +825,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
         const result = await idfyService.getTaskResult(
             verificationMeta.requestId
-        );
-
-        console.log(
-            "AADHAAR TASK RESULT:",
-            JSON.stringify(result, null, 2)
         );
 
         redirectUrl =

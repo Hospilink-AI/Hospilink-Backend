@@ -85,8 +85,6 @@ const { createCanvas } = require("canvas");
 const MDVS_BASE_URL = process.env.MDVS_BASE_URL;
 const MDVS_API_KEY = process.env.MDVS_API_KEY;
 
-console.log("[MDVS] BASE_URL loaded as:", MDVS_BASE_URL);
-
 // Map Hospilink types to MDVS types based on qualification
 const determineMdvsDocType = (hospilinkDocType, extractedData) => {
     const q = (extractedData?.qualification || "").toUpperCase();
