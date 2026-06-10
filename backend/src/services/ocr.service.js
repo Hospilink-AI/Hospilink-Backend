@@ -52,26 +52,8 @@ exports.extractTextFromBuffer = async (buffer, mimetype, docType = "") => {
         return detections[0].description || "";
 
     } catch (err) {
-        console.error("[OCR] Google Vision API Error:", err.message);
-        
-        // Provide helpful error messages
-        if (err.code === 7) {
-            if (err.message.includes("requires billing")) {
-                console.error("[OCR] 💳 BILLING REQUIRED: Vision API needs billing enabled (free tier available)");
-                console.error("[OCR] 🔗 Enable billing at:", err.message.match(/https:\/\/[^\s]+/)?.[0]);
-                console.error("[OCR] 💡 You get 1,000 free requests/month after enabling billing");
-            } else if (err.message.includes("has not been used") || err.message.includes("is disabled")) {
-                console.error("[OCR] ⏳ Vision API was just enabled. Wait 2-5 minutes for it to propagate.");
-                console.error("[OCR] 🔗 Enable at:", err.message.match(/https:\/\/[^\s]+/)?.[0]);
-            } else {
-                console.error("[OCR] ❌ Permission denied. Check service account permissions.");
-            }
-        } else if (err.code === 3) {
-            console.error("[OCR] ❌ Invalid image format or corrupted file");
-        } else if (err.code === 16) {
-            console.error("[OCR] ❌ Authentication failed. Check GOOGLE_CLIENT_EMAIL and GOOGLE_PRIVATE_KEY");
-        }
-        
+        logger.error(`Google Vision API Error: ${err.message}`);
+
         return "";
     }
 };
