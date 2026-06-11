@@ -40,8 +40,10 @@ exports.createDuty = asyncHandler(async (req, res) => {
         description,
         offered_rate,
         is_overnight_duty,
-        staff_count
+        staff_count,
+        duty_sub_type
     } = req.body;
+
 
     // Use hospital user ID from the authenticated user (JWT)
     const userId = req.user.id;
@@ -58,8 +60,10 @@ exports.createDuty = asyncHandler(async (req, res) => {
         urgency,
         description,
         offeredRate: offered_rate,
-        isOvernightDuty: is_overnight_duty || false
+        isOvernightDuty: is_overnight_duty || false,
+        ...(staff_role === 'rmo' && { dutySubType: duty_sub_type })
     };
+
 
     // Create multiple duties based on staff_count
     const createdDuties = [];
@@ -145,7 +149,7 @@ exports.createDuty = asyncHandler(async (req, res) => {
         success: true,
         duties: createdDuties,
         count: createdDuties.length,
-        message: `Successfully created ${createdDuties.length} duty`
+        message: `Successfully created ${createdDuties.length} ${createdDuties.length === 1 ? 'duty' : 'duties'}`
     });
 });
 
@@ -279,8 +283,16 @@ exports.acceptDuty = asyncHandler(async (req, res) => {
         }
 
         // Handle other specific errors
+        if (error.message.includes('already being processed')) {
+            return res.status(409).json({
+                success: false,
+                message: error.message,
+                code: 'DUPLICATE_REQUEST'
+            });
+        }
+
         if (error.message.includes('Duty is no longer available')) {
-            return res.status(400).json({
+            return res.status(409).json({
                 success: false,
                 message: error.message,
                 code: 'DUTY_UNAVAILABLE'
@@ -300,6 +312,14 @@ exports.acceptDuty = asyncHandler(async (req, res) => {
                 success: false,
                 message: error.message,
                 code: 'TIME_CONFLICT'
+            });
+        }
+
+        if (error.message.includes('Cannot accept duty after start time')) {
+            return res.status(422).json({
+                success: false,
+                message: error.message,
+                code: 'ACCEPT_AFTER_START'
             });
         }
 
@@ -743,34 +763,10 @@ exports.cancelDuty = asyncHandler(async (req, res) => {
             data: { duty }
         });
     } catch (error) {
-        // Handle specific error cases
-        if (error.message.includes('Duty not found')) {
-            return res.status(404).json({
-                success: false,
-                message: error.message
-            });
-        }
-
-        if (error.message.includes('cannot cancel') ||
-            error.message.includes('Cannot cancel') ||
-            error.message.includes('required') ||
-            error.message.includes('Invalid cancellation reason')) {
-            return res.status(400).json({
-                success: false,
-                message: error.message
-            });
-        }
-
-        if (error.message.includes('can only cancel') ||
-            error.message.includes('cannot cancel unassigned')) {
-            return res.status(403).json({
-                success: false,
-                message: error.message
-            });
-        }
-
-        // Re-throw other errors to be handled by global error handler
-        throw error;
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
@@ -838,7 +834,7 @@ exports.getDutyRoute = asyncHandler(async (req, res) => {
         });
     } catch (error) {
         logger.error('Error getting duty route:', error);
-        res.status(500).json({
+        res.status(error.statusCode || 500).json({
             success: false,
             message: error.message
         });
@@ -944,7 +940,7 @@ exports.getHospitalActiveDuties = asyncHandler(async (req, res) => {
             summary: result.summary
         });
     } catch (error) {
-        res.status(400).json({
+        res.status(error.statusCode || 500).json({
             success: false,
             message: error.message
         });
@@ -988,7 +984,7 @@ exports.getHospitalDutyRouteMap = asyncHandler(async (req, res) => {
         console.error(`Error in getHospitalDutyRouteMap for duty ${dutyId}:`, error);
         
         // Enhanced error response
-        res.status(error.message.includes('not found') ? 404 : 400).json({
+        res.status(error.statusCode || (error.message.toLowerCase().includes('not found') ? 404 : 500)).json({
             success: false,
             message: error.message,
             code: error.code || 'DUTY_ROUTE_MAP_ERROR',

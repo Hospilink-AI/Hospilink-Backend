@@ -190,7 +190,7 @@ class ProfileController {
             const responseTime = Date.now() - startTime;
             console.error(`Staff availability toggle failed for user ${userId}: ${responseTime}ms, error: ${error.message}`);
 
-            res.status(400).json({
+            res.status(error.statusCode || 500).json({
                 success: false,
                 message: error.message,
                 responseTime: responseTime,

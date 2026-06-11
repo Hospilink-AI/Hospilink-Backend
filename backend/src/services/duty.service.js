@@ -24,6 +24,14 @@ const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
 const notificationEmitter = require('./notificationEmitter');
 const s3Service = require('./s3.service');
+const {
+    AppError,
+    ValidationError,
+    NotFoundError,
+    ConflictError,
+    ForbiddenError,
+    UnprocessableEntityError
+} = require('../middleware/error.middleware');
 
 // Per-duty Redis lock TTL in seconds — prevents thundering herd
 const DUTY_ACCEPT_LOCK_TTL = 10;
@@ -60,7 +68,7 @@ class DutyService {
         // Find the hospital profile for this user
         const hospital = await Hospital.findOne({ user: userId });
         if (!hospital) {
-            throw new Error('Hospital profile not found. Please complete your profile first.');
+            throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
         }
 
         // Additional server-side validation (double-check)
@@ -77,7 +85,7 @@ class DutyService {
         const bufferTime = new Date(dutyStartTime.getTime() - 15 * 60 * 1000);
 
         if (bufferTime <= now) {
-            throw new Error('Duty start time must be at least 15 minutes in the future. Cannot create duties for past or immediate times.');
+            throw new ValidationError('Duty start time must be at least 15 minutes in the future. Cannot create duties for past or immediate times.');
         }
 
         const duty = await Duty.create({
@@ -133,7 +141,7 @@ class DutyService {
         if (status) {
             // If status is provided, validate it's one of the active statuses
             if (!activeStatuses.includes(status)) {
-                throw new Error('Invalid status. Only available, assigned, enroute, in-progress are allowed');
+                throw new ValidationError('Invalid status. Only available, assigned, enroute, in-progress are allowed');
             }
             match.status = status;
         } else {
@@ -227,7 +235,7 @@ class DutyService {
         if (status) {
             // If status is provided, validate it's one of the historical statuses
             if (!historicalStatuses.includes(status)) {
-                throw new Error('Invalid status. Only completed, cancelled, expired, incomplete are allowed');
+                throw new ValidationError('Invalid status. Only completed, cancelled, expired, incomplete are allowed');
             }
             match.status = status;
         } else {
@@ -310,7 +318,7 @@ class DutyService {
         // (e.g. double-tap, network retry) within the lock window.
         const staffLockAcquired = await acquireDutyLock(dutyId, userId.toString());
         if (!staffLockAcquired) {
-            throw new Error('Your acceptance request is already being processed. Please wait.');
+            throw new ConflictError('Your acceptance request is already being processed. Please wait.');
         }
 
         // Use a MongoDB session for the overlap check + atomic claim so both
@@ -325,7 +333,7 @@ class DutyService {
                 // ── 1. Load staff profile ─────────────────────────────────────
                 const medicalStaff = await MedicalStaff.findOne({ user: userId }).session(session);
                 if (!medicalStaff) {
-                    throw new Error('Medical staff profile not found. Please complete your profile first.');
+                    throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
                 }
 
                 // ── 2. Load duty for validation ───────────────────────────────
@@ -334,7 +342,7 @@ class DutyService {
                     .session(session);
 
                 if (!duty) {
-                    throw new Error('Duty not found');
+                    throw new NotFoundError('Duty not found');
                 }
 
                 // ── 3. Role check ─────────────────────────────────────────────
@@ -342,12 +350,12 @@ class DutyService {
                 const normalizedDutyRole  = normalizeRole(duty.staffRole);
 
                 if (normalizedStaffRole !== normalizedDutyRole) {
-                    throw new Error(`Role mismatch: This duty requires a ${duty.staffRole}, but your profile shows ${medicalStaff.jobRole}`);
+                    throw new ForbiddenError(`Role mismatch: This duty requires a ${duty.staffRole}, but your profile shows ${medicalStaff.jobRole}`);
                 }
 
                 // ── 4. Status check ───────────────────────────────────────────
                 if (duty.status !== 'available') {
-                    throw new Error('Duty is no longer available');
+                    throw new ConflictError('Duty is no longer available');
                 }
 
                 // ── 5. Start time check ───────────────────────────────────────
@@ -358,7 +366,7 @@ class DutyService {
                 dutyStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
 
                 if (now >= dutyStartTime) {
-                    throw new Error('Cannot accept duty after start time.');
+                    throw new UnprocessableEntityError('Cannot accept duty after start time.');
                 }
 
                 // ── 6. Overlap check (inside transaction = consistent read) ───
@@ -375,7 +383,7 @@ class DutyService {
 
                 for (const existingDuty of existingDuties) {
                     if (doDutiesOverlap(duty, existingDuty)) {
-                        throw new Error(
+                        throw new ConflictError(
                             `Time conflict: You already have a duty from ${existingDuty.startTime} to ${existingDuty.endTime}. ` +
                             `New duty from ${duty.startTime} to ${duty.endTime} overlaps.`
                         );
@@ -409,7 +417,7 @@ class DutyService {
                 ).populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } });
 
                 if (!claimedDuty) {
-                    throw new Error('Duty is no longer available');
+                    throw new ConflictError('Duty is no longer available');
                 }
 
             }); // transaction auto-commits or auto-aborts
@@ -592,7 +600,7 @@ class DutyService {
         // Find the medical staff profile for this user
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {
-            throw new Error('Medical staff profile not found. Please complete your profile first.');
+            throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
         }
 
         const duty = await Duty.findById(dutyId)
@@ -605,19 +613,22 @@ class DutyService {
             });
 
         if (!duty) {
-            throw new Error('Duty not found');
+            throw new NotFoundError('Duty not found');
         }
 
         // Validate staff assignment
         const validation = duty.canChangeStatus(newStatus, medicalStaff._id);
         if (!validation.allowed) {
-            throw new Error(validation.reason);
+            if (validation.reason.includes('assigned to you')) {
+                throw new ForbiddenError(validation.reason);
+            }
+            throw new ValidationError(validation.reason);
         }
 
         // Additional timing validations
         if (newStatus === 'enroute') {
             if (duty.status !== 'assigned') {
-                throw new Error('Duty must be assigned before marking enroute');
+                throw new ValidationError('Duty must be assigned before marking enroute');
             }
             duty.enrouteAt = getCurrentIST();
         }
@@ -625,7 +636,7 @@ class DutyService {
         if (newStatus === 'in-progress') {
             const startValidation = duty.canStartDuty();
             if (!startValidation.allowed) {
-                throw new Error(startValidation.reason);
+                throw new ValidationError(startValidation.reason);
             }
             duty.startedAt = getCurrentIST();
         }
@@ -633,7 +644,7 @@ class DutyService {
         if (newStatus === 'completed') {
             const completeValidation = duty.canCompleteDuty();
             if (!completeValidation.allowed) {
-                throw new Error(completeValidation.reason);
+                throw new ValidationError(completeValidation.reason);
             }
             duty.completedAt = getCurrentIST();
         }
@@ -683,21 +694,21 @@ class DutyService {
             });
 
         if (!duty) {
-            throw new Error('Duty not found');
+            throw new NotFoundError('Duty not found');
         }
 
         // Authorization check
         if (userRole === 'staff') {
             if (!medicalStaff) {
-                throw new Error('Medical staff profile not found');
+                throw new NotFoundError('Medical staff profile not found');
             }
             if (!duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
-                throw new Error('You can only view status history for duties assigned to you');
+                throw new ForbiddenError('You can only view status history for duties assigned to you');
             }
         } else if (userRole === 'hospital') {
             const hospital = await Hospital.findOne({ user: userId });
             if (!hospital || duty.hospital._id.toString() !== hospital._id.toString()) {
-                throw new Error('You can only view status history for your own duties');
+                throw new ForbiddenError('You can only view status history for your own duties');
             }
         }
 
@@ -1041,7 +1052,7 @@ class DutyService {
     async getOngoingDutiesForStaff(userId) {
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {
-            throw new Error('Medical staff profile not found');
+            throw new NotFoundError('Medical staff profile not found');
         }
 
         const duties = await Duty.find({
@@ -1065,17 +1076,17 @@ class DutyService {
         // Find the hospital profile for this user
         const hospital = await Hospital.findOne({ user: userId });
         if (!hospital) {
-            throw new Error('Hospital profile not found. Please complete your profile first.');
+            throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
         }
 
         const duty = await Duty.findById(dutyId);
         if (!duty) {
-            throw new Error('Duty not found');
+            throw new NotFoundError('Duty not found');
         }
 
         // Verify this duty belongs to the requesting hospital
         if (duty.hospital.toString() !== hospital._id.toString()) {
-            throw new Error('You can only edit your own duties');
+            throw new ForbiddenError('You can only edit your own duties');
         }
 
         const isEmergencyOrCritical = duty.urgency === 'emergency';
@@ -1086,7 +1097,7 @@ class DutyService {
         if (isEmergencyOrCritical && isPricingOnlyUpdate) {
             const pricingValidation = duty.canEditPricing();
             if (!pricingValidation.allowed) {
-                throw new Error(pricingValidation.reason);
+                throw new ValidationError(pricingValidation.reason);
             }
             duty.offeredRate = updateData.offeredRate;
             await duty.save();
@@ -1099,9 +1110,9 @@ class DutyService {
         if (!editValidation.allowed) {
             // For emergency duties that are still available, suggest pricing-only edit
             if (isEmergencyOrCritical && duty.status === 'available') {
-                throw new Error('Emergency duties can only have their pricing edited within 30 minutes of start time. Use offeredRate only.');
+                throw new ValidationError('Emergency duties can only have their pricing edited within 30 minutes of start time. Use offeredRate only.');
             }
-            throw new Error(editValidation.reason);
+            throw new ValidationError(editValidation.reason);
         }
 
         // Validate and update allowed fields
@@ -1128,7 +1139,7 @@ class DutyService {
             newStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
             const bufferTime = new Date(newStartTime.getTime() - 15 * 60 * 1000);
             if (bufferTime <= now) {
-                throw new Error('New start time must be at least 15 minutes in the future');
+                throw new ValidationError('New start time must be at least 15 minutes in the future');
             }
         }
 
@@ -1170,7 +1181,7 @@ class DutyService {
             .populate('statusHistory.changedBy', 'name email role');
 
         if (!duty) {
-            throw new Error('Duty not found');
+            throw new NotFoundError('Duty not found');
         }
 
         // Role-based authorization
@@ -1180,7 +1191,7 @@ class DutyService {
             // Find medical staff profile
             const medicalStaff = await MedicalStaff.findOne({ user: userId });
             if (!medicalStaff) {
-                throw new Error('Medical staff profile not found');
+                throw new NotFoundError('Medical staff profile not found');
             }
 
             // Staff can view available duties OR duties assigned to them
@@ -1191,11 +1202,11 @@ class DutyService {
             const isExpired = duty.status === 'expired';
 
             if (!isAssigned && !isAvailable) {
-                throw new Error('Access denied: You can only view available duties or duties assigned to you');
+                throw new ForbiddenError('Access denied: You can only view available duties or duties assigned to you');
             }
 
             if (isExpired) {
-                throw new Error('Access denied: This duty has expired and is no longer available');
+                throw new ForbiddenError('Access denied: This duty has expired and is no longer available');
             }
 
             // Add distance information for staff members only (always show distance)
@@ -1326,12 +1337,12 @@ class DutyService {
             // Find hospital profile
             const hospital = await Hospital.findOne({ user: userId });
             if (!hospital) {
-                throw new Error('Hospital profile not found');
+                throw new NotFoundError('Hospital profile not found');
             }
 
             // Hospital can only view their own duties
             if (duty.hospital._id.toString() !== hospital._id.toString()) {
-                throw new Error('Access denied: You can only view your hospital duties');
+                throw new ForbiddenError('Access denied: You can only view your hospital duties');
             }
 
             // Add distance/time ONLY when duty is assigned (accepted by staff)
@@ -1401,7 +1412,7 @@ class DutyService {
         } else if (userRole === 'admin') {
             // Admin can view any duty — fall through to return below
         } else {
-            throw new Error('Access denied: insufficient role to view duty details');
+            throw new ForbiddenError('Access denied: insufficient role to view duty details');
         }
 
         // For hospital users (or when distance calculation fails), add review data and return
@@ -1442,7 +1453,7 @@ class DutyService {
             // Get staff information for role filtering
             const staff = await MedicalStaff.findOne({ user: staffId });
             if (!staff) {
-                throw new Error('Staff profile not found');
+                throw new NotFoundError('Staff profile not found');
             }
 
             console.log(`Processing available duties for staff ${staffId}:`, {
@@ -1562,7 +1573,7 @@ class DutyService {
             };
         } catch (error) {
             console.error('Error in getAvailableJobsWithDistance:', error.message);
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -1574,12 +1585,12 @@ class DutyService {
             const duty = await Duty.findById(dutyId).populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates');
 
             if (!duty) {
-                throw new Error('Duty not found');
+                throw new NotFoundError('Duty not found');
             }
 
             // Add proper null check before accessing location properties
             if (!currentLocation || !currentLocation.latitude || !currentLocation.longitude) {
-                throw new Error('Staff location is required to get route information. Please enable location in your dashboard or update your profile location.');
+                throw new ValidationError('Staff location is required to get route information. Please enable location in your dashboard or update your profile location.');
             }
 
             const staffLat = currentLocation.latitude;
@@ -1591,7 +1602,7 @@ class DutyService {
                 !duty.hospital.coordinates.coordinates.latitude ||
                 !duty.hospital.coordinates.coordinates.longitude) {
 
-                throw new Error('Hospital location not found');
+                throw new NotFoundError('Hospital location not found');
             }
 
             //  Access named coordinates
@@ -1653,10 +1664,10 @@ class DutyService {
                 };
             } catch (error) {
                 console.error('Directions API failed:', error.message);
-                throw new Error(`Unable to get route information: ${error.message}`);
+                throw new AppError('Unable to get route information. Please try again.', 503);
             }
         } catch (error) {
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -1666,13 +1677,13 @@ class DutyService {
         const TERMINAL_STATUSES = ['completed', 'cancelled', 'incomplete'];
 
         if (statusFilter && !TERMINAL_STATUSES.includes(statusFilter)) {
-            throw new Error(`Invalid status filter. Allowed values: ${TERMINAL_STATUSES.join(', ')}`);
+            throw new ValidationError(`Invalid status filter. Allowed values: ${TERMINAL_STATUSES.join(', ')}`);
         }
 
         try {
             const staff = await MedicalStaff.findOne({ user: staffUserId });
             if (!staff) {
-                throw new Error('Medical staff profile not found');
+                throw new NotFoundError('Medical staff profile not found');
             }
 
             const paginationParams = getPaginationParams(page, limit);
@@ -1785,7 +1796,7 @@ class DutyService {
             };
 
         } catch (error) {
-            throw new Error(`Error fetching completed duties: ${error.message}`);
+            throw error;
         }
     }
 
@@ -1799,7 +1810,7 @@ class DutyService {
         // ========= RECEIPT =========
         if (dutyId) {
             const duty = duties.find(d => d._id.toString() === dutyId);
-            if (!duty) throw new Error('Duty not found');
+            if (!duty) throw new NotFoundError('Duty not found');
 
             const receiptData = {
                 staff: {
@@ -1981,7 +1992,7 @@ class DutyService {
             // Add role filter if specified
             if (role) {
                 if (!ALLOWED_ROLES.includes(role)) {
-                    throw new Error(`Invalid role: ${role}`);
+                    throw new ValidationError(`Invalid role: ${role}`);
                 }
                 query.staffRole = role;
             }
@@ -1990,7 +2001,7 @@ class DutyService {
             if (status) {
                 const allowedStatuses = ['assigned', 'enroute', 'in-progress'];
                 if (!allowedStatuses.includes(status)) {
-                    throw new Error(`Invalid status: ${status}`);
+                    throw new ValidationError(`Invalid status: ${status}`);
                 }
                 query.status = status;
             }
@@ -2079,16 +2090,16 @@ class DutyService {
                 .populate('hospital', 'hospitalLegalName location currentAddress coordinates');
 
             if (!duty) {
-                throw new Error('Duty not found or does not belong to your hospital');
+                throw new NotFoundError('Duty not found or does not belong to your hospital');
             }
 
             // Verify duty is in active state
             if (!['assigned', 'enroute', 'in-progress'].includes(duty.status)) {
-                throw new Error('Duty is not in active state');
+                throw new ValidationError('Duty is not in active state');
             }
 
             if (!duty.assignedTo) {
-                throw new Error('Duty is not assigned to any staff');
+                throw new ValidationError('Duty is not assigned to any staff');
             }
 
             // Use hospital-specific route formatting (not admin service)
@@ -2140,7 +2151,7 @@ class DutyService {
             }
 
             if (!currentLocation) {
-                throw new Error('Unable to determine staff location');
+                throw new ValidationError('Unable to determine staff location');
             }
 
             // Get route information
@@ -2381,37 +2392,37 @@ class DutyService {
         // 1. Hospital validation
         const hospital = await Hospital.findById(hospitalId);
         if (!hospital) {
-            throw new Error('Hospital not found');
+            throw new NotFoundError('Hospital not found');
         }
 
         // 2. Duty validation
         const duty = await Duty.findById(dutyId);
         if (!duty) {
-            throw new Error('Duty not found');
+            throw new NotFoundError('Duty not found');
         }
 
         // 3. Check duty belongs to hospital
         if (duty.hospital.toString() !== hospitalId) {
-            throw new Error('Duty does not belong to this hospital');
+            throw new UnprocessableEntityError('Duty does not belong to this hospital');
         }
 
         // 4. Only one staff can take duty
         if (duty.status !== 'available') {
-            throw new Error('Duty is already assigned or not available');
+            throw new ConflictError('Duty is already assigned or not available');
         }
 
         // 5. Staff validation
         const staff = await MedicalStaff.findById(staffId);
         if (!staff) {
-            throw new Error('Medical staff not found');
+            throw new NotFoundError('Medical staff not found');
         }
 
-        // 6. Role match 
+        // 6. Role match
         const normalizedStaffRole = normalizeRole(staff.jobRole);
         const normalizedDutyRole = normalizeRole(duty.staffRole);
 
         if (normalizedStaffRole !== normalizedDutyRole) {
-            throw new Error(`Role mismatch: duty requires ${duty.staffRole}`);
+            throw new UnprocessableEntityError(`Role mismatch: duty requires ${duty.staffRole}`);
         }
 
         // 7. Time validation (same as hospital)
@@ -2424,7 +2435,7 @@ class DutyService {
         dutyStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
 
         if (now >= dutyStartTime) {
-            throw new Error('Cannot assign duty after start time');
+            throw new UnprocessableEntityError('Cannot assign duty after start time');
         }
 
         // 8. Overlap check 
@@ -2439,7 +2450,7 @@ class DutyService {
 
         for (const existing of existingDuties) {
             if (doDutiesOverlap(duty, existing)) {
-                throw new Error('Staff already has overlapping duty');
+                throw new ConflictError('Staff already has overlapping duty');
             }
         }
 

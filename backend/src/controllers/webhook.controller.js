@@ -38,7 +38,7 @@ exports.handleAadhaarWebhook = async (req, res) => {
 
         if (!verifyWebhookToken(receivedToken)) {
             logger.warn('Webhook rejected: invalid or missing token', { ip: req.ip });
-            return res.sendStatus(401);
+            return res.status(401).json({ success: false, message: 'Unauthorized' });
         }
 
         // ── 2. Validate payload ───────────────────────────────────────────────
@@ -47,7 +47,7 @@ exports.handleAadhaarWebhook = async (req, res) => {
         const requestId = data.reference_id;
         if (!requestId) {
             logger.warn('Webhook rejected: missing reference_id in payload');
-            return res.sendStatus(400);
+            return res.status(400).json({ success: false, message: 'Invalid payload: missing reference_id' });
         }
 
         // ── 3. Update document ────────────────────────────────────────────────
@@ -83,10 +83,10 @@ exports.handleAadhaarWebhook = async (req, res) => {
         }
 
         logger.info(`Aadhaar webhook processed: referenceId=${requestId}, modified=${result.modifiedCount}`);
-        res.sendStatus(200);
+        res.status(200).json({ success: true, message: 'Webhook processed successfully' });
 
     } catch (err) {
         logger.error(`Webhook error: ${err.message}`);
-        res.sendStatus(500);
+        res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };

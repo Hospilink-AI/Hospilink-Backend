@@ -54,6 +54,20 @@ class RateLimitError extends AppError {
     }
 }
 
+class UnprocessableEntityError extends AppError {
+    constructor(message = 'Unprocessable entity') {
+        super(message, 422);
+        this.name = 'UnprocessableEntityError';
+    }
+}
+
+class GoneError extends AppError {
+    constructor(message = 'Resource no longer available') {
+        super(message, 410);
+        this.name = 'GoneError';
+    }
+}
+
 // Error handler middleware
 const errorHandler = (err, req, res, next) => {
     err.statusCode = err.statusCode || 500;
@@ -233,6 +247,8 @@ module.exports = {
     ForbiddenError,
     ConflictError,
     RateLimitError,
+    UnprocessableEntityError,
+    GoneError,
     errorHandler,
     globalErrorHandler,
     asyncHandler,

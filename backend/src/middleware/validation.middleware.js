@@ -732,7 +732,7 @@ const validateNearbyStaff = (req, res, next) => {
 
 // Validation for duty creation to prevent past/invalid times
 const validateDutyCreation = (req, res, next) => {
-    const { date, start_time, urgency, staff_count } = req.body;
+    const { date, start_time, urgency, staff_count, staff_role, duty_sub_type } = req.body;
     const errors = [];
     
     // Validate staff_count if provided
@@ -740,6 +740,14 @@ const validateDutyCreation = (req, res, next) => {
         const count = parseInt(staff_count);
         if (isNaN(count) || count < 1 || count > 50) {
             errors.push('staff_count must be a number between 1 and 50');
+        }
+    }
+
+    // RMO sub-type: required when role is rmo, forbidden otherwise
+    if (staff_role === 'rmo') {
+        const validSubTypes = ['ward', 'icu', 'casualty'];
+        if (!duty_sub_type || !validSubTypes.includes(duty_sub_type)) {
+            errors.push('Sub-type is required for RMO duties');
         }
     }
     

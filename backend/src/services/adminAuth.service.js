@@ -28,13 +28,13 @@ class AdminAuthService {
             ]);
             
             if (!admin) {
-                throw new NotFoundError('Admin not found with this email');
+                throw new UnauthorizedError('Invalid email or password.');
             }
 
-            // Verify password 
+            // Verify password
             const isPasswordValid = await admin.comparePassword(password);
             if (!isPasswordValid) {
-                throw new UnauthorizedError('Invalid credentials');
+                throw new UnauthorizedError('Invalid email or password.');
             }
 
             // Generate OTP

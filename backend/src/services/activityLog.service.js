@@ -12,6 +12,7 @@ const {
 } = require('../utils/activityLog.helpers');
 const { ACTIVITY_STATUSES } = require('../utils/activityLog.constants');
 const logger = require('../utils/logger');
+const { NotFoundError } = require('../middleware/error.middleware');
 
 /**
  * Activity Log Service
@@ -128,7 +129,7 @@ class ActivityLogService {
             const log = await ActivityLog.findById(logId).lean();
             
             if (!log) {
-                throw new Error('Activity log not found');
+                throw new NotFoundError('Activity log not found');
             }
             
             return {
