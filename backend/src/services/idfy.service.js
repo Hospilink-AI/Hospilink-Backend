@@ -103,10 +103,10 @@ exports.verifyAadhaarDigilocker = async (referenceId) => {
                     key_id: process.env.IDFY_KEY_ID,
                     ou_id: process.env.IDFY_OU_ID,
                     secret: process.env.IDFY_SECRET,
-                    // callback_url: `${process.env.BACKEND_URL}/api/webhook/idfy-aadhaar?wt=${process.env.IDFY_WEBHOOK_TOKEN}`,
+                    callback_url: `${process.env.BASE_URL}/api/webhook/idfy-aadhaar?wt=${process.env.IDFY_WEBHOOK_TOKEN}`,
                     // doc_type: "AADHAAR",
                     // file_format: "xml"
-                    callback_url: `${process.env.BASE_URL}/api/webhook/idfy-aadhaar`,
+                    // callback_url: `${process.env.BASE_URL}/api/webhook/idfy-aadhaar`,
                     doc_type: "ADHAR",
                     file_format: "xml",
                     extra_fields: {}
