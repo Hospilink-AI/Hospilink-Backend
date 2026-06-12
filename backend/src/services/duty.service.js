@@ -125,7 +125,7 @@ class DutyService {
             const next = new Date(d);
             next.setDate(next.getDate() + 1);
             match.date = { $gte: d, $lt: next };
-        // Date range filter
+            // Date range filter
         } else if (startDate || endDate) {
             match.date = {};
             if (startDate) match.date.$gte = new Date(startDate);
@@ -207,19 +207,19 @@ class DutyService {
     // Duty history for hospital — shows only completed, cancelled, expired, incomplete statuses
     async getDutyHistory({ hospitalUserId, date, startDate, endDate, status, staffRole, page = 1, limit = 10 }) {
         const { skip } = getPaginationParams(page, limit);
-    
+
         const hospital = await Hospital.findOne({ user: hospitalUserId });
         if (!hospital) return { duties: [], pagination: getPaginationMeta(0, page, limit) };
-    
+
         const match = { hospital: hospital._id };
-    
+
         // Single date filter
         if (date) {
             const d = new Date(date);
             const next = new Date(d);
             next.setDate(next.getDate() + 1);
             match.date = { $gte: d, $lt: next };
-        // Date range filter
+            // Date range filter
         } else if (startDate || endDate) {
             match.date = {};
             if (startDate) match.date.$gte = new Date(startDate);
@@ -229,7 +229,7 @@ class DutyService {
                 match.date.$lt = end;
             }
         }
-    
+
         // Only show historical statuses for duties-history endpoint
         const historicalStatuses = ['completed', 'cancelled', 'expired', 'incomplete'];
         if (status) {
@@ -242,9 +242,9 @@ class DutyService {
             // Default to showing only historical statuses
             match.status = { $in: historicalStatuses };
         }
-    
+
         if (staffRole) match.staffRole = staffRole;
-    
+
         const [duties, total] = await Promise.all([
             Duty.find(match)
                 .populate({
@@ -258,7 +258,7 @@ class DutyService {
                 .limit(parseInt(limit)),
             Duty.countDocuments(match)
         ]);
-    
+
         const formatted = await Promise.all(duties.map(async (duty) => {
             const staff = duty.assignedTo;
             const hoursCompleted = calculateDutyDuration(
@@ -303,7 +303,7 @@ class DutyService {
                 cancellation: duty.cancellation || null
             };
         }));
-    
+
         return {
             duties: formatted,
             pagination: getPaginationMeta(total, parseInt(page), parseInt(limit))
@@ -347,7 +347,7 @@ class DutyService {
 
                 // ── 3. Role check ─────────────────────────────────────────────
                 const normalizedStaffRole = normalizeRole(medicalStaff.jobRole);
-                const normalizedDutyRole  = normalizeRole(duty.staffRole);
+                const normalizedDutyRole = normalizeRole(duty.staffRole);
 
                 if (normalizedStaffRole !== normalizedDutyRole) {
                     throw new ForbiddenError(`Role mismatch: This duty requires a ${duty.staffRole}, but your profile shows ${medicalStaff.jobRole}`);
@@ -1346,14 +1346,14 @@ class DutyService {
             }
 
             // Add distance/time ONLY when duty is assigned (accepted by staff)
-            const shouldShowDistance = duty.status === 'assigned' || 
-                                    duty.status === 'enroute' || 
-                                    duty.status === 'in-progress';
+            const shouldShowDistance = duty.status === 'assigned' ||
+                duty.status === 'enroute' ||
+                duty.status === 'in-progress';
 
             if (shouldShowDistance && duty.assignedTo && duty.assignedTo.user) {
                 try {
                     console.log(`Hospital viewing assigned duty ${duty._id} - calculating staff distance`);
-                    
+
                     // Get assigned staff's real-time location
                     const locationInfo = await DashboardService.getStaffLocationForDuties(duty.assignedTo.user._id);
                     const staffLat = locationInfo.location.latitude;
@@ -1752,6 +1752,7 @@ class DutyService {
                     hospital: duty.hospital,
                     assignedTo: duty.assignedTo,
                     staffRole: duty.staffRole,
+                    dutySubType: duty.dutySubType,
                     status: duty.status,
                     date: duty.date,
                     endDate: duty.endDate,
@@ -2189,7 +2190,7 @@ class DutyService {
                     avgRating: staff.averageRating || 0,
                     address: staff.currentAddress ? `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : `${staff.city}, ${staff.state} - ${staff.pincode}`,
                     currentAddress: staff.currentAddress,
-                    city: staff.city, 
+                    city: staff.city,
                     state: staff.state,
                     pincode: staff.pincode,
                     location: {
@@ -2386,7 +2387,7 @@ class DutyService {
     }
 
 
-    
+
     async assignDutyByAdmin({ hospitalId, dutyId, staffId, adminId }) {
 
         // 1. Hospital validation
