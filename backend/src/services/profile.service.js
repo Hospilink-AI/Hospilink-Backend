@@ -16,6 +16,7 @@ const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');
 const logger = require('../utils/logger');
 const { formatRoleForDisplay } = require('../utils/helpers');
 const DashboardService = require('./dashboard.service');
+const SMSService = require('./sms.service');
 const {
     ValidationError,
     NotFoundError,
@@ -54,6 +55,13 @@ class ProfileService {
             const existingProfile = await MedicalStaff.findOne({ user: userId });
             if (existingProfile) {
                 throw new ConflictError('Medical staff profile already exists');
+            }
+
+            // Phone must be OTP-verified before profile creation
+            const normalizedStaffPhone = SMSService.normalizePhone(profileData.phoneNumber);
+            const staffPhoneVerified = await cacheService.getPhoneVerified(userId, normalizedStaffPhone);
+            if (!staffPhoneVerified) {
+                throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
             }
 
             let coordinates = null;
@@ -98,6 +106,9 @@ class ProfileService {
             });
 
             await medicalStaffProfile.save();
+
+            // Consume the verified flag — single-use, clean up immediately after save
+            await cacheService.deletePhoneVerified(userId, normalizedStaffPhone);
 
             // Populate user data
             await medicalStaffProfile.populate('user', 'name email role isEmailVerified');
@@ -168,6 +179,13 @@ class ProfileService {
             const existingProfile = await Hospital.findOne({ user: userId });
             if (existingProfile) {
                 throw new ConflictError('Hospital profile already exists');
+            }
+
+            // Phone must be OTP-verified before profile creation
+            const normalizedHospitalPhone = SMSService.normalizePhone(profileData.phoneNumber);
+            const hospitalPhoneVerified = await cacheService.getPhoneVerified(userId, normalizedHospitalPhone);
+            if (!hospitalPhoneVerified) {
+                throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
             }
 
             let coordinates;
@@ -257,6 +275,9 @@ class ProfileService {
             });
 
             await hospitalProfile.save();
+
+            // Consume the verified flag — single-use, clean up immediately after save
+            await cacheService.deletePhoneVerified(userId, normalizedHospitalPhone);
 
             // Populate user data
             await hospitalProfile.populate('user', 'name email role isEmailVerified');

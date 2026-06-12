@@ -1606,6 +1606,59 @@ const validateHospitalDutyRouteMap = (req, res, next) => {
 };
 
 
+// Phone OTP validators (profile creation flow) 
+const validateSendPhoneOTP = (req, res, next) => {
+    const { phoneNumber } = req.body;
+    const errors = [];
+
+    const allowedFields = ['phoneNumber'];
+    const unexpected = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpected.length > 0) {
+        errors.push(`Unexpected fields: ${unexpected.join(', ')}`);
+    }
+
+    if (!phoneNumber || phoneNumber.trim().length === 0) {
+        errors.push('Phone number is required');
+    } else if (!/^\+91\s?[6-9]\d{9}$/.test(phoneNumber.trim())) {
+        errors.push('Phone number must be a valid Indian mobile number starting with +91');
+    }
+
+    if (errors.length > 0) {
+        throw new ValidationError(errors.join(', '));
+    }
+
+    next();
+};
+
+
+
+
+const validateVerifyPhoneOTP = (req, res, next) => {
+    const { phoneNumber, otp } = req.body;
+    const errors = [];
+
+    const allowedFields = ['phoneNumber', 'otp'];
+    const unexpected = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpected.length > 0) {
+        errors.push(`Unexpected fields: ${unexpected.join(', ')}`);
+    }
+
+    if (!phoneNumber || phoneNumber.trim().length === 0) {
+        errors.push('Phone number is required');
+    } else if (!/^\+91\s?[6-9]\d{9}$/.test(phoneNumber.trim())) {
+        errors.push('Phone number must be a valid Indian mobile number starting with +91');
+    }
+
+    if (!otp || !/^\d{6}$/.test(otp)) {
+        errors.push('OTP must be exactly 6 digits');
+    }
+
+    if (errors.length > 0) {
+        throw new ValidationError(errors.join(', '));
+    }
+
+    next();
+};
 
 
 module.exports = {
@@ -1642,5 +1695,7 @@ module.exports = {
     validateDashboardLocationPermission,
     validateDashboardLocationUpdate,
     validateHospitalActiveDutiesQuery,
-    validateHospitalDutyRouteMap
+    validateHospitalDutyRouteMap,
+    validateSendPhoneOTP,
+    validateVerifyPhoneOTP
 };
