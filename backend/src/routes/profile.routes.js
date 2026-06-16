@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const profileController = require('../controllers/profile.controller');
 const dashboardController = require('../controllers/dashboard.controller');
-const { protect, authorize } = require('../middleware/auth.middleware');
+const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
 const {
     validateMedicalStaffProfile,
     validateHospitalProfile,
@@ -14,10 +14,11 @@ const {
 } = require('../middleware/validation.middleware');
 const { staffAvailabilityRateLimit } = require('../middleware/rateLimit.middleware');
 const upload = require('../middleware/upload.middleware');
-const { requireHospitalVerification, requireStaffVerificationandisAvailable, requireVerifiedStaffOnly} = require('../middleware/accountsVerification.middleware');
+const { requireHospitalVerification, requireStaffVerificationandisAvailable, requireVerifiedStaffOnly } = require('../middleware/accountsVerification.middleware');
 
 // Apply protection to all profile routes
 router.use(protect);
+router.use(checkSuspension);
 
 // Get current user profile
 router.get('/me', profileController.getMyProfile);
@@ -50,7 +51,7 @@ router.get('/services', profileController.getAvailableServices);
 router.patch('/staff-availability',
     staffAvailabilityRateLimit,
     authorize('staff'),
-    requireVerifiedStaffOnly, 
+    requireVerifiedStaffOnly,
     validateStaffAvailability,
     profileController.toggleMedicalStaffAvailability
 );
@@ -59,7 +60,7 @@ router.patch('/staff-availability',
 // Get nearby available staff for hospital map dashboard
 router.get('/nearby-staff',
     authorize('hospital'),
-    requireHospitalVerification, 
+    requireHospitalVerification,
     validateNearbyStaff,
     profileController.getNearbyStaff
 );

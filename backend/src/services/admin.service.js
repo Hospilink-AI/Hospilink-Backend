@@ -117,7 +117,7 @@ class AdminService {
                         totalHospitals: [
                             { $count: 'count' }
                         ],
-                        
+
                         // Previous period hospitals (for percentage change)
                         previousHospitals: [
                             {
@@ -130,7 +130,7 @@ class AdminService {
                             },
                             { $count: 'count' }
                         ],
-                        
+
                         // Recent hospitals (last 30 days)
                         recentHospitals: [
                             {
@@ -190,13 +190,13 @@ class AdminService {
             const totalHospitals = hospitalStats.totalHospitals[0]?.count || 0;
             const previousHospitals = hospitalStats.previousHospitals[0]?.count || 0;
             const recentHospitals = hospitalStats.recentHospitals[0]?.count || 0;
-            
+
             const totalStaff = staffStats.totalStaff[0]?.count || 0;
             const previousStaff = staffStats.previousStaff[0]?.count || 0;
             const recentStaff = staffStats.recentStaff[0]?.count || 0;
 
             // Calculate percentage change (comparing recent 30 days vs previous 30 days)
-            const hospitalChange = previousHospitals > 0 
+            const hospitalChange = previousHospitals > 0
                 ? Math.round(((recentHospitals - previousHospitals) / previousHospitals) * 100)
                 : recentHospitals > 0 ? 100 : 0;
 
@@ -477,7 +477,7 @@ class AdminService {
 
                         // Get real-time location from dashboard cache (falls back to profile location)
                         const locationData = await DashboardService.getStaffLocationForDuties(staffMember.user._id.toString());
-                        
+
                         return {
                             staff: staffMember,
                             staffLat: locationData.location.latitude,
@@ -526,7 +526,7 @@ class AdminService {
             // Combine staff with distance results
             const staffWithRealTimeLocation = validStaffWithLocations.map(s => {
                 const distanceResult = distanceResults.get(s.staff._id.toString());
-                
+
                 if (!distanceResult) {
                     console.warn(`Admin: No distance result for staff ${s.staff._id}`);
                     return null;
@@ -572,7 +572,7 @@ class AdminService {
             fallbackLocationCalls = validStaffWithLocations.filter(s => !s.success).length;
 
             console.log(`[Admin Google Maps API] Total calls: ${googleMapsApiCalls} (Real-time locations: ${realTimeLocationCalls}, Fallback locations: ${fallbackLocationCalls})`);
-            
+
             // Get duty status for all valid staff (batch optimized)
             const staffIds = validStaff.map(staff => staff.id);
             const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');
@@ -581,7 +581,7 @@ class AdminService {
             // Add duty status to staff data
             const staffWithDutyStatus = validStaff.map(staff => {
                 const dutyStatus = dutyStatusMap.get(staff.id.toString());
-                
+
                 return {
                     ...staff,
                     // Duty status fields
@@ -603,7 +603,7 @@ class AdminService {
                         id: hospital._id,
                         name: hospital.hospitalLegalName,
                         address: {
-                            currentAddress: hospital.currentAddress ,
+                            currentAddress: hospital.currentAddress,
                             city: hospital.city,
                             state: hospital.state,
                             pincode: hospital.pincode
@@ -625,13 +625,13 @@ class AdminService {
                         fullyAvailable: staffWithDutyStatus.filter(s => s.availabilityStatus === 'fully_available').length,
                         hasUpcomingDuties: staffWithDutyStatus.filter(s => s.availabilityStatus === 'has_upcoming_duties').length,
                         hasActiveDuties: staffWithDutyStatus.filter(s => s.availabilityStatus === 'has_active_duties').length,
-                        
+
                         verificationStats: {
                             verified: staffWithDutyStatus.filter(s => s.verificationStatus === 'verified').length,
                             pending: staffWithDutyStatus.filter(s => s.verificationStatus === 'pending').length,
                             rejected: staffWithDutyStatus.filter(s => s.verificationStatus === 'rejected').length
                         },
-                        
+
                         // Location source statistics
                         usingRealTimeLocation: staffWithDutyStatus.filter(s => s.location.source === 'browser').length,
                         usingProfileLocation: staffWithDutyStatus.filter(s => s.location.source === 'profile' || s.location.source === 'profile_fallback').length
@@ -662,7 +662,7 @@ class AdminService {
     // GET /api/admin/hospitals-list — simple list with id, name, location (for dropdowns)
     async getHospitalSimpleList(nameFilter = null) {
         const match = {};
-        
+
         if (nameFilter) {
             match.hospitalLegalName = { $regex: escapeRegex(nameFilter.trim()), $options: 'i' };
         }
@@ -718,11 +718,13 @@ class AdminService {
                     let: { hid: '$_id' },
                     pipeline: [
                         { $match: { $expr: { $eq: ['$hospital', '$$hid'] } } },
-                        { $group: {
-                            _id: null,
-                            total: { $sum: 1 },
-                            occupied: { $sum: { $cond: [{ $in: ['$status', ['assigned', 'enroute', 'in-progress']] }, 1, 0] } }
-                        }}
+                        {
+                            $group: {
+                                _id: null,
+                                total: { $sum: 1 },
+                                occupied: { $sum: { $cond: [{ $in: ['$status', ['assigned', 'enroute', 'in-progress']] }, 1, 0] } }
+                            }
+                        }
                     ],
                     as: 'dutyStats'
                 }
@@ -761,10 +763,12 @@ class AdminService {
                                         $filter: {
                                             input: { $ifNull: [{ $arrayElemAt: ['$docRecord.documents', 0] }, []] },
                                             as: 'd',
-                                            cond: { $and: [
-                                                { $eq: ['$$d.verificationStatus', 'verified'] },
-                                                { $ne: ['$$d.isDeleted', true] }
-                                            ]}
+                                            cond: {
+                                                $and: [
+                                                    { $eq: ['$$d.verificationStatus', 'verified'] },
+                                                    { $ne: ['$$d.isDeleted', true] }
+                                                ]
+                                            }
                                         }
                                     }
                                 }
@@ -818,7 +822,7 @@ class AdminService {
             for (const doc of docRecord.documents.filter(d => !d.isDeleted)) {
                 let url = null;
                 if (doc.s3Key) {
-                    try { url = await generatePreSignedURL(doc.s3Key); } catch (_) {}
+                    try { url = await generatePreSignedURL(doc.s3Key); } catch (_) { }
                 }
                 documents.push({
                     id: doc._id,
@@ -859,7 +863,7 @@ class AdminService {
         };
     }
 
-    
+
 
     // PATCH /api/admin/hospitals/:id/verify
     async verifyHospital(hospitalId) {
@@ -878,14 +882,14 @@ class AdminService {
 
         // Invalidate cache with retry mechanism
         const cacheInvalidated = await CacheInvalidationService.invalidateHospitalVerificationCache(hospital.user._id);
-        
+
         if (!cacheInvalidated) {
             logger.error(`Failed to invalidate cache for hospital ${hospitalId} after verification`);
         }
 
         // Refresh cache to ensure consistency
         const cacheRefreshed = await CacheInvalidationService.refreshHospitalVerificationCache(hospital.user._id);
-        
+
         if (!cacheRefreshed) {
             logger.error(`Failed to refresh cache for hospital ${hospitalId} after verification`);
         }
@@ -907,8 +911,8 @@ class AdminService {
         notificationEmitter.emitHospitalVerified(hospital, hospital.user._id.toString())
             .catch(err => logger.error('Verification notification error:', err.message));
 
-        return { 
-            id: hospital._id, 
+        return {
+            id: hospital._id,
             verificationStatus: hospital.verificationStatus,
             previousStatus: previousStatus,
             cacheInvalidated: cacheInvalidated,
@@ -941,14 +945,14 @@ class AdminService {
 
         // IMMEDIATE: Invalidate cache with retry mechanism
         const cacheInvalidated = await CacheInvalidationService.invalidateHospitalVerificationCache(hospital.user._id);
-        
+
         if (!cacheInvalidated) {
             logger.error(`Failed to invalidate cache for hospital ${hospitalId} after rejection`);
         }
 
         // IMMEDIATE: Refresh cache to ensure consistency
         const cacheRefreshed = await CacheInvalidationService.refreshHospitalVerificationCache(hospital.user._id);
-        
+
         if (!cacheRefreshed) {
             logger.error(`Failed to refresh cache for hospital ${hospitalId} after rejection`);
         }
@@ -970,9 +974,9 @@ class AdminService {
         notificationEmitter.emitHospitalRejected(hospital, hospital.user._id.toString(), reason)
             .catch(err => logger.error('Rejection notification error:', err.message));
 
-        return { 
-            id: hospital._id, 
-            verificationStatus: hospital.verificationStatus, 
+        return {
+            id: hospital._id,
+            verificationStatus: hospital.verificationStatus,
             rejectionReason: hospital.rejectionReason,
             previousStatus: previousStatus,
             cacheInvalidated: cacheInvalidated,
@@ -989,7 +993,7 @@ class AdminService {
                 $facet: {
                     // Total staff count
                     totalStaff: [{ $count: 'count' }],
-                    
+
                     // Pending verification count (account level)
                     pendingVerification: [
                         {
@@ -999,7 +1003,7 @@ class AdminService {
                         },
                         { $count: 'count' }
                     ],
-                    
+
                     // Approved count (verified accounts)
                     approvedStaff: [
                         {
@@ -1009,7 +1013,7 @@ class AdminService {
                         },
                         { $count: 'count' }
                     ],
-                    
+
                     // On duty count (staff with in-progress duties)
                     onDutyStaff: [
                         {
@@ -1027,7 +1031,7 @@ class AdminService {
                         },
                         { $count: 'count' }
                     ],
-                    
+
                     // Available/Unavailable counts
                     availabilityStats: [
                         {
@@ -1073,7 +1077,7 @@ class AdminService {
                 $facet: {
                     // Total hospital count
                     totalHospitals: [{ $count: 'count' }],
-                    
+
                     // Pending verification count
                     pendingVerification: [
                         {
@@ -1083,7 +1087,7 @@ class AdminService {
                         },
                         { $count: 'count' }
                     ],
-                    
+
                     // Verified hospitals count
                     verifiedHospitals: [
                         {
@@ -1096,13 +1100,13 @@ class AdminService {
                 }
             }
         ];
- 
+
         const [result] = await Hospital.aggregate(pipeline);
- 
+
         const totalHospitals = result.totalHospitals[0]?.count || 0;
         const pendingVerification = result.pendingVerification[0]?.count || 0;
         const verifiedHospitals = result.verifiedHospitals[0]?.count || 0;
- 
+
         return {
             totalHospitals,
             pendingVerification,
@@ -1110,7 +1114,7 @@ class AdminService {
         };
     }
 
-    
+
 
     // GET /api/admin/medical-staff — paginated list with filters (search, role, availability)
     async getMedicalStaffListWithFilters({ search, role, availability, status, location, page = 1, limit = 10 }) {
@@ -1145,7 +1149,7 @@ class AdminService {
                 }
             },
             { $unwind: { path: '$userInfo', preserveNullAndEmptyArrays: true } },
-            
+
             // Add search filter for name and email only
             ...(search ? [{
                 $match: {
@@ -1156,7 +1160,7 @@ class AdminService {
                     ]
                 }
             }] : []),
-            
+
             // Lookup completed duties count
             {
                 $lookup: {
@@ -1178,9 +1182,9 @@ class AdminService {
                     as: 'completedDuties'
                 }
             },
-            
+
             { $sort: { fullName: 1 } },
-            
+
             {
                 $facet: {
                     data: [
@@ -1193,7 +1197,7 @@ class AdminService {
                                 fullName: 1,
                                 jobRole: 1,
                                 currentAddress: '$currentAddress',
-                                city: '$city', 
+                                city: '$city',
                                 state: '$state',
                                 pincode: '$pincode',
                                 email: '$userInfo.email',
@@ -1240,13 +1244,13 @@ class AdminService {
     // GET /api/admin/medical-staff-list — verified staff list with city and jobRole filters
     async getVerifiedMedicalStaffList({ city, jobRole, page = 1, limit = 10 }) {
         const { skip } = getPaginationParams(page, limit);
-    
+
         // Build match stage - only verified staff
         const match = { verificationStatus: 'verified' };
-            
+
         if (city) match.city = { $regex: escapeRegex(city.trim()), $options: 'i' };
         if (jobRole) match.jobRole = jobRole;
-    
+
         const pipeline = [
             { $match: match },
             {
@@ -1286,9 +1290,9 @@ class AdminService {
                 }
             }
         ];
-    
+
         const [result] = await MedicalStaff.aggregate(pipeline);
-    
+
         // Generate pre-signed URLs for profile pictures
         const staffWithUrls = await Promise.all((result.data || []).map(async (staff) => {
             let profilePictureUrl = null;
@@ -1314,7 +1318,7 @@ class AdminService {
                 profilePicture: profilePictureUrl
             };
         }));
-    
+
         return {
             staff: staffWithUrls,
             pagination: getPaginationMeta(result.totalCount[0]?.count || 0, parseInt(page), parseInt(limit))
@@ -1339,7 +1343,7 @@ class AdminService {
             for (const doc of docRecord.documents.filter(d => !d.isDeleted)) {
                 let url = null;
                 if (doc.s3Key) {
-                    try { url = await generatePreSignedURL(doc.s3Key); } catch (_) {}
+                    try { url = await generatePreSignedURL(doc.s3Key); } catch (_) { }
                 }
                 documents.push({
                     id: doc._id,
@@ -1370,8 +1374,8 @@ class AdminService {
             city: staff.city,
             state: staff.state,
             pincode: staff.pincode,
-            location: staff.currentAddress ? 
-                `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : 
+            location: staff.currentAddress ?
+                `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` :
                 `${staff.city}, ${staff.state} - ${staff.pincode}`,
             phoneNumber: staff.phoneNumber,
             email: staff.user?.email,
@@ -1449,11 +1453,11 @@ class AdminService {
         notificationEmitter.emitStaffVerified(staff, staff.user._id.toString())
             .catch(err => logger.error('Verification notification error:', err.message));
 
-        return { 
-            id: staff._id, 
+        return {
+            id: staff._id,
             verificationStatus: staff.verificationStatus,
             previousStatus: previousStatus,
-            isAvailable: staff.isAvailable, 
+            isAvailable: staff.isAvailable,
             message: staff.isAvailable ? 'Staff verified and availability enabled' : 'Staff verified',
             cacheInvalidated: cacheInvalidated,
             cacheRefreshed: !!cacheRefreshed
@@ -1503,7 +1507,7 @@ class AdminService {
         ]);
 
         logger.info(`Profile cache invalidated for staff ${staffId} after rejection`);
-        
+
         logger.info(`Medical staff ${staffId} rejected: ${previousStatus} → rejected (Reason: ${reason})`);
         // Send email to staff
         EmailService.sendMedicalStaffRejectedEmail(staff.user.email, staff.fullName, reason)
@@ -1513,9 +1517,9 @@ class AdminService {
         notificationEmitter.emitStaffRejected(staff, staff.user._id.toString(), reason)
             .catch(err => logger.error('Rejection notification error:', err.message));
 
-        return { 
-            id: staff._id, 
-            verificationStatus: staff.verificationStatus, 
+        return {
+            id: staff._id,
+            verificationStatus: staff.verificationStatus,
             rejectionReason: staff.rejectionReason,
             previousStatus: previousStatus,
             cacheInvalidated: cacheInvalidated,
@@ -1523,7 +1527,244 @@ class AdminService {
         };
     }
 
-    
+    // PATCH /api/admin/hospitals/:hospitalId/suspend
+    async suspendHospital(hospitalId, reason) {
+        if (!reason) {
+            throw new ValidationError('Suspension reason is required');
+        }
+
+        const hospital = await Hospital.findById(hospitalId)
+            .populate('user', 'name email');
+
+        if (!hospital) {
+            throw new NotFoundError('Hospital not found');
+        }
+
+        if (hospital.isSuspended) {
+            throw new ConflictError('Hospital account is already suspended');
+        }
+
+        hospital.isSuspended = true;
+        hospital.suspensionReason = reason;
+        hospital.suspendedAt = new Date();
+
+        await hospital.save();
+
+        const userId = hospital.user._id;
+
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateHospitalSuspensionCache(userId),
+            CacheInvalidationService.invalidateHospitalVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`)
+        ]);
+
+        await CacheInvalidationService.refreshHospitalSuspensionCache(userId);
+
+        logger.info(`Hospital ${hospitalId} suspended. Reason: ${reason}`);
+
+        EmailService.sendAccountSuspendedEmail(
+            hospital.user.email,
+            hospital.hospitalLegalName,
+            reason
+        ).catch(err =>
+            logger.error('Suspension email error:', err.message)
+        );
+
+        notificationEmitter.emitAccountSuspended(
+            hospital,
+            userId.toString(),
+            'hospital',
+            reason
+        ).catch(err =>
+            logger.error('Suspension notification error:', err.message)
+        );
+
+        return {
+            id: hospital._id,
+            isSuspended: hospital.isSuspended,
+            suspensionReason: hospital.suspensionReason,
+            suspendedAt: hospital.suspendedAt
+        };
+    }
+
+    // PATCH /api/admin/hospitals/:hospitalId/unsuspend
+    async unsuspendHospital(hospitalId) {
+
+        const hospital = await Hospital.findById(hospitalId)
+            .populate('user', 'name email');
+
+        if (!hospital) {
+            throw new NotFoundError('Hospital not found');
+        }
+
+        if (!hospital.isSuspended) {
+            throw new ConflictError('Hospital account is not suspended');
+        }
+
+        hospital.isSuspended = false;
+        hospital.suspensionReason = null;
+        hospital.suspendedAt = null;
+
+        await hospital.save();
+
+        const userId = hospital.user._id;
+
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateHospitalSuspensionCache(userId),
+            CacheInvalidationService.invalidateHospitalVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`)
+        ]);
+
+        await CacheInvalidationService.refreshHospitalSuspensionCache(userId);
+
+        logger.info(`Hospital ${hospitalId} unsuspended`);
+
+        EmailService.sendAccountActivatedEmail(
+            hospital.user.email,
+            hospital.hospitalLegalName
+        ).catch(err =>
+            logger.error('Unsuspend email error:', err.message)
+        );
+
+        notificationEmitter.emitAccountActivated(
+            hospital,
+            userId.toString(),
+            'hospital'
+        ).catch(err =>
+            logger.error('Unsuspend notification error:', err.message)
+        );
+
+        return {
+            id: hospital._id,
+            isSuspended: hospital.isSuspended,
+            suspensionReason: hospital.suspensionReason
+        };
+    }
+
+    // PATCH /api/admin/medical-staff/:staffId/suspend
+    async suspendMedicalStaff(staffId, reason) {
+
+        if (!reason) {
+            throw new ValidationError('Suspension reason is required');
+        }
+
+        const staff = await MedicalStaff.findById(staffId)
+            .populate('user', 'name email');
+
+        if (!staff) {
+            throw new NotFoundError('Medical staff not found');
+        }
+
+        if (staff.isSuspended) {
+            throw new ConflictError('Medical staff account is already suspended');
+        }
+
+        staff.isSuspended = true;
+        staff.suspensionReason = reason;
+        staff.suspendedAt = new Date();
+
+        await staff.save();
+
+        const userId = staff.user._id;
+
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateStaffSuspensionCache(userId),
+            CacheInvalidationService.invalidateStaffVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`)
+        ]);
+
+        await CacheInvalidationService.refreshStaffSuspensionCache(userId);
+
+        logger.info(`Medical staff ${staffId} suspended. Reason: ${reason}`);
+
+        EmailService.sendAccountSuspendedEmail(
+            staff.user.email,
+            staff.fullName,
+            reason
+        ).catch(err =>
+            logger.error('Suspension email error:', err.message)
+        );
+
+        notificationEmitter.emitAccountSuspended(
+            staff,
+            userId.toString(),
+            'staff',
+            reason
+        ).catch(err =>
+            logger.error('Suspension notification error:', err.message)
+        );
+
+        return {
+            id: staff._id,
+            isSuspended: staff.isSuspended,
+            suspensionReason: staff.suspensionReason,
+            suspendedAt: staff.suspendedAt
+        };
+    }
+
+    // PATCH /api/admin/medical-staff/:staffId/unsuspend
+    async unsuspendMedicalStaff(staffId) {
+
+        const staff = await MedicalStaff.findById(staffId)
+            .populate('user', 'name email');
+
+        if (!staff) {
+            throw new NotFoundError('Medical staff not found');
+        }
+
+        if (!staff.isSuspended) {
+            throw new ConflictError('Medical staff account is not suspended');
+        }
+
+        staff.isSuspended = false;
+        staff.suspensionReason = null;
+        staff.suspendedAt = null;
+
+        await staff.save();
+
+        const userId = staff.user._id;
+
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateStaffSuspensionCache(userId),
+            CacheInvalidationService.invalidateStaffVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`)
+        ]);
+
+        await CacheInvalidationService.refreshStaffSuspensionCache(userId);
+
+        logger.info(`Medical staff ${staffId} unsuspended`);
+
+        EmailService.sendAccountActivatedEmail(
+            staff.user.email,
+            staff.fullName
+        ).catch(err =>
+            logger.error('Unsuspend email error:', err.message)
+        );
+
+        notificationEmitter.emitAccountActivated(
+            staff,
+            userId.toString(),
+            'staff'
+        ).catch(err =>
+            logger.error('Unsuspend notification error:', err.message)
+        );
+
+        return {
+            id: staff._id,
+            isSuspended: staff.isSuspended,
+            suspensionReason: staff.suspensionReason
+        };
+    }
+
+
     // GET /api/admin/documents — paginated list of all documents across all users
     async getAllDocuments({ status, userRole, page = 1, limit = 10, sortBy = 'uploadedAt', sortOrder = 'desc' }) {
         const { skip } = getPaginationParams(page, limit);
@@ -1605,7 +1846,7 @@ class AdminService {
             docs.map(async (doc) => {
                 let url = null;
                 if (doc.s3Key) {
-                    try { url = await generatePreSignedURL(doc.s3Key); } catch (_) {}
+                    try { url = await generatePreSignedURL(doc.s3Key); } catch (_) { }
                 }
                 const { s3Key, ...rest } = doc;
                 return { ...rest, url };
@@ -1787,7 +2028,7 @@ class AdminService {
         try {
             // Normalize location input
             const normalizedLocation = escapeRegex(location.toLowerCase().trim());
-            
+
             // Get all hospitals in specified city/region
             const hospitals = await Hospital.find({
                 $or: [
@@ -1801,7 +2042,7 @@ class AdminService {
             }
 
             const hospitalIds = hospitals.map(h => h._id);
-            
+
             return {
                 hospital: { $in: hospitalIds }
             };
@@ -1820,7 +2061,7 @@ class AdminService {
             const cacheKey = `duty_route_map:${dutyId}`;
             const redis = await redisClient.getClientAsync(); // Get the actual Redis client
             const cachedResult = await redis.get(cacheKey);
-            
+
             if (cachedResult) {
                 return JSON.parse(cachedResult);
             }
@@ -1856,7 +2097,7 @@ class AdminService {
 
             // Get current staff location with fallback
             let currentLocation = await locationTrackingService.getStaffLocation(staff.user._id);
-            
+
             // Fallback to staff's registered coordinates if real-time location unavailable
             if (!currentLocation) {
                 currentLocation = {
@@ -1963,7 +2204,7 @@ class AdminService {
                     isRealTime: duty.status === 'enroute' || duty.status === 'in-progress',
                     updateInterval: 2000, // 2 seconds for real-time tracking
                     lastUpdate: currentLocation.timestamp,
-                    estimatedArrival: routeInfo.duration ? 
+                    estimatedArrival: routeInfo.duration ?
                         new Date(Date.now() + routeInfo.duration * 1000) : null,
                     accuracy: currentLocation.accuracy || null
                 },
@@ -1991,45 +2232,45 @@ class AdminService {
     async getOvernightDuties() {
         try {
             const now = new Date();
-            
+
             // Query for overnight duties that are currently active
             const overnightDuties = await Duty.find({
                 isOvernightDuty: true,
                 status: { $in: ['assigned', 'enroute', 'in-progress'] },
                 date: { $lte: now } // Started today or earlier
             })
-            .populate({
-                path: 'assignedTo',
-                select: 'fullName jobRole user',
-                populate: {
-                    path: 'user',
-                    select: 'name email'
-                }
-            })
-            .populate('hospital', 'hospitalLegalName location')
-            .sort({ startTime: 1 })
-            .lean();
+                .populate({
+                    path: 'assignedTo',
+                    select: 'fullName jobRole user',
+                    populate: {
+                        path: 'user',
+                        select: 'name email'
+                    }
+                })
+                .populate('hospital', 'hospitalLegalName location')
+                .sort({ startTime: 1 })
+                .lean();
 
             // Format the duties with remaining time calculation
             const formattedDuties = overnightDuties.map(duty => {
                 const staff = duty.assignedTo;
                 const hospital = duty.hospital;
-                
+
                 // Calculate remaining time
                 const dutyDate = new Date(duty.date);
                 const [endHours, endMinutes] = duty.endTime.split(':');
                 const dutyEndTime = new Date(dutyDate);
                 dutyEndTime.setHours(parseInt(endHours), parseInt(endMinutes), 0, 0);
-                
+
                 // If overnight, end time is next day
                 if (duty.isOvernightDuty) {
                     dutyEndTime.setDate(dutyEndTime.getDate() + 1);
                 }
-                
+
                 const remainingMs = dutyEndTime - now;
                 const remainingHours = Math.floor(remainingMs / (1000 * 60 * 60));
                 const remainingMinutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
-                
+
                 // Determine current load status based on duty status and time
                 let currentLoad = 'Optimal';
                 if (duty.status === 'in-progress') {
@@ -2041,7 +2282,7 @@ class AdminService {
                 } else if (duty.status === 'assigned') {
                     currentLoad = 'On-Call';
                 }
-                
+
                 return {
                     id: duty._id,
                     staffName: staff?.fullName || 'Unknown',
@@ -2053,7 +2294,7 @@ class AdminService {
                     startTime: duty.startTime,
                     endTime: duty.endTime,
                     timeRange: `${duty.startTime} - ${duty.endTime}`,
-                    remainingTime: remainingHours > 0 
+                    remainingTime: remainingHours > 0
                         ? `${remainingHours}h ${remainingMinutes}m remaining`
                         : `${remainingMinutes}m remaining`,
                     currentLoad,
@@ -2080,7 +2321,7 @@ class AdminService {
             const query = {
                 status: 'completed'
             };
-            
+
             // Build date filter
             let dateFilter;
             if (date || startDate || endDate) {
@@ -2091,27 +2332,27 @@ class AdminService {
                 const today = new Date();
                 const oneWeekAgo = new Date(today);
                 oneWeekAgo.setDate(today.getDate() - 7);
-                
+
                 dateFilter = {
                     $gte: new Date(oneWeekAgo.getFullYear(), oneWeekAgo.getMonth(), oneWeekAgo.getDate()),
                     $lt: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
                 };
             }
-            
+
             // Use $or to check both completedAt and date fields
             // This handles cases where completedAt might not be set
             query.$or = [
                 { completedAt: dateFilter },
                 { date: dateFilter }
             ];
-            
+
             // Add hospital name filter if provided
             let hospitalIds = null;
             if (hospitalName) {
                 const hospitals = await Hospital.find({
                     hospitalLegalName: { $regex: escapeRegex(hospitalName.trim()), $options: 'i' }
                 }).select('_id');
-                
+
                 if (hospitals.length === 0) {
                     // No hospitals found with this name
                     return {
@@ -2132,17 +2373,17 @@ class AdminService {
                         }
                     };
                 }
-                
+
                 hospitalIds = hospitals.map(h => h._id);
                 query.hospital = { $in: hospitalIds };
             }
-            
+
             // Get total count for pagination
             const totalDuties = await Duty.countDocuments(query);
-            
+
             // Calculate pagination
             const { skip } = getPaginationParams(page, limit);
-            
+
             // Fetch duties - sort by completedAt if available, otherwise by date
             const duties = await Duty.find(query)
                 .populate({
@@ -2158,12 +2399,12 @@ class AdminService {
                 .skip(skip)
                 .limit(limit)
                 .lean();
-            
+
             // Format duties
             const formattedDuties = duties.map(duty => {
                 const staff = duty.assignedTo;
                 const hospital = duty.hospital;
-                
+
                 // Calculate hours completed
                 const duration = formatDuration(
                     duty.startTime,
@@ -2172,7 +2413,7 @@ class AdminService {
                     duty.isOvernightDuty,
                     duty.endDate
                 );
-                
+
                 return {
                     id: duty._id,
                     staffName: staff?.fullName || 'Unknown',
@@ -2205,7 +2446,7 @@ class AdminService {
                     offeredRate: duty.offeredRate
                 };
             });
-            
+
             return {
                 duties: formattedDuties,
                 pagination: getPaginationMeta(totalDuties, page, limit),
@@ -2223,7 +2464,7 @@ class AdminService {
     }
 
 
-    
+
     // Create duty for hospital from admin panel
     // POST /api/admin/duties
     async createDutyForHospital(hospitalId, dutyPayload) {
@@ -2313,7 +2554,7 @@ class AdminService {
                 const admins = await User.find({ role: 'admin' }).select('_id');
                 if (admins.length) {
                     const adminIds = admins.map(a => a._id.toString());
-                    
+
                     // Send emergency alerts for all created duties
                     for (const duty of createdDuties) {
                         await notificationEmitter.emitEmergencyAdminAlert(duty, hospital, adminIds, 'emergency_created');

@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const dutyController = require('../controllers/duty.controller');
-const { protect, authorize } = require('../middleware/auth.middleware');
-const { requireHospitalVerification, requireStaffVerificationandisAvailable} = require('../middleware/accountsVerification.middleware');
-const { 
-    validateDutyStatusHistory, 
+const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
+const { requireHospitalVerification, requireStaffVerificationandisAvailable } = require('../middleware/accountsVerification.middleware');
+const {
+    validateDutyStatusHistory,
     validateDutyCreation,
     validateDutyAcceptance,
     validateDutyStatusChange,
@@ -19,11 +19,12 @@ const {
 
 // Apply protection to all duty routes
 router.use(protect);
+router.use(checkSuspension);
 
 router.post(
     '/hospitals/:hospitalId/duties',
     authorize('hospital'),
-    requireHospitalVerification, 
+    requireHospitalVerification,
     validateDutyCreation,
     dutyController.createDuty
 );
@@ -41,7 +42,7 @@ router.get('/duties/ongoing', authorize('staff'), requireStaffVerificationandisA
 router.post(
     '/staff/accept-duty',
     authorize('staff'),
-    requireStaffVerificationandisAvailable, 
+    requireStaffVerificationandisAvailable,
     validateDutyAcceptance,
     dutyController.acceptDuty
 );
@@ -49,7 +50,7 @@ router.post(
 router.patch(
     '/duties/status',
     authorize('staff'),
-    requireStaffVerificationandisAvailable, 
+    requireStaffVerificationandisAvailable,
     validateDutyStatusChange,
     dutyController.changeDutyStatus
 );
@@ -74,7 +75,7 @@ router.patch(
 router.get(
     '/duties/statement',
     authorize('staff'),
-    requireStaffVerificationandisAvailable, 
+    requireStaffVerificationandisAvailable,
     validateStatementQuery,
     dutyController.getStatement
 );
@@ -82,7 +83,7 @@ router.get(
 
 // Hospital active duties and route map endpoints
 router.get('/duties/active-duties', authorize('hospital'), requireHospitalVerification, validateHospitalActiveDutiesQuery, dutyController.getHospitalActiveDuties);
- 
+
 router.get('/duties/duty-route-map/:dutyId', authorize('hospital'), requireHospitalVerification, validateHospitalDutyRouteMap, dutyController.getHospitalDutyRouteMap);
 
 router.get('/duties/:id', validateObjectId('id'), authorize('staff', 'hospital', 'admin'), dutyController.getDutyDetail);

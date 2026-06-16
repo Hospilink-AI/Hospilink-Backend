@@ -141,7 +141,7 @@ class EmailService {
     async sendAdminLoginAlertEmail(adminName, adminEmail, deviceName, location, time) {
         try {
             const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
-            
+
             if (!alertEmail) {
                 logger.warn('ADMIN_LOGIN_ALERT_EMAIL not configured, skipping alert email');
                 return false;
@@ -198,8 +198,8 @@ class EmailService {
         }
     }
 
-    
-    
+
+
     async sendDutyAcceptanceEmail(email, userName, dutyDetails) {
         try {
             const mailOptions = {
@@ -481,8 +481,8 @@ class EmailService {
 
     async sendStaffDutyCancellationEmail(email, userName, dutyDetails, cancellationDetails) {
         try {
-            const cancelledByText = cancellationDetails.cancelledBy === 'hospital' 
-                ? 'the hospital' 
+            const cancelledByText = cancellationDetails.cancelledBy === 'hospital'
+                ? 'the hospital'
                 : 'you';
 
             const mailOptions = {
@@ -545,8 +545,8 @@ class EmailService {
 
     async sendHospitalDutyCancellationEmail(hospitalEmail, hospitalName, staffDetails, dutyDetails, cancellationDetails) {
         try {
-            const cancelledByText = cancellationDetails.cancelledBy === 'hospital' 
-                ? 'you' 
+            const cancelledByText = cancellationDetails.cancelledBy === 'hospital'
+                ? 'you'
                 : 'the assigned staff member';
 
             const staffInfo = staffDetails ? `
@@ -621,7 +621,7 @@ class EmailService {
         }
     }
 
-    
+
     async sendHospitalVerifiedEmail(email, hospitalName) {
         try {
             const mailOptions = {
@@ -889,6 +889,165 @@ class EmailService {
             return true;
         } catch (error) {
             logger.error(`Error sending profile creation confirmation email to ${email}: ${error.message}`);
+            return false;
+        }
+    }
+
+    async sendAccountSuspendedEmail(email, name, reason) {
+        try {
+            const mailOptions = {
+                from: `HospiLink <${process.env.EMAIL_FROM}>`,
+                to: email,
+                subject: 'HospiLink - Account Suspended',
+                html: `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+
+    <div style="background-color: #e74c3c; padding: 20px; text-align: center;">
+        <h2 style="color: white; margin: 0;">
+            Account Suspended
+        </h2>
+    </div>
+
+    <div style="padding: 20px;">
+
+        <p>Hello <strong>${name}</strong>,</p>
+
+        <p>
+            We are writing to inform you that your HospiLink account has been
+            <strong style="color:#e74c3c;">temporarily suspended</strong>
+            following a review by our administration team.
+        </p>
+
+        <div style="background-color:#fff3cd; border-left:4px solid #ffc107; padding:15px; margin:20px 0;">
+            <h4 style="margin-top:0; color:#856404;">Suspension Reason</h4>
+            <p style="margin:0; color:#856404;">
+                ${reason}
+            </p>
+        </div>
+
+        <p>
+            While your account is suspended, you will not be able to:
+        </p>
+
+        <ul>
+            <li>Access your HospiLink dashboard</li>
+            <li>Create or accept duties</li>
+            <li>Update profile information</li>
+            <li>Use platform services</li>
+        </ul>
+
+        <p>
+            If you believe this suspension was made in error or would like
+            additional clarification, please contact our support team.
+        </p>
+
+        <div style="background-color:#f8f9fa; border-left:4px solid #3498db; padding:15px; margin:20px 0;">
+            <strong>Support Team</strong><br>
+            Email: support@hospilink.com
+        </div>
+
+        <p>
+            We appreciate your cooperation and understanding.
+        </p>
+
+        <p>
+            Regards,<br>
+            <strong>HospiLink Administration Team</strong>
+        </p>
+
+        <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
+
+        <p style="font-size:12px; color:#7f8c8d; text-align:center;">
+            © ${new Date().getFullYear()} HospiLink. All rights reserved.
+        </p>
+
+    </div>
+</div>
+`
+            };
+
+            await this.transporter.sendMail(mailOptions);
+
+            logger.info(`Account suspended email sent to ${email}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending suspension email to ${email}: ${error.message}`);
+            return false;
+        }
+    }
+
+    async sendAccountActivatedEmail(email, name) {
+        try {
+            const mailOptions = {
+                from: `HospiLink <${process.env.EMAIL_FROM}>`,
+                to: email,
+                subject: 'HospiLink - Account Restored',
+                html: `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+
+    <div style="background-color: #27ae60; padding: 20px; text-align: center;">
+        <h2 style="color: white; margin: 0;">
+            Account Reactivated
+        </h2>
+    </div>
+
+    <div style="padding: 20px;">
+
+        <p>Hello <strong>${name}</strong>,</p>
+
+        <p>
+            We are pleased to inform you that your HospiLink account has been
+            <strong style="color:#27ae60;">reactivated</strong>.
+        </p>
+
+        <div style="background-color:#f0fff4; border-left:4px solid #27ae60; padding:15px; margin:20px 0;">
+            <p style="margin:0; color:#276749;">
+                Your account is now active and you can continue using all
+                HospiLink services.
+            </p>
+        </div>
+
+        <p>
+            You now have full access to:
+        </p>
+
+        <ul>
+            <li>Your HospiLink dashboard</li>
+            <li>Duty creation and management</li>
+            <li>Duty applications and assignments</li>
+            <li>Notifications and platform services</li>
+        </ul>
+
+        <p>
+            We appreciate your cooperation during the review process.
+        </p>
+
+        <p>
+            If you have any questions, please contact our support team.
+        </p>
+
+        <p>
+            Regards,<br>
+            <strong>HospiLink Administration Team</strong>
+        </p>
+
+        <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
+
+        <p style="font-size:12px; color:#7f8c8d; text-align:center;">
+            © ${new Date().getFullYear()} HospiLink. All rights reserved.
+        </p>
+
+    </div>
+</div>
+`
+            };
+
+            await this.transporter.sendMail(mailOptions);
+
+            logger.info(`Account activated email sent to ${email}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending activation email to ${email}: ${error.message}`);
             return false;
         }
     }

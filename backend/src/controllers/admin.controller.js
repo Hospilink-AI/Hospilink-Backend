@@ -31,7 +31,7 @@ exports.adminSignin = asyncHandler(async (req, res) => {
             { userId: admin._id || admin.id, name: admin.name, role: 'admin', email: admin.email },
             { email: admin.email },
             req
-        ).catch(() => {});
+        ).catch(() => { });
     }
 
     res.status(200).json({
@@ -68,7 +68,7 @@ exports.adminResendOTP = asyncHandler(async (req, res) => {
 
 // Admin logout - POST /api/admin/logout
 exports.adminLogout = asyncHandler(async (req, res) => {
-    const token = req.headers.authorization.split(' ')[1]; 
+    const token = req.headers.authorization.split(' ')[1];
     const userId = req.user?.id || req.user?._id;
 
     const result = await AdminAuthService.logout(token, userId);
@@ -93,7 +93,7 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
     }
 
     const result = await adminService.createDutyForHospital(hospital_id, req.body);
-    
+
     res.status(201).json(result);
 });
 
@@ -160,14 +160,14 @@ exports.getMedicalStaffList = asyncHandler(async (req, res) => {
 // GET /api/admin/medical-staff-list — verified staff list with city and jobRole filters
 exports.getVerifiedMedicalStaffList = asyncHandler(async (req, res) => {
     const { city, jobRole, page, limit } = req.validatedQuery;
- 
+
     const result = await adminService.getVerifiedMedicalStaffList({
         city,
         jobRole,
         page,
         limit
     });
- 
+
     res.status(200).json({
         success: true,
         ...result
@@ -193,7 +193,7 @@ exports.verifyMedicalStaff = asyncHandler(async (req, res) => {
         { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
         { staffId: req.params.staffId },
         req
-    ).catch(() => {});
+    ).catch(() => { });
 
     res.status(200).json({ success: true, message: result.message, data: result });
 });
@@ -211,9 +211,84 @@ exports.rejectMedicalStaff = asyncHandler(async (req, res) => {
         { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
         { staffId: req.params.staffId, reason },
         req
-    ).catch(() => {});
+    ).catch(() => { });
 
     res.status(200).json({ success: true, message: result.message, data: result });
+});
+
+// PATCH /api/admin/medical-staff/:staffId/suspend
+exports.suspendMedicalStaff = asyncHandler(async (req, res) => {
+    const { reason } = req.body;
+
+    if (!reason) {
+        return res.status(400).json({
+            success: false,
+            message: 'Suspension reason is required'
+        });
+    }
+
+    const result = await adminService.suspendMedicalStaff(
+        req.params.staffId,
+        reason
+    );
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.ACCOUNT_SUSPENDED,
+        {
+            type: 'staff',
+            id: req.params.staffId
+        },
+        {
+            userId: req.user._id || req.user.id,
+            name: req.user.name,
+            role: 'admin',
+            email: req.user.email
+        },
+        {
+            staffId: req.params.staffId,
+            reason
+        },
+        req
+    ).catch(() => { });
+
+    res.status(200).json({
+        success: true,
+        message: 'Staff account suspended',
+        data: result
+    });
+});
+
+
+// PATCH /api/admin/medical-staff/:staffId/unsuspend
+exports.unsuspendMedicalStaff = asyncHandler(async (req, res) => {
+
+    const result = await adminService.unsuspendMedicalStaff(
+        req.params.staffId
+    );
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.ACCOUNT_ACTIVATED,
+        {
+            type: 'staff',
+            id: req.params.staffId
+        },
+        {
+            userId: req.user._id || req.user.id,
+            name: req.user.name,
+            role: 'admin',
+            email: req.user.email
+        },
+        {
+            staffId: req.params.staffId
+        },
+        req
+    ).catch(() => { });
+
+    res.status(200).json({
+        success: true,
+        message: 'Staff account unsuspended',
+        data: result
+    });
 });
 
 
@@ -291,7 +366,7 @@ exports.verifyDocument = asyncHandler(async (req, res) => {
         { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
         { targetUserId: result.userId, targetUserName: result.userName },
         req
-    ).catch(() => {});
+    ).catch(() => { });
 
     res.status(200).json({ success: true, message: 'Document verified successfully', data: result });
 });
@@ -309,7 +384,7 @@ exports.rejectDocument = asyncHandler(async (req, res) => {
         { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
         { targetUserId: result.userId, targetUserName: result.userName, reason },
         req
-    ).catch(() => {});
+    ).catch(() => { });
 
     res.status(200).json({ success: true, message: 'Document rejected successfully', data: result });
 });
@@ -353,10 +428,10 @@ exports.exportActiveDuties = asyncHandler(async (req, res) => {
 
     // Fetch all matching duties without pagination
     const result = await adminService.getActiveDuties({
-        role:     role     || null,
+        role: role || null,
         location: location || null,
-        status:   status   || null,
-        page:  1,
+        status: status || null,
+        page: 1,
         limit: 10000
     });
 
@@ -390,18 +465,18 @@ exports.exportActiveDuties = asyncHandler(async (req, res) => {
         ];
 
         const rows = duties.map(d => [
-            d.hospital?.name        || '',
-            d.hospital?.city        || '',
+            d.hospital?.name || '',
+            d.hospital?.city || '',
             (d.role || '').replace(/_/g, ' ').toUpperCase(),
-            d.staff?.name           || '',
-            d.staff?.email          || '',
+            d.staff?.name || '',
+            d.staff?.email || '',
             d.timing?.date ? new Date(d.timing.date).toLocaleDateString('en-IN') : '',
-            d.timing?.startTime     || '',
-            d.timing?.endTime       || '',
-            (d.status?.status       || '').toUpperCase(),
-            (d.timing?.urgency      || '').toUpperCase(),
-            d.distance?.distanceText        || '',
-            d.distance?.estimatedTimeText   || '',
+            d.timing?.startTime || '',
+            d.timing?.endTime || '',
+            (d.status?.status || '').toUpperCase(),
+            (d.timing?.urgency || '').toUpperCase(),
+            d.distance?.distanceText || '',
+            d.distance?.estimatedTimeText || '',
             d.offeredRate ? `₹${d.offeredRate}` : ''
         ]);
 
@@ -501,7 +576,7 @@ exports.verifyHospital = asyncHandler(async (req, res) => {
         { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
         { hospitalId: req.params.hospitalId },
         req
-    ).catch(() => {});
+    ).catch(() => { });
 
     res.status(200).json({ success: true, message: 'Hospital verified successfully', data: result });
 });
@@ -519,11 +594,85 @@ exports.rejectHospital = asyncHandler(async (req, res) => {
         { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
         { hospitalId: req.params.hospitalId, reason },
         req
-    ).catch(() => {});
+    ).catch(() => { });
 
     res.status(200).json({ success: true, message: 'Hospital rejected', data: result });
 });
 
+// PATCH /api/admin/hospitals/:hospitalId/suspend
+exports.suspendHospital = asyncHandler(async (req, res) => {
+    const { reason } = req.body;
+
+    if (!reason) {
+        return res.status(400).json({
+            success: false,
+            message: 'Suspension reason is required'
+        });
+    }
+
+    const result = await adminService.suspendHospital(
+        req.params.hospitalId,
+        reason
+    );
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.ACCOUNT_SUSPENDED,
+        {
+            type: 'hospital',
+            id: req.params.hospitalId
+        },
+        {
+            userId: req.user._id || req.user.id,
+            name: req.user.name,
+            role: 'admin',
+            email: req.user.email
+        },
+        {
+            hospitalId: req.params.hospitalId,
+            reason
+        },
+        req
+    ).catch(() => { });
+
+    res.status(200).json({
+        success: true,
+        message: 'Hospital account suspended',
+        data: result
+    });
+});
+
+
+// PATCH /api/admin/hospitals/:hospitalId/unsuspend
+exports.unsuspendHospital = asyncHandler(async (req, res) => {
+
+    const result = await adminService.unsuspendHospital(
+        req.params.hospitalId
+    );
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.ACCOUNT_ACTIVATED,
+        {
+            type: 'hospital',
+            id: req.params.hospitalId
+        },
+        {
+            userId: req.user._id || req.user.id,
+            name: req.user.name,
+            role: 'admin',
+            email: req.user.email
+        },
+        {
+            hospitalId: req.params.hospitalId
+        },
+        req
+    ).catch(() => { });
+
+    res.status(200).json({
+        success: true,
+        message: 'Hospital account unsuspended',
+        data: result
+    });
+});
 
 // GET /api/admin/overnight-duties - Get live overnight duties
 exports.getOvernightDuties = asyncHandler(async (req, res) => {

@@ -551,6 +551,39 @@ const validateRejectionReason = (req, res, next) => {
     next();
 };
 
+// Validate suspension reason for PATCH endpoints
+const validateSuspensionReason = (req, res, next) => {
+    const { reason } = req.body;
+
+    const allowedFields = ['reason'];
+
+    const unexpectedFields = Object.keys(req.body)
+        .filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid fields: ${unexpectedFields.join(', ')}. Only allowed: reason`
+        });
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Suspension reason is required and must be a non-empty string'
+        });
+    }
+
+    if (reason.length > 500) {
+        return res.status(400).json({
+            success: false,
+            message: 'Suspension reason cannot exceed 500 characters'
+        });
+    }
+
+    next();
+};
+
 
 
 // Validate hospital simple list query
@@ -810,11 +843,11 @@ const validateMedicalStaffListVerified = (req, res, next) => {
             message: 'GET request should not contain request body. Use query parameters only.'
         });
     }
- 
+
     // Validate allowed query parameters only
     const allowedParams = ['city', 'jobRole', 'page', 'limit'];
     const receivedParams = Object.keys(req.query);
- 
+
     // Check for unexpected parameters
     const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
     if (unexpectedParams.length > 0) {
@@ -823,9 +856,9 @@ const validateMedicalStaffListVerified = (req, res, next) => {
             message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
         });
     }
- 
+
     const { city, jobRole, page = 1, limit = 10 } = req.query;
- 
+
     // Validate city parameter (optional)
     if (city && typeof city !== 'string') {
         return res.status(400).json({
@@ -833,14 +866,14 @@ const validateMedicalStaffListVerified = (req, res, next) => {
             message: 'City parameter must be a string'
         });
     }
- 
+
     if (jobRole && !ALLOWED_ROLES.includes(jobRole)) {
         return res.status(400).json({
             success: false,
             message: `Job role parameter must be one of: ${ALLOWED_ROLES.join(', ')}`
         });
     }
- 
+
     // Validate page parameter
     const pageNum = parseInt(page);
     if (isNaN(pageNum) || pageNum < 1) {
@@ -849,7 +882,7 @@ const validateMedicalStaffListVerified = (req, res, next) => {
             message: 'Page parameter must be a positive integer'
         });
     }
- 
+
     // Validate limit parameter
     const limitNum = parseInt(limit);
     if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
@@ -858,14 +891,14 @@ const validateMedicalStaffListVerified = (req, res, next) => {
             message: 'Limit parameter must be a positive integer between 1 and 100'
         });
     }
- 
+
     req.validatedQuery = {
         city: city || null,
         jobRole: jobRole || null,
         page: pageNum,
         limit: limitNum
     };
- 
+
     next();
 };
 
@@ -1029,5 +1062,6 @@ module.exports = {
     validateDocumentsListQuery,
     validateObjectId,
     validateRejectionReason,
+    validateSuspensionReason,
     validateAssignDuty
 };

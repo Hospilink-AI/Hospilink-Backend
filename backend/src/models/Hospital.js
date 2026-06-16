@@ -20,7 +20,7 @@ const hospitalSchema = new mongoose.Schema({
         trim: true,
         lowercase: true,
         validate: {
-            validator: function(v) {
+            validator: function (v) {
                 return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
             },
             message: 'Please provide a valid email address'
@@ -67,7 +67,7 @@ const hospitalSchema = new mongoose.Schema({
         required: [true, 'Pincode is required'],
         trim: true,
         validate: {
-            validator: function(v) {
+            validator: function (v) {
                 return /^[1-9][0-9]{5}$/.test(v);
             },
             message: 'Pincode must be a valid 6-digit Indian postal code'
@@ -78,7 +78,7 @@ const hospitalSchema = new mongoose.Schema({
         required: [true, 'Phone number is required'],
         trim: true,
         validate: {
-            validator: function(v) {
+            validator: function (v) {
                 // Must start with +91 followed by 10 digits
                 return /^(\+91) [6-9]\d{9}$/.test(v);
             },
@@ -162,6 +162,21 @@ const hospitalSchema = new mongoose.Schema({
         trim: true,
         maxlength: [500, 'Rejection reason cannot exceed 500 characters']
     },
+    isSuspended: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
+    suspensionReason: {
+        type: String,
+        trim: true,
+        maxlength: [500, 'Suspension reason cannot exceed 500 characters'],
+        default: null
+    },
+    suspendedAt: {
+        type: Date,
+        default: null
+    },
     createdAt: {
         type: Date,
         default: Date.now
@@ -176,7 +191,7 @@ const hospitalSchema = new mongoose.Schema({
 
 
 // Index for faster queries
-hospitalSchema.index({ user: 1 }); 
+hospitalSchema.index({ user: 1 });
 hospitalSchema.index({ 'coordinates.coordinates.longitude': 1 });
 hospitalSchema.index({ 'coordinates.coordinates.latitude': 1 });
 hospitalSchema.index({ servicesAvailable: 1 });
@@ -189,6 +204,10 @@ hospitalSchema.index({ verificationStatus: 1, createdAt: -1 });
 
 // Index for rejection tracking
 hospitalSchema.index({ verificationStatus: 1, rejectionReason: 1 });
+
+// Suspension indexes
+hospitalSchema.index({ verificationStatus: 1, isSuspended: 1 });
+hospitalSchema.index({ isSuspended: 1, createdAt: -1 });
 
 // Index for cache invalidation queries
 hospitalSchema.index({ user: 1, verificationStatus: 1, rejectionReason: 1 });

@@ -78,7 +78,7 @@ class CacheService {
         try {
             const client = await redisClient.getClientAsync();
             const pipeline = client.pipeline();
-            
+
             operations.forEach(op => {
                 if (op.type === 'set') {
                     pipeline.setex(op.key, op.ttl, JSON.stringify(op.value));
@@ -88,7 +88,7 @@ class CacheService {
                     pipeline.get(op.key);
                 }
             });
-            
+
             return await pipeline.exec();
         } catch (error) {
             logger.error('Cache pipeline error:', error);
@@ -159,12 +159,12 @@ class CacheService {
             `profile:${userId}:hospital`,
             `profile:${userId}:admin`
         ];
-        
+
         const operations = patterns.map(pattern => ({
             type: 'del',
             key: pattern
         }));
-        
+
         return await this.pipeline(operations);
     }
 
@@ -194,31 +194,47 @@ class CacheService {
         return await this.del(key);
     }
 
+    // Suspension status caching methods
+    async getSuspensionStatus(userId, role) {
+        const key = `suspension:${role}:${userId}`;
+        return await this.get(key);
+    }
+
+    async setSuspensionStatus(userId, role, data, ttl = 300) {
+        const key = `suspension:${role}:${userId}`;
+        return await this.set(key, data, ttl);
+    }
+
+    async invalidateSuspensionStatus(userId, role) {
+        const key = `suspension:${role}:${userId}`;
+        return await this.del(key);
+    }
+
     // Batch profile status check for multiple users (admin features)
     async getMultipleProfileStatus(userIds) {
         const operations = userIds.map(userId => ({
             type: 'get',
             key: `profile:status:${userId}`
         }));
-        
+
         const results = await this.pipeline(operations);
         return userIds.map((userId, index) => ({
             userId,
             data: results[index] ? JSON.parse(results[index][1]) : null
         }));
     }
-    
+
     // Location permission caching methods
     async getLocationPermission(userId) {
         const key = `location:permission:${userId}`;
         return await this.get(key);
     }
-    
+
     async setLocationPermission(userId, data, ttl = 1800) { // 30 minutes
         const key = `location:permission:${userId}`;
         return await this.set(key, data, ttl);
     }
-    
+
     async invalidateLocationPermission(userId) {
         const key = `location:permission:${userId}`;
         return await this.del(key);
@@ -250,7 +266,7 @@ class CacheService {
             type: 'get',
             key: `availability:${userId}`
         }));
-        
+
         const results = await this.pipeline(operations);
         return userIds.map((userId, index) => {
             const result = results[index];
@@ -272,7 +288,7 @@ class CacheService {
             },
             ttl
         }));
-        
+
         return await this.pipeline(operations);
     }
 
@@ -283,12 +299,12 @@ class CacheService {
             `upcoming:duties:${userId}`,
             `nearby:staff:*`
         ];
-        
+
         const operations = patterns.map(pattern => ({
             type: 'del',
             key: pattern
         }));
-        
+
         return await this.pipeline(operations);
     }
 
@@ -335,7 +351,7 @@ class CacheService {
             type: 'get',
             key: `duty:status:${id}`
         }));
-        
+
         const results = await this.pipeline(operations);
         return staffIds.map((id, index) => ({
             staffId: id,
@@ -350,7 +366,7 @@ class CacheService {
             value: data,
             ttl
         }));
-        
+
         return await this.pipeline(operations);
     }
 

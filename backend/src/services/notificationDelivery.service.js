@@ -32,7 +32,9 @@ const FCM_TITLES = {
     DUTY_UNASSIGNED_15MIN: 'Duty Unassigned Alert',
     DUTY_UNFILLED_CRITICAL: 'Critical: Duty Unfilled',
     EMERGENCY_ADMIN_ALERT: 'Emergency Alert',
-    PASSWORD_CHANGED: 'Password Changed'
+    PASSWORD_CHANGED: 'Password Changed',
+    ACCOUNT_SUSPENDED: 'Account Suspended',
+    ACCOUNT_ACTIVATED: 'Account Restored'
 };
 
 class NotificationDeliveryService {
@@ -53,9 +55,9 @@ class NotificationDeliveryService {
                 // User is online - deliver via WebSocket
                 websocketManager.sendUnreadCount(userId, unreadCount);
                 websocketManager.emitToUser(userId, 'notification', payload);
-                
+
                 logger.info(`Delivered notification to user ${userId} via WebSocket (online)`);
-                
+
                 return {
                     success: true,
                     method: 'websocket',
@@ -65,7 +67,7 @@ class NotificationDeliveryService {
                 // User is offline - deliver via FCM push
                 const title = FCM_TITLES[type] || 'HospiLink';
                 const body = payload.message || 'You have a new notification';
-                
+
                 const fcmData = {
                     type,
                     unreadCount: String(unreadCount),
@@ -75,13 +77,13 @@ class NotificationDeliveryService {
                 };
 
                 const result = await fcmService.sendToUser(userId, title, body, fcmData);
-                
+
                 if (result.success) {
                     logger.info(`Delivered notification to user ${userId} via FCM (offline)`);
                 } else {
                     logger.warn(`Failed to deliver FCM to user ${userId}: ${result.reason || result.error}`);
                 }
-                
+
                 return {
                     success: result.success,
                     method: 'fcm',
@@ -139,7 +141,7 @@ class NotificationDeliveryService {
             if (offlineIds.length > 0) {
                 const title = FCM_TITLES[type] || 'HospiLink';
                 const body = payload.message || 'You have a new notification';
-                
+
                 const fcmData = {
                     type,
                     dutyId: payload.duty?.id || '',

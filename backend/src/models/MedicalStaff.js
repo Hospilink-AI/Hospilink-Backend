@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const { INDIAN_STATES } = require('../utils/constants');
- 
+
 const medicalStaffSchema = new mongoose.Schema({
     user: {
         type: mongoose.Schema.Types.ObjectId,
@@ -46,7 +46,7 @@ const medicalStaffSchema = new mongoose.Schema({
         required: [true, 'Pincode is required'],
         trim: true,
         validate: {
-            validator: function(v) {
+            validator: function (v) {
                 return /^[1-9][0-9]{5}$/.test(v);
             },
             message: 'Pincode must be a valid 6-digit Indian postal code'
@@ -58,7 +58,7 @@ const medicalStaffSchema = new mongoose.Schema({
         trim: true,
         lowercase: true,
         validate: {
-            validator: function(v) {
+            validator: function (v) {
                 return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
             },
             message: 'Please provide a valid email address'
@@ -179,6 +179,21 @@ const medicalStaffSchema = new mongoose.Schema({
         trim: true,
         maxlength: [500, 'Rejection reason cannot exceed 500 characters']
     },
+    isSuspended: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
+    suspensionReason: {
+        type: String,
+        trim: true,
+        maxlength: [500, 'Suspension reason cannot exceed 500 characters'],
+        default: null
+    },
+    suspendedAt: {
+        type: Date,
+        default: null
+    },
     experience: {
         type: String,
         enum: {
@@ -260,6 +275,10 @@ medicalStaffSchema.index({ verificationStatus: 1, createdAt: -1 });
 // Index for rejection tracking 
 medicalStaffSchema.index({ verificationStatus: 1, rejectionReason: 1 });
 
+// Suspension indexes
+medicalStaffSchema.index({ verificationStatus: 1, isSuspended: 1 });
+medicalStaffSchema.index({ isSuspended: 1, createdAt: -1 });
+
 // Index for cache invalidation queries 
 medicalStaffSchema.index({ user: 1, verificationStatus: 1, rejectionReason: 1 });
 
@@ -270,7 +289,7 @@ medicalStaffSchema.index({
     'coordinates.coordinates.latitude': 1,
     'coordinates.coordinates.longitude': 1,
     jobRole: 1
-}); 
+});
 
 // Additional optimized indexes 
 medicalStaffSchema.index({
