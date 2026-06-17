@@ -258,13 +258,23 @@ class AuthService {
 
         logger.info(`User signed in: ${user.email}`);
 
-        // Fetch onboarding step for immediate redirect — non-blocking parallel query
+        // Fetch onboarding step and verificationStatus in parallel — non-blocking
         let onboardingStep = 'complete';
+        let verificationStatus = null;
         try {
             if (user.role === 'staff' || user.role === 'hospital') {
                 const ProfileService = require('./profile.service');
-                const status = await ProfileService.checkProfileCompletion(user._id.toString());
+                const ProfileModel = user.role === 'hospital'
+                    ? require('../models/Hospital')
+                    : require('../models/MedicalStaff');
+
+                const [status, profileDoc] = await Promise.all([
+                    ProfileService.checkProfileCompletion(user._id.toString()),
+                    ProfileModel.findOne({ user: user._id }).select('verificationStatus').lean()
+                ]);
+
                 onboardingStep = status.onboardingStep;
+                verificationStatus = profileDoc?.verificationStatus ?? null;
             }
         } catch (_) {}
 
@@ -278,7 +288,8 @@ class AuthService {
                 role: user.role,
                 isEmailVerified: user.isEmailVerified
             },
-            onboardingStep
+            onboardingStep,
+            verificationStatus
         };
     }
 
