@@ -5,11 +5,11 @@ const reviewController = require("../controllers/review.controller");
 const { protect, authorize } = require("../middleware/auth.middleware");
 const { validateReviewSubmission, validateStaffIdParam } = require("../middleware/validation.middleware");
 
-// Hospital submits review for staff
+// Hospital submits review for staff, or staff submits review for hospital (reviewType derived from req.user.role)
 router.post(
     "/submit",
     protect,
-    authorize("hospital"),
+    authorize("hospital", "staff"),
     validateReviewSubmission,
     reviewController.submitReview
 );

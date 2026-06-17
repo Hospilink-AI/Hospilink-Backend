@@ -3,11 +3,17 @@ const router = express.Router();
 const dutyController = require('../controllers/duty.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
 const { requireHospitalVerification, requireStaffVerificationandisAvailable} = require('../middleware/accountsVerification.middleware');
-const { 
-    validateDutyStatusHistory, 
+const {
+    validateDutyStatusHistory,
     validateDutyCreation,
     validateDutyAcceptance,
     validateDutyStatusChange,
+    validateRequestStartOtp,
+    validateVerifyStartOtp,
+    validateVerifyEndOtp,
+    validateRaiseDispute,
+    validateResolveDispute,
+    validateUnlockOtp,
     validateDutyCancellation,
     validateDutyEdit,
     validatePagination,
@@ -49,9 +55,75 @@ router.post(
 router.patch(
     '/duties/status',
     authorize('staff'),
-    requireStaffVerificationandisAvailable, 
+    requireStaffVerificationandisAvailable,
     validateDutyStatusChange,
     dutyController.changeDutyStatus
+);
+
+router.post(
+    '/duties/:id/request-start-otp',
+    authorize('staff'),
+    requireStaffVerificationandisAvailable,
+    validateObjectId('id'),
+    validateRequestStartOtp,
+    dutyController.requestStartOtp
+);
+
+router.post(
+    '/duties/:id/verify-start-otp',
+    authorize('staff'),
+    requireStaffVerificationandisAvailable,
+    validateObjectId('id'),
+    validateVerifyStartOtp,
+    dutyController.verifyStartOtp
+);
+
+router.post(
+    '/duties/:id/request-end-otp',
+    authorize('staff'),
+    requireStaffVerificationandisAvailable,
+    validateObjectId('id'),
+    dutyController.requestEndOtp
+);
+
+router.post(
+    '/duties/:id/verify-end-otp',
+    authorize('hospital'),
+    requireHospitalVerification,
+    validateObjectId('id'),
+    validateVerifyEndOtp,
+    dutyController.verifyEndOtp
+);
+
+router.post(
+    '/duties/:id/regenerate-end-otp',
+    authorize('staff', 'hospital'),
+    validateObjectId('id'),
+    dutyController.regenerateEndOtp
+);
+
+router.post(
+    '/duties/:id/dispute',
+    authorize('staff', 'hospital'),
+    validateObjectId('id'),
+    validateRaiseDispute,
+    dutyController.raiseDispute
+);
+
+router.patch(
+    '/duties/:id/resolve-dispute',
+    authorize('admin'),
+    validateObjectId('id'),
+    validateResolveDispute,
+    dutyController.resolveDispute
+);
+
+router.patch(
+    '/duties/:id/unlock-otp',
+    authorize('admin'),
+    validateObjectId('id'),
+    validateUnlockOtp,
+    dutyController.unlockDutyOtp
 );
 
 router.post(

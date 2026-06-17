@@ -146,6 +146,19 @@ const medicalStaffSchema = new mongoose.Schema({
             message: 'Please provide a valid phone number'
         }
     },
+    // Spaces stripped from phoneNumber — used to enforce phone-number
+    // uniqueness across Hospital and MedicalStaff accounts.
+    normalizedPhone: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    // True once the send-phone-otp / verify-phone-otp flow succeeded for this
+    // number, mirroring User.isEmailVerified.
+    isPhoneVerified: {
+        type: Boolean,
+        default: false
+    },
     isProfileComplete: {
         type: Boolean,
         default: true

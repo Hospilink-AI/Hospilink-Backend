@@ -847,7 +847,7 @@ const validateDutyStatusChange = (req, res, next) => {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
     }
     
-    const allowedStatuses = ['enroute', 'in-progress', 'completed'];
+    const allowedStatuses = ['enroute'];
     if (!status || !allowedStatuses.includes(status)) {
         errors.push(`Invalid status. Allowed: ${allowedStatuses.join(', ')}`);
     }
@@ -864,6 +864,242 @@ const validateDutyStatusChange = (req, res, next) => {
         });
     }
     
+    next();
+};
+
+
+
+// Validation for requesting a Start OTP (staff taps "Get OTP" within range of the hospital)
+const validateRequestStartOtp = (req, res, next) => {
+    const { coordinates } = req.body;
+    const errors = [];
+
+    const allowedFields = ['coordinates'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!coordinates || typeof coordinates !== 'object') {
+        errors.push('coordinates ({ latitude, longitude }) is required');
+    } else {
+        const { latitude, longitude } = coordinates;
+        if (typeof latitude !== 'number' || latitude < -90 || latitude > 90) {
+            errors.push('coordinates.latitude must be a number between -90 and 90');
+        }
+        if (typeof longitude !== 'number' || longitude < -180 || longitude > 180) {
+            errors.push('coordinates.longitude must be a number between -180 and 180');
+        }
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for verifying the Start OTP (geofence handshake)
+const validateVerifyStartOtp = (req, res, next) => {
+    const { otp, coordinates } = req.body;
+    const errors = [];
+
+    const allowedFields = ['otp', 'coordinates'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!otp || !/^\d{6}$/.test(otp)) {
+        errors.push('OTP must be exactly 6 digits');
+    }
+
+    if (!coordinates || typeof coordinates !== 'object') {
+        errors.push('coordinates ({ latitude, longitude }) is required');
+    } else {
+        const { latitude, longitude } = coordinates;
+        if (typeof latitude !== 'number' || latitude < -90 || latitude > 90) {
+            errors.push('coordinates.latitude must be a number between -90 and 90');
+        }
+        if (typeof longitude !== 'number' || longitude < -180 || longitude > 180) {
+            errors.push('coordinates.longitude must be a number between -180 and 180');
+        }
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for verifying the End OTP + payment attestation
+const validateVerifyEndOtp = (req, res, next) => {
+    const { otp, paymentMethod, isPaid } = req.body;
+    const errors = [];
+
+    const allowedFields = ['otp', 'paymentMethod', 'isPaid'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!otp || !/^\d{6}$/.test(otp)) {
+        errors.push('OTP must be exactly 6 digits');
+    }
+
+    const validPaymentMethods = ['cash', 'upi', 'bank', 'will_pay_later'];
+    if (!paymentMethod || !validPaymentMethods.includes(paymentMethod)) {
+        errors.push(`paymentMethod is required. Allowed: ${validPaymentMethods.join(', ')}`);
+    }
+
+    if (typeof isPaid !== 'boolean') {
+        errors.push('isPaid must be a boolean');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for raising a dispute (staff or hospital)
+const validateRaiseDispute = (req, res, next) => {
+    const { reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['reason'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        errors.push('reason is required');
+    } else if (reason.length > 1000) {
+        errors.push('reason cannot exceed 1000 characters');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for admin resolving a dispute
+const validateResolveDispute = (req, res, next) => {
+    const { finalStatus, notes, paymentMethod, isPaid, completedAt } = req.body;
+    const errors = [];
+
+    const allowedFields = ['finalStatus', 'notes', 'paymentMethod', 'isPaid', 'completedAt'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    const validFinalStatuses = ['completed', 'incomplete', 'cancelled'];
+    if (!finalStatus || !validFinalStatuses.includes(finalStatus)) {
+        errors.push(`finalStatus is required. Allowed: ${validFinalStatuses.join(', ')}`);
+    }
+
+    if (notes !== undefined && typeof notes !== 'string') {
+        errors.push('notes must be a string');
+    }
+
+    const validPaymentMethods = ['cash', 'upi', 'bank', 'will_pay_later'];
+    if (paymentMethod !== undefined && !validPaymentMethods.includes(paymentMethod)) {
+        errors.push(`paymentMethod must be one of: ${validPaymentMethods.join(', ')}`);
+    }
+
+    if (isPaid !== undefined && typeof isPaid !== 'boolean') {
+        errors.push('isPaid must be a boolean');
+    }
+
+    if (completedAt !== undefined && isNaN(new Date(completedAt).getTime())) {
+        errors.push('completedAt must be a valid date');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for admin unlocking a locked start/end OTP
+const validateUnlockOtp = (req, res, next) => {
+    const { otpType, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['otpType', 'reason'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    const validOtpTypes = ['start', 'end'];
+    if (!otpType || !validOtpTypes.includes(otpType)) {
+        errors.push(`otpType is required. Allowed: ${validOtpTypes.join(', ')}`);
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        errors.push('reason is required');
+    } else if (reason.length > 1000) {
+        errors.push('reason cannot exceed 1000 characters');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
     next();
 };
 
@@ -1678,6 +1914,12 @@ module.exports = {
     validateNearbyStaff,
     validateDutyAcceptance,
     validateDutyStatusChange,
+    validateRequestStartOtp,
+    validateVerifyStartOtp,
+    validateVerifyEndOtp,
+    validateRaiseDispute,
+    validateResolveDispute,
+    validateUnlockOtp,
     validateDutyCancellation,
     validateDutyEdit,
     validatePagination,

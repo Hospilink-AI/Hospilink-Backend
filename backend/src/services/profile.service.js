@@ -25,6 +25,17 @@ const {
 } = require('../middleware/error.middleware');
 
 class ProfileService {
+    // Returns true if normalizedPhone already belongs to another Hospital or MedicalStaff profile.
+    async isPhoneNumberRegistered(normalizedPhone) {
+        const [staffMatch, hospitalMatch] = await Promise.all([
+            MedicalStaff.findOne({ normalizedPhone }).select('_id').lean(),
+            Hospital.findOne({ normalizedPhone }).select('_id').lean()
+        ]);
+        return !!(staffMatch || hospitalMatch);
+    }
+
+
+    
     // Create medical staff profile
     async createMedicalStaffProfile(userId, profileData) {
         try {
@@ -64,6 +75,11 @@ class ProfileService {
                 throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
             }
 
+            // Phone number must be unique across all hospital and staff accounts
+            if (await this.isPhoneNumberRegistered(normalizedStaffPhone)) {
+                throw new ConflictError('Phone number already registered with another account');
+            }
+
             let coordinates = null;
 
             // Always geocode from address - no location permission during profile creation
@@ -96,6 +112,8 @@ class ProfileService {
                 state: profileData.state,
                 pincode: profileData.pincode,
                 phoneNumber: profileData.phoneNumber,
+                normalizedPhone: normalizedStaffPhone,
+                isPhoneVerified: true,
                 email: profileData.email,
                 coordinates: coordinates,
                 profileSummary: profileData.profileSummary || '',
@@ -188,6 +206,11 @@ class ProfileService {
                 throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
             }
 
+            // Phone number must be unique across all hospital and staff accounts
+            if (await this.isPhoneNumberRegistered(normalizedHospitalPhone)) {
+                throw new ConflictError('Phone number already registered with another account');
+            }
+
             let coordinates;
             let geocodingAddress;
             let geocodingSource = 'google_maps_api';
@@ -268,6 +291,8 @@ class ProfileService {
                 state: profileData.state,
                 pincode: profileData.pincode,
                 phoneNumber: profileData.phoneNumber,
+                normalizedPhone: normalizedHospitalPhone,
+                isPhoneVerified: true,
                 servicesAvailable: profileData.servicesAvailable,
                 staffCount: profileData.staffCount,
                 description: profileData.description || '',

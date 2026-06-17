@@ -85,6 +85,19 @@ const hospitalSchema = new mongoose.Schema({
             message: 'Phone number must start with +91 followed by 10 digits'
         }
     },
+    // Spaces stripped from phoneNumber — used to enforce phone-number
+    // uniqueness across Hospital and MedicalStaff accounts.
+    normalizedPhone: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    // True once the send-phone-otp / verify-phone-otp flow succeeded for this
+    // number, mirroring User.isEmailVerified.
+    isPhoneVerified: {
+        type: Boolean,
+        default: false
+    },
     // Update coordinates to use named properties
     coordinates: {
         type: {
@@ -161,6 +174,14 @@ const hospitalSchema = new mongoose.Schema({
         type: String,
         trim: true,
         maxlength: [500, 'Rejection reason cannot exceed 500 characters']
+    },
+    averageRating: {
+        type: Number,
+        default: 0
+    },
+    totalRatings: {
+        type: Number,
+        default: 0
     },
     createdAt: {
         type: Date,

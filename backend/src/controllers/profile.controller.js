@@ -1,5 +1,5 @@
 const ProfileService = require('../services/profile.service');
-const { asyncHandler, AppError, ValidationError } = require('../middleware/error.middleware');
+const { asyncHandler, AppError, ValidationError, ConflictError } = require('../middleware/error.middleware');
 const activityLogEmitter = require('../services/activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const OTPService = require('../services/otp.service');
@@ -103,6 +103,12 @@ class ProfileController {
         const { phoneNumber } = req.body;
 
         const normalizedPhone = SMSService.normalizePhone(phoneNumber);
+
+        // Phone number must be unique across all hospital and staff accounts —
+        // checked here, before sending a paid SMS, so the user finds out immediately.
+        if (await ProfileService.isPhoneNumberRegistered(normalizedPhone)) {
+            throw new ConflictError('Phone number already registered with another account');
+        }
 
         const otp = OTPService.generateOTP();
         const otpExpiry = OTPService.getOTPExpiry();
