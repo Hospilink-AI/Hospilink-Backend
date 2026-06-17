@@ -2513,6 +2513,34 @@ class DutyService {
             throw new ForbiddenError('Start OTP is locked — contact admin support');
         }
 
+        // Time-window guard: OTP can only be requested within ±bufferMinutes of scheduled start.
+        // Enforced at generation — never issue a code when the check-in window is closed.
+        const now = getCurrentIST();
+        const bufferMinutes = 15;
+        const [startHours, startMinutes] = duty.startTime.split(':').map(Number);
+        const istDutyDate = toIST(new Date(duty.date));
+        const scheduledStartTime = new Date(istDutyDate);
+        scheduledStartTime.setHours(startHours, startMinutes, 0, 0);
+
+        const windowStart = new Date(scheduledStartTime.getTime() - bufferMinutes * 60 * 1000);
+        const windowEnd   = new Date(scheduledStartTime.getTime() + bufferMinutes * 60 * 1000);
+
+        if (now < windowStart) {
+            const opensAt  = windowStart.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            const startsAt = scheduledStartTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            throw new ValidationError(
+                `Check-in window has not opened yet. You can request a start OTP from ${opensAt} (${bufferMinutes} minutes before your ${startsAt} duty start).`
+            );
+        }
+
+        if (now > windowEnd) {
+            const windowStartStr = windowStart.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            const windowEndStr   = windowEnd.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            throw new ValidationError(
+                `Check-in window has closed. The start OTP window was ${windowStartStr} – ${windowEndStr}. Please contact admin if you need assistance.`
+            );
+        }
+
         const hospitalLat = duty.hospital?.coordinates?.coordinates?.latitude;
         const hospitalLng = duty.hospital?.coordinates?.coordinates?.longitude;
         if (typeof hospitalLat !== 'number' || typeof hospitalLng !== 'number') {
@@ -2526,8 +2554,7 @@ class DutyService {
 
         const code = OTPService.generateOTP();
         const expiryMinutes = parseInt(process.env.DUTY_START_OTP_EXPIRY_MINUTES) || 5;
-        const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
-        const now = getCurrentIST();
+        const expiresAt = new Date(now.getTime() + expiryMinutes * 60 * 1000);
 
         const updated = await Duty.findOneAndUpdate(
             { _id: dutyId, status: 'enroute' },
