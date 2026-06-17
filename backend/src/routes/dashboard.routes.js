@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const dashboardController = require('../controllers/dashboard.controller');
-const { protect, authorize } = require('../middleware/auth.middleware');
+const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
 
 // Apply protection to all dashboard routes
 router.use(protect);
+router.use(checkSuspension);
 router.use(authorize('staff'));
 
 // Dashboard endpoints

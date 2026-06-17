@@ -242,6 +242,124 @@ class CacheInvalidationService {
         logger.info(`Batch staff cache invalidation completed: ${results.success} success, ${results.failed} failed`);
         return results;
     }
+
+    // ─── Hospital suspension cache ─────────────────────────────────────────────
+
+    // Invalidate hospital suspension cache with retry mechanism
+    static async invalidateHospitalSuspensionCache(userId, maxRetries = 3) {
+        const cacheKey = `suspension:hospital:${userId}`;
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                await cacheService.del(cacheKey);
+                const cachedValue = await cacheService.get(cacheKey);
+                if (!cachedValue) {
+                    logger.info(`Hospital suspension cache invalidated for user ${userId} (attempt ${attempt})`);
+                    return true;
+                }
+                logger.warn(`Hospital suspension cache invalidation failed for user ${userId} (attempt ${attempt})`);
+                if (attempt < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, attempt - 1)));
+                }
+            } catch (error) {
+                logger.error(`Hospital suspension cache invalidation error for user ${userId} (attempt ${attempt}):`, error);
+                if (attempt < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, attempt - 1)));
+                }
+            }
+        }
+
+        logger.error(`Hospital suspension cache invalidation failed after ${maxRetries} attempts for user ${userId}`);
+        return false;
+    }
+
+    // Re-fetch hospital suspension data from DB and warm the cache
+    static async refreshHospitalSuspensionCache(userId) {
+        const cacheKey = `suspension:hospital:${userId}`;
+
+        try {
+            await this.invalidateHospitalSuspensionCache(userId);
+
+            const hospital = await Hospital.findOne({ user: userId })
+                .select('isSuspended suspensionReason')
+                .lean();
+
+            if (hospital) {
+                const freshData = {
+                    isSuspended: hospital.isSuspended || false,
+                    suspensionReason: hospital.suspensionReason || null
+                };
+                await cacheService.set(cacheKey, freshData, 300);
+                logger.info(`Hospital suspension cache refreshed for user ${userId}`);
+                return freshData;
+            }
+
+            logger.warn(`Hospital not found for user ${userId} during suspension cache refresh`);
+            return null;
+        } catch (error) {
+            logger.error(`Hospital suspension cache refresh error for user ${userId}:`, error);
+            return null;
+        }
+    }
+
+    // ─── Staff suspension cache ────────────────────────────────────────────────
+
+    // Invalidate staff suspension cache with retry mechanism
+    static async invalidateStaffSuspensionCache(userId, maxRetries = 3) {
+        const cacheKey = `suspension:staff:${userId}`;
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                await cacheService.del(cacheKey);
+                const cachedValue = await cacheService.get(cacheKey);
+                if (!cachedValue) {
+                    logger.info(`Staff suspension cache invalidated for user ${userId} (attempt ${attempt})`);
+                    return true;
+                }
+                logger.warn(`Staff suspension cache invalidation failed for user ${userId} (attempt ${attempt})`);
+                if (attempt < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, attempt - 1)));
+                }
+            } catch (error) {
+                logger.error(`Staff suspension cache invalidation error for user ${userId} (attempt ${attempt}):`, error);
+                if (attempt < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, attempt - 1)));
+                }
+            }
+        }
+
+        logger.error(`Staff suspension cache invalidation failed after ${maxRetries} attempts for user ${userId}`);
+        return false;
+    }
+
+    // Re-fetch staff suspension data from DB and warm the cache
+    static async refreshStaffSuspensionCache(userId) {
+        const cacheKey = `suspension:staff:${userId}`;
+
+        try {
+            await this.invalidateStaffSuspensionCache(userId);
+
+            const staff = await MedicalStaff.findOne({ user: userId })
+                .select('isSuspended suspensionReason')
+                .lean();
+
+            if (staff) {
+                const freshData = {
+                    isSuspended: staff.isSuspended || false,
+                    suspensionReason: staff.suspensionReason || null
+                };
+                await cacheService.set(cacheKey, freshData, 300);
+                logger.info(`Staff suspension cache refreshed for user ${userId}`);
+                return freshData;
+            }
+
+            logger.warn(`Staff not found for user ${userId} during suspension cache refresh`);
+            return null;
+        } catch (error) {
+            logger.error(`Staff suspension cache refresh error for user ${userId}:`, error);
+            return null;
+        }
+    }
 }
 
 module.exports = CacheInvalidationService;

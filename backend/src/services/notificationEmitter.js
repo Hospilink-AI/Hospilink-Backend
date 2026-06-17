@@ -1394,6 +1394,62 @@ class NotificationEmitter {
             console.error('Error emitting emergency admin alert:', error);
         }
     }
+
+    // ─── Account suspension notifications ─────────────────────────────────────
+
+    /**
+     * Emit account suspended notification to the affected user
+     * @param {Object} profile - Hospital or MedicalStaff object
+     * @param {string} userId - User ID string
+     * @param {string} role - 'hospital' | 'staff'
+     * @param {string} reason - Suspension reason
+     */
+    async emitAccountSuspended(profile, userId, role, reason) {
+        try {
+            const name = role === 'hospital'
+                ? (profile.hospitalLegalName || 'Account')
+                : (profile.fullName || 'Account');
+
+            const payload = {
+                type: 'ACCOUNT_SUSPENDED',
+                reason,
+                message: `Your account has been suspended. Reason: ${reason}. Please contact support for assistance.`,
+                timestamp: new Date().toISOString()
+            };
+
+            const { unreadCount } = await notificationService.createNotificationWithCount(
+                userId, 'ACCOUNT_SUSPENDED', payload
+            );
+            await notificationDelivery.deliverToUser(userId, 'ACCOUNT_SUSPENDED', payload, unreadCount);
+            console.log(`[NOTIFICATION] Account suspended notification sent to ${role} user ${userId}`);
+        } catch (error) {
+            console.error('[NOTIFICATION] Error emitting account suspended notification:', error);
+        }
+    }
+
+    /**
+     * Emit account activated (unsuspended) notification to the affected user
+     * @param {Object} profile - Hospital or MedicalStaff object
+     * @param {string} userId - User ID string
+     * @param {string} role - 'hospital' | 'staff'
+     */
+    async emitAccountActivated(profile, userId, role) {
+        try {
+            const payload = {
+                type: 'ACCOUNT_ACTIVATED',
+                message: 'Your account has been restored. You can now access all platform features.',
+                timestamp: new Date().toISOString()
+            };
+
+            const { unreadCount } = await notificationService.createNotificationWithCount(
+                userId, 'ACCOUNT_ACTIVATED', payload
+            );
+            await notificationDelivery.deliverToUser(userId, 'ACCOUNT_ACTIVATED', payload, unreadCount);
+            console.log(`[NOTIFICATION] Account activated notification sent to ${role} user ${userId}`);
+        } catch (error) {
+            console.error('[NOTIFICATION] Error emitting account activated notification:', error);
+        }
+    }
 }
 
 module.exports = new NotificationEmitter();

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const notificationController = require('../controllers/notification.controller');
-const { protect } = require('../middleware/auth.middleware');
+const { protect, checkSuspension } = require('../middleware/auth.middleware');
 const { 
     validateNotificationId, 
     validateBulkNotificationRead,
@@ -11,6 +11,7 @@ const {
 
 // Apply authentication to all notification routes
 router.use(protect);
+router.use(checkSuspension);
 
 // Get user's notifications
 router.get('/', validateNotificationQuery, notificationController.getNotifications);

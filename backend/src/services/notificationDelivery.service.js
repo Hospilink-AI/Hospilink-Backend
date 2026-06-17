@@ -32,7 +32,9 @@ const FCM_TITLES = {
     DUTY_UNASSIGNED_15MIN: 'Duty Unassigned Alert',
     DUTY_UNFILLED_CRITICAL: 'Critical: Duty Unfilled',
     EMERGENCY_ADMIN_ALERT: 'Emergency Alert',
-    PASSWORD_CHANGED: 'Password Changed'
+    PASSWORD_CHANGED: 'Password Changed',
+    ACCOUNT_SUSPENDED: 'Account Suspended',
+    ACCOUNT_ACTIVATED: 'Account Restored'
 };
 
 class NotificationDeliveryService {
