@@ -73,6 +73,19 @@ async function authMiddleware(socket, next) {
             socket.medicalStaff = medicalStaff;
         }
 
+        // ── 6. Check suspension ───────────────────────────────────────────────
+        // Profile is already loaded above — zero extra DB cost.
+        if (user.role === 'hospital' || user.role === 'staff') {
+            const profile = user.role === 'hospital' ? socket.hospital : socket.medicalStaff;
+            if (profile && profile.isSuspended) {
+                const reason = profile.suspensionReason
+                    ? `Your account has been suspended. Reason: ${profile.suspensionReason}. Please contact support.`
+                    : 'Your account has been suspended. Please contact support.';
+                logger.warn(`Socket connection rejected: suspended ${user.role} account for user ${user._id}`);
+                return next(new Error(reason));
+            }
+        }
+
         next();
 
     } catch (error) {

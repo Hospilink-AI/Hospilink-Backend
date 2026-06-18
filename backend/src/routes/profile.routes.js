@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const profileController = require('../controllers/profile.controller');
 const dashboardController = require('../controllers/dashboard.controller');
-const { protect, authorize } = require('../middleware/auth.middleware');
+const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
 const {
     validateMedicalStaffProfile,
     validateHospitalProfile,
@@ -18,6 +18,7 @@ const { requireHospitalVerification, requireStaffVerificationandisAvailable, req
 
 // Apply protection to all profile routes
 router.use(protect);
+router.use(checkSuspension);
 
 // Get current user profile
 router.get('/me', profileController.getMyProfile);
