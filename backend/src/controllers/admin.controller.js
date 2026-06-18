@@ -598,3 +598,72 @@ exports.assignDutyToStaff = asyncHandler(async (req, res) => {
         data: duty
     });
 });
+
+// PATCH /api/admin/hospitals/:hospitalId/suspend
+exports.suspendHospital = asyncHandler(async (req, res) => {
+    const { reason } = req.body;
+    if (!reason) return res.status(400).json({ success: false, message: 'Suspension reason is required' });
+
+    const result = await adminService.suspendHospital(req.params.hospitalId, reason);
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.ACCOUNT_SUSPENDED,
+        { type: 'hospital', id: req.params.hospitalId },
+        { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+        { hospitalId: req.params.hospitalId, reason },
+        req
+    ).catch(() => {});
+
+    res.status(200).json({ success: true, message: result.message, data: result });
+});
+
+
+// PATCH /api/admin/hospitals/:hospitalId/unsuspend
+exports.unsuspendHospital = asyncHandler(async (req, res) => {
+    const result = await adminService.unsuspendHospital(req.params.hospitalId);
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.ACCOUNT_ACTIVATED,
+        { type: 'hospital', id: req.params.hospitalId },
+        { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+        { hospitalId: req.params.hospitalId },
+        req
+    ).catch(() => {});
+
+    res.status(200).json({ success: true, message: result.message, data: result });
+});
+
+
+// PATCH /api/admin/medical-staff/:staffId/suspend
+exports.suspendMedicalStaff = asyncHandler(async (req, res) => {
+    const { reason } = req.body;
+    if (!reason) return res.status(400).json({ success: false, message: 'Suspension reason is required' });
+
+    const result = await adminService.suspendMedicalStaff(req.params.staffId, reason);
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.ACCOUNT_SUSPENDED,
+        { type: 'staff', id: req.params.staffId },
+        { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+        { staffId: req.params.staffId, reason },
+        req
+    ).catch(() => {});
+
+    res.status(200).json({ success: true, message: result.message, data: result });
+});
+
+
+// PATCH /api/admin/medical-staff/:staffId/unsuspend
+exports.unsuspendMedicalStaff = asyncHandler(async (req, res) => {
+    const result = await adminService.unsuspendMedicalStaff(req.params.staffId);
+
+    activityLogEmitter.emitAdminActivity(
+        ACTIVITY_ACTIONS.ACCOUNT_ACTIVATED,
+        { type: 'staff', id: req.params.staffId },
+        { userId: req.user._id || req.user.id, name: req.user.name, role: 'admin', email: req.user.email },
+        { staffId: req.params.staffId },
+        req
+    ).catch(() => {});
+
+    res.status(200).json({ success: true, message: result.message, data: result });
+});

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const dutyController = require('../controllers/duty.controller');
-const { protect, authorize } = require('../middleware/auth.middleware');
+const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
 const { requireHospitalVerification, requireStaffVerificationandisAvailable} = require('../middleware/accountsVerification.middleware');
 const {
     validateDutyStatusHistory,
@@ -25,6 +25,7 @@ const {
 
 // Apply protection to all duty routes
 router.use(protect);
+router.use(checkSuspension);
 
 router.post(
     '/hospitals/:hospitalId/duties',

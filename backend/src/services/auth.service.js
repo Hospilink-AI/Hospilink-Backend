@@ -233,6 +233,26 @@ class AuthService {
             throw new UnauthorizedError('Invalid email or password.');
         }
 
+        // Check suspension before issuing any token — fail-closed, no token for suspended accounts
+        if (user.role === 'hospital' || user.role === 'staff') {
+            const Model = user.role === 'hospital'
+                ? require('../models/Hospital')
+                : require('../models/MedicalStaff');
+
+            const profile = await Model.findOne({ user: user._id })
+                .select('isSuspended suspensionReason')
+                .lean();
+
+            if (profile && profile.isSuspended) {
+                const reason = profile.suspensionReason
+                    ? `Your account has been suspended. Reason: ${profile.suspensionReason}. Please contact support for assistance.`
+                    : 'Your account has been suspended. Please contact support for assistance.';
+
+                const { ForbiddenError } = require('../middleware/error.middleware');
+                throw new ForbiddenError(reason);
+            }
+        }
+
         // Generate JWT token
         const token = jwt.sign(
             { id: user._id, role: user.role },

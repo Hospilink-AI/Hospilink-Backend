@@ -192,6 +192,21 @@ const medicalStaffSchema = new mongoose.Schema({
         trim: true,
         maxlength: [500, 'Rejection reason cannot exceed 500 characters']
     },
+    isSuspended: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
+    suspensionReason: {
+        type: String,
+        trim: true,
+        maxlength: [500, 'Suspension reason cannot exceed 500 characters'],
+        default: null
+    },
+    suspendedAt: {
+        type: Date,
+        default: null
+    },
     experience: {
         type: String,
         enum: {
@@ -275,6 +290,10 @@ medicalStaffSchema.index({ verificationStatus: 1, rejectionReason: 1 });
 
 // Index for cache invalidation queries 
 medicalStaffSchema.index({ user: 1, verificationStatus: 1, rejectionReason: 1 });
+
+// Indexes for suspension queries
+medicalStaffSchema.index({ isSuspended: 1, createdAt: -1 });
+medicalStaffSchema.index({ verificationStatus: 1, isSuspended: 1 });
 
 // compound index for nearby staff queries 
 medicalStaffSchema.index({

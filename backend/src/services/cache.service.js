@@ -435,6 +435,24 @@ class CacheService {
         return await this.del(key);
     }
 
+    // ─── Suspension status caching ────────────────────────────────────────────
+    // key pattern: suspension:{role}:{userId}  TTL: 300s (same as verification cache)
+
+    async getSuspensionStatus(userId, role) {
+        const key = `suspension:${role}:${userId}`;
+        return await this.get(key);
+    }
+
+    async setSuspensionStatus(userId, role, data, ttl = 300) {
+        const key = `suspension:${role}:${userId}`;
+        return await this.set(key, data, ttl);
+    }
+
+    async invalidateSuspensionStatus(userId, role) {
+        const key = `suspension:${role}:${userId}`;
+        return await this.del(key);
+    }
+
 }
 
 module.exports = new CacheService();

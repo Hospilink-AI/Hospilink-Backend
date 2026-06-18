@@ -182,6 +182,21 @@ const hospitalSchema = new mongoose.Schema({
     totalRatings: {
         type: Number,
         default: 0
+    },    
+    isSuspended: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
+    suspensionReason: {
+        type: String,
+        trim: true,
+        maxlength: [500, 'Suspension reason cannot exceed 500 characters'],
+        default: null
+    },
+    suspendedAt: {
+        type: Date,
+        default: null
     },
     createdAt: {
         type: Date,
@@ -213,6 +228,10 @@ hospitalSchema.index({ verificationStatus: 1, rejectionReason: 1 });
 
 // Index for cache invalidation queries
 hospitalSchema.index({ user: 1, verificationStatus: 1, rejectionReason: 1 });
+
+// Indexes for suspension queries
+hospitalSchema.index({ isSuspended: 1, createdAt: -1 });
+hospitalSchema.index({ verificationStatus: 1, isSuspended: 1 });
 
 
 // For geospatial queries, we need to create a virtual field that returns array format
