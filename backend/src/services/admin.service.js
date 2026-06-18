@@ -6,7 +6,7 @@ const Review = require('../models/Review');
 const Document = require('../models/Document');
 const User = require('../models/User');
 const { generatePreSignedURL } = require('./s3.service');
-const { calculateDutyDuration, formatDuration, formatRoleForDisplay } = require('../utils/helpers');
+const { calculateDutyDuration, getCurrentIST, formatDuration, formatRoleForDisplay} = require('../utils/helpers');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
 const { ALLOWED_ROLES } = require('../utils/constants');
 const geocodingService = require('./geocoding.service');
@@ -2525,10 +2525,6 @@ class AdminService {
 
     // Admin overrides duty status
     async adminOverrideDutyStatus(dutyId, adminUserId, newStatus, reason) {
-        const Duty = require('../models/Duty');
-        const { NotFoundError, ValidationError } = require('../middleware/error.middleware');
-        const getCurrentIST = require('../utils/dateHelpers').getCurrentIST;
-
         const duty = await Duty.findById(dutyId);
         if (!duty) {
             throw new NotFoundError('Duty not found');
@@ -2588,10 +2584,6 @@ class AdminService {
 
     // Admin resolves a disputed duty
     async resolveDispute(dutyId, adminId, { finalStatus, notes, paymentMethod, isPaid, completedAt }) {
-        const Duty = require('../models/Duty');
-        const { NotFoundError, ValidationError, ConflictError } = require('../middleware/error.middleware');
-        const getCurrentIST = require('../utils/dateHelpers').getCurrentIST;
-
         if (!['completed', 'incomplete', 'cancelled'].includes(finalStatus)) {
             throw new ValidationError('finalStatus must be one of: completed, incomplete, cancelled');
         }
@@ -2657,10 +2649,6 @@ class AdminService {
     
     // Admin unlocks a locked start/end OTP
     async unlockDutyOtp(dutyId, otpType, adminId, reason) {
-        const Duty = require('../models/Duty');
-        const { NotFoundError, ValidationError, ConflictError } = require('../middleware/error.middleware');
-        const getCurrentIST = require('../utils/dateHelpers').getCurrentIST;
-
         if (!['start', 'end'].includes(otpType)) {
             throw new ValidationError("otpType must be 'start' or 'end'");
         }
