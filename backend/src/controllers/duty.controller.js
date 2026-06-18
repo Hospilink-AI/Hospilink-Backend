@@ -431,12 +431,12 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
 
 
 
+
 exports.requestStartOtp = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { coordinates } = req.body;
     const userId = req.user.id;
 
-    const { alreadyInProgress, expiresAt } = await DutyService.requestStartOtp(id, userId, coordinates);
+    const { alreadyInProgress, expiresAt } = await DutyService.requestStartOtp(id, userId);
 
     res.status(200).json({
         success: true,
@@ -452,10 +452,10 @@ exports.requestStartOtp = asyncHandler(async (req, res) => {
 
 exports.verifyStartOtp = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { otp, coordinates } = req.body;
+    const { otp } = req.body;
     const userId = req.user.id;
 
-    const duty = await DutyService.verifyStartOtp(id, userId, otp, coordinates);
+    const duty = await DutyService.verifyStartOtp(id, userId, otp);
 
     // Emit on-site notification to hospital + in-progress notification to staff
     try {
@@ -581,49 +581,6 @@ exports.raiseDispute = asyncHandler(async (req, res) => {
     });
 });
 
-
-
-
-exports.resolveDispute = asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const { finalStatus, notes, paymentMethod, isPaid, completedAt } = req.body;
-    const adminId = req.user.id;
-
-    const duty = await DutyService.resolveDispute(id, adminId, { finalStatus, notes, paymentMethod, isPaid, completedAt });
-
-    activityLogEmitter.emitSystemActivity(
-        ACTIVITY_ACTIONS.DUTY_DISPUTE_RESOLVED,
-        { dutyId: duty._id.toString(), finalStatus, timestamp: new Date().toISOString() }
-    ).catch(err => logger.error('Error logging dispute resolution:', err));
-
-    res.status(200).json({
-        success: true,
-        message: `Dispute resolved — duty marked as ${finalStatus}.`,
-        duty
-    });
-});
-
-
-
-
-exports.unlockDutyOtp = asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const { otpType, reason } = req.body;
-    const adminId = req.user.id;
-
-    const duty = await DutyService.unlockDutyOtp(id, otpType, adminId, reason);
-
-    activityLogEmitter.emitSystemActivity(
-        ACTIVITY_ACTIONS.DUTY_OTP_UNLOCKED,
-        { dutyId: duty._id.toString(), otpType, reason, timestamp: new Date().toISOString() }
-    ).catch(err => logger.error('Error logging OTP unlock:', err));
-
-    res.status(200).json({
-        success: true,
-        message: `${otpType === 'start' ? 'Start' : 'End'} OTP unlocked.`,
-        duty
-    });
-});
 
 
 

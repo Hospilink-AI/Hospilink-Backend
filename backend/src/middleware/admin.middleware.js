@@ -1046,6 +1046,127 @@ const validateSuspensionReason = (req, res, next) => {
 };
 
 
+
+// Validation for admin override of duty status
+const validateAdminOverrideStatus = (req, res, next) => {
+    const { status, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['status', 'reason'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    const allowedStatuses = ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'completed'];
+    if (!status || !allowedStatuses.includes(status)) {
+        errors.push(`Invalid status. Allowed: ${allowedStatuses.join(', ')}`);
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length < 10 || reason.trim().length > 500) {
+        errors.push('Reason is required and must be between 10 and 500 characters');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for admin resolving a dispute
+const validateResolveDispute = (req, res, next) => {
+    const { finalStatus, notes, paymentMethod, isPaid, completedAt } = req.body;
+    const errors = [];
+
+    const allowedFields = ['finalStatus', 'notes', 'paymentMethod', 'isPaid', 'completedAt'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    const validFinalStatuses = ['completed', 'incomplete', 'cancelled'];
+    if (!finalStatus || !validFinalStatuses.includes(finalStatus)) {
+        errors.push(`finalStatus is required. Allowed: ${validFinalStatuses.join(', ')}`);
+    }
+
+    if (notes !== undefined && typeof notes !== 'string') {
+        errors.push('notes must be a string');
+    }
+
+    const validPaymentMethods = ['cash', 'upi', 'bank', 'will_pay_later'];
+    if (paymentMethod !== undefined && !validPaymentMethods.includes(paymentMethod)) {
+        errors.push(`paymentMethod must be one of: ${validPaymentMethods.join(', ')}`);
+    }
+
+    if (isPaid !== undefined && typeof isPaid !== 'boolean') {
+        errors.push('isPaid must be a boolean');
+    }
+
+    if (completedAt !== undefined && isNaN(new Date(completedAt).getTime())) {
+        errors.push('completedAt must be a valid date');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for admin unlocking a locked start/end OTP
+const validateUnlockOtp = (req, res, next) => {
+    const { otpType, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['otpType', 'reason'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    const validOtpTypes = ['start', 'end'];
+    if (!otpType || !validOtpTypes.includes(otpType)) {
+        errors.push(`otpType is required. Allowed: ${validOtpTypes.join(', ')}`);
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        errors.push('reason is required');
+    } else if (reason.length > 1000) {
+        errors.push('reason cannot exceed 1000 characters');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
 module.exports = {
     validateAdminSignin,
     validateAdminOTP,
@@ -1064,5 +1185,8 @@ module.exports = {
     validateObjectId,
     validateRejectionReason,
     validateSuspensionReason,
-    validateAssignDuty
+    validateAssignDuty,
+    validateAdminOverrideStatus,
+    validateResolveDispute,
+    validateUnlockOtp,
 };

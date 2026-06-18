@@ -2519,6 +2519,191 @@ class AdminService {
             message: 'Staff account unsuspended successfully'
         };
     }
+
+
+
+
+    // Admin overrides duty status
+    async adminOverrideDutyStatus(dutyId, adminUserId, newStatus, reason) {
+        const Duty = require('../models/Duty');
+        const { NotFoundError, ValidationError } = require('../middleware/error.middleware');
+        const getCurrentIST = require('../utils/dateHelpers').getCurrentIST;
+
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        const allowedTransitions = {
+            'available': ['assigned', 'enroute', 'in-progress', 'completed'],
+            'assigned': ['available', 'enroute', 'in-progress', 'completed'],
+            'enroute': ['available', 'assigned', 'in-progress', 'completed'],
+            'in-progress': ['completed'],
+            'pending-confirmation': ['completed'],
+            'completed': []
+        };
+
+        if (!allowedTransitions[duty.status]) {
+            throw new ValidationError(`Admin override is not allowed from status ${duty.status}`);
+        }
+
+        if (!allowedTransitions[duty.status].includes(newStatus)) {
+            throw new ValidationError(`Invalid override transition from ${duty.status} to ${newStatus}`);
+        }
+
+        const previousStatus = duty.status;
+        duty.status = newStatus;
+        duty.statusHistory.push({
+            status: newStatus,
+            timestamp: getCurrentIST(),
+            changedBy: adminUserId,
+            reason,
+            manualOverride: true,
+            overriddenFromStatus: previousStatus
+        });
+
+        await duty.save();
+
+        await duty.populate({
+            path: 'assignedTo',
+            populate: {
+                path: 'user',
+                select: 'name email'
+            }
+        });
+
+        await duty.populate({
+            path: 'hospital',
+            populate: {
+                path: 'user',
+                select: 'name email'
+            }
+        });
+
+        return duty;
+    }
+
+
+
+
+    // Admin resolves a disputed duty
+    async resolveDispute(dutyId, adminId, { finalStatus, notes, paymentMethod, isPaid, completedAt }) {
+        const Duty = require('../models/Duty');
+        const { NotFoundError, ValidationError, ConflictError } = require('../middleware/error.middleware');
+        const getCurrentIST = require('../utils/dateHelpers').getCurrentIST;
+
+        if (!['completed', 'incomplete', 'cancelled'].includes(finalStatus)) {
+            throw new ValidationError('finalStatus must be one of: completed, incomplete, cancelled');
+        }
+
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (duty.status !== 'disputed') {
+            throw new ValidationError('Only disputed duties can be resolved');
+        }
+
+        const now = getCurrentIST();
+        const setFields = {
+            disputeResolution: {
+                resolvedBy: adminId,
+                resolvedAt: now,
+                notes: notes || null,
+                finalStatus
+            },
+            status: finalStatus
+        };
+
+        if (finalStatus === 'completed') {
+            setFields.completedAt = completedAt ? new Date(completedAt) : (duty.completedAt || now);
+            if (paymentMethod !== undefined) setFields.paymentMethod = paymentMethod;
+            if (isPaid !== undefined) setFields.isPaid = isPaid;
+            if (paymentMethod !== undefined || isPaid !== undefined) {
+                setFields.paymentAttestedAt = now;
+                setFields.paymentAttestedBy = adminId;
+            }
+        } else if (finalStatus === 'incomplete') {
+            setFields.incompleteAt = now;
+        }
+
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: 'disputed' },
+            {
+                $set: setFields,
+                $push: {
+                    statusHistory: {
+                        status: finalStatus,
+                        timestamp: now,
+                        changedBy: adminId,
+                        reason: `Dispute resolved by admin: ${notes || finalStatus}`
+                    }
+                }
+            },
+            { new: true }
+        )
+            .populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } })
+            .populate({ path: 'assignedTo', populate: { path: 'user', select: 'name email' } });
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed — cannot resolve dispute');
+        }
+
+        return updated;
+    }
+
+
+    
+    // Admin unlocks a locked start/end OTP
+    async unlockDutyOtp(dutyId, otpType, adminId, reason) {
+        const Duty = require('../models/Duty');
+        const { NotFoundError, ValidationError, ConflictError } = require('../middleware/error.middleware');
+        const getCurrentIST = require('../utils/dateHelpers').getCurrentIST;
+
+        if (!['start', 'end'].includes(otpType)) {
+            throw new ValidationError("otpType must be 'start' or 'end'");
+        }
+
+        const field = `${otpType}Otp`;
+
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (duty[field].status !== 'LOCKED') {
+            throw new ValidationError(`${otpType === 'start' ? 'Start' : 'End'} OTP is not locked`);
+        }
+
+        const now = getCurrentIST();
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, [`${field}.status`]: 'LOCKED' },
+            {
+                $set: {
+                    [`${field}.status`]: 'NONE',
+                    [`${field}.attempts`]: 0,
+                    [`${field}.unlockedBy`]: adminId,
+                    [`${field}.unlockReason`]: reason
+                },
+                $push: {
+                    statusHistory: {
+                        status: duty.status,
+                        timestamp: now,
+                        changedBy: adminId,
+                        reason: `${otpType === 'start' ? 'Start' : 'End'} OTP unlocked by admin: ${reason}`
+                    }
+                }
+            },
+            { new: true }
+        );
+
+        if (!updated) {
+            throw new ConflictError('OTP status changed — cannot unlock');
+        }
+
+        return updated;
+    }
 }
 
 module.exports = new AdminService();

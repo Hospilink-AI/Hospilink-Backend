@@ -12,15 +12,13 @@ const {
     validateVerifyStartOtp,
     validateVerifyEndOtp,
     validateRaiseDispute,
-    validateResolveDispute,
-    validateUnlockOtp,
     validateDutyCancellation,
     validateDutyEdit,
     validatePagination,
     validateObjectId,
     validateStatementQuery,
-    validateHospitalActiveDutiesQuery,
-    validateHospitalDutyRouteMap
+    validateHospitalDutyRouteMap,
+    validateHospitalActiveDutiesQuery
 } = require('../middleware/validation.middleware');
 
 // Apply protection to all duty routes
@@ -111,21 +109,6 @@ router.post(
     dutyController.raiseDispute
 );
 
-router.patch(
-    '/duties/:id/resolve-dispute',
-    authorize('admin'),
-    validateObjectId('id'),
-    validateResolveDispute,
-    dutyController.resolveDispute
-);
-
-router.patch(
-    '/duties/:id/unlock-otp',
-    authorize('admin'),
-    validateObjectId('id'),
-    validateUnlockOtp,
-    dutyController.unlockDutyOtp
-);
 
 router.post(
     '/duty/status-history',

@@ -667,3 +667,81 @@ exports.unsuspendMedicalStaff = asyncHandler(async (req, res) => {
 
     res.status(200).json({ success: true, message: result.message, data: result });
 });
+
+
+
+
+// Admin overrides duty status - PATCH /api/admin/duties/:id/admin-override
+exports.adminOverrideDutyStatus = asyncHandler(async (req, res) => {
+    const { status, reason } = req.body;
+    const dutyId = req.params.id;
+    const userId = req.user.id;
+
+    const duty = await adminService.adminOverrideDutyStatus(dutyId, userId, status, reason);
+
+    try {
+        const auditEntry = duty.statusHistory[duty.statusHistory.length - 1];
+        await activityLogEmitter.logDutyStatusOverridden(
+            duty,
+            req.user,
+            auditEntry?.overriddenFromStatus || null,
+            status,
+            reason,
+            req
+        );
+    } catch (err) {
+        logger.error('Error logging admin override activity:', err);
+    }
+
+    res.status(200).json({
+        success: true,
+        message: `Duty status overridden to ${status} successfully.`,
+        duty
+    });
+});
+
+
+
+
+// Admin resolves a dispute - PATCH /api/admin/duties/:id/resolve-dispute
+exports.resolveDispute = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { finalStatus, notes, paymentMethod, isPaid, completedAt } = req.body;
+    const adminId = req.user.id;
+
+    const duty = await adminService.resolveDispute(id, adminId, { finalStatus, notes, paymentMethod, isPaid, completedAt });
+
+    activityLogEmitter.emitSystemActivity(
+        ACTIVITY_ACTIONS.DUTY_DISPUTE_RESOLVED,
+        { dutyId: duty._id.toString(), finalStatus, timestamp: new Date().toISOString() }
+    ).catch(err => logger.error('Error logging dispute resolution:', err));
+
+    res.status(200).json({
+        success: true,
+        message: `Dispute resolved — duty marked as ${finalStatus}.`,
+        duty
+    });
+});
+
+
+
+
+// Admin unlocks a locked OTP - PATCH /api/admin/duties/:id/unlock-otp
+exports.unlockDutyOtp = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { otpType, reason } = req.body;
+    const adminId = req.user.id;
+
+    const duty = await adminService.unlockDutyOtp(id, otpType, adminId, reason);
+
+    activityLogEmitter.emitSystemActivity(
+        ACTIVITY_ACTIONS.DUTY_OTP_UNLOCKED,
+        { dutyId: duty._id.toString(), otpType, reason, timestamp: new Date().toISOString() }
+    ).catch(err => logger.error('Error logging OTP unlock:', err));
+
+    res.status(200).json({
+        success: true,
+        message: `${otpType === 'start' ? 'Start' : 'End'} OTP unlocked.`,
+        duty
+    });
+});

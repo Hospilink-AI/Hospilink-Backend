@@ -154,7 +154,15 @@ const dutySchema = new mongoose.Schema({
             type: mongoose.Schema.Types.Mixed,  // Allow both ObjectId and string
             required: true
         },
-        reason: String  // For cancellations
+        reason: String,  // For cancellations or admin override reasons
+        manualOverride: {
+            type: Boolean,
+            default: false
+        },
+        overriddenFromStatus: {
+            type: String,
+            enum: ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'disputed', 'completed', 'cancelled', 'expired', 'incomplete']
+        }
     }],
 
     cancellation: {

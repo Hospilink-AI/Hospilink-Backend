@@ -38,6 +38,7 @@ const {
 
 // Per-duty Redis lock TTL in seconds — prevents thundering herd
 const DUTY_ACCEPT_LOCK_TTL = 10;
+const LOCATION_UPDATE_MAX_AGE_MS = parseInt(process.env.STAFF_LOCATION_MAX_AGE_MS, 10) || 90 * 1000;
 
 /**
  * Acquire a short-lived Redis lock for a specific duty acceptance attempt.
@@ -63,6 +64,29 @@ async function releaseDutyLock(dutyId, staffId) {
         await redis.del(`duty_accept_lock:${dutyId}:${staffId}`);
     } catch {
         // Best-effort — TTL will clean it up anyway
+    }
+}
+
+async function getRecentStaffLocation(staffUserId) {
+    try {
+        const dashboardLocation = await DashboardService.getDashboardLocation(staffUserId);
+        if (!dashboardLocation || typeof dashboardLocation.latitude !== 'number' || typeof dashboardLocation.longitude !== 'number' || !dashboardLocation.updatedAt) {
+            return null;
+        }
+
+        const timestamp = Date.parse(dashboardLocation.updatedAt);
+        if (Number.isNaN(timestamp) || (Date.now() - timestamp) > LOCATION_UPDATE_MAX_AGE_MS) {
+            return null;
+        }
+
+        return {
+            latitude: dashboardLocation.latitude,
+            longitude: dashboardLocation.longitude,
+            timestamp,
+            source: dashboardLocation.source || 'websocket'
+        };
+    } catch (error) {
+        return null;
     }
 }
 
@@ -660,6 +684,7 @@ class DutyService {
 
         return duty;
     }
+
 
 
 
@@ -2485,7 +2510,7 @@ class DutyService {
     // Re-checks the geofence server-side against the submitted coordinates, mints a Start OTP,
     // and sends it via SMS to the hospital's registered phone number. The hospital reads the
     // code aloud to the staff member, who then submits it via verify-start-otp.
-    async requestStartOtp(dutyId, userId, coordinates) {
+    async requestStartOtp(dutyId, userId) {
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {
             throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
@@ -2547,7 +2572,12 @@ class DutyService {
             throw new ValidationError('Hospital location is not configured — contact support');
         }
 
-        if (!isWithinGeofence(coordinates.latitude, coordinates.longitude, hospitalLat, hospitalLng)) {
+        const staffLocation = await getRecentStaffLocation(userId);
+        if (!staffLocation) {
+            throw new ValidationError('Unable to determine your current location. Ensure the app is online and sharing live GPS to the server.');
+        }
+
+        if (!isWithinGeofence(staffLocation.latitude, staffLocation.longitude, hospitalLat, hospitalLng)) {
             const radiusMeters = Math.round(GEOFENCE_RADIUS_KM * 1000);
             throw new ValidationError(`You must be within ${radiusMeters}m of the hospital to request a start OTP`);
         }
@@ -2612,7 +2642,7 @@ class DutyService {
     // Staff submits the Start OTP (read out by the hospital) along with their current
     // coordinates. Both the OTP and a fresh geofence check must pass to move 'enroute' ->
     // 'in-progress'. Wrong OTP or out-of-range counts toward the shared lockout counter.
-    async verifyStartOtp(dutyId, userId, otp, coordinates) {
+    async verifyStartOtp(dutyId, userId, otp) {
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {
             throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
@@ -2653,7 +2683,12 @@ class DutyService {
             throw new ValidationError('Hospital location is not configured — contact support');
         }
 
-        const geofenceOk = isWithinGeofence(coordinates.latitude, coordinates.longitude, hospitalLat, hospitalLng);
+        const staffLocation = await getRecentStaffLocation(userId);
+        if (!staffLocation) {
+            throw new ValidationError('Unable to determine your current location. Ensure the app is online and sharing live GPS to the server.');
+        }
+
+        const geofenceOk = isWithinGeofence(staffLocation.latitude, staffLocation.longitude, hospitalLat, hospitalLng);
         const otpOk = duty.startOtp.code === otp;
 
         if (!geofenceOk || !otpOk) {
@@ -3008,121 +3043,6 @@ class DutyService {
 
         if (!updated) {
             throw new ConflictError('Duty status changed — cannot raise dispute');
-        }
-
-        return updated;
-    }
-
-
-
-    // Admin resolves a disputed duty, setting its final status. When resolving to 'completed',
-    // an admin may optionally supply/override the payment attestation and completedAt.
-    async resolveDispute(dutyId, adminId, { finalStatus, notes, paymentMethod, isPaid, completedAt }) {
-        if (!['completed', 'incomplete', 'cancelled'].includes(finalStatus)) {
-            throw new ValidationError('finalStatus must be one of: completed, incomplete, cancelled');
-        }
-
-        const duty = await Duty.findById(dutyId);
-        if (!duty) {
-            throw new NotFoundError('Duty not found');
-        }
-
-        if (duty.status !== 'disputed') {
-            throw new ValidationError('Only disputed duties can be resolved');
-        }
-
-        const now = getCurrentIST();
-        const setFields = {
-            disputeResolution: {
-                resolvedBy: adminId,
-                resolvedAt: now,
-                notes: notes || null,
-                finalStatus
-            },
-            status: finalStatus
-        };
-
-        if (finalStatus === 'completed') {
-            setFields.completedAt = completedAt ? new Date(completedAt) : (duty.completedAt || now);
-            if (paymentMethod !== undefined) setFields.paymentMethod = paymentMethod;
-            if (isPaid !== undefined) setFields.isPaid = isPaid;
-            if (paymentMethod !== undefined || isPaid !== undefined) {
-                setFields.paymentAttestedAt = now;
-                setFields.paymentAttestedBy = adminId;
-            }
-        } else if (finalStatus === 'incomplete') {
-            setFields.incompleteAt = now;
-        }
-
-        const updated = await Duty.findOneAndUpdate(
-            { _id: dutyId, status: 'disputed' },
-            {
-                $set: setFields,
-                $push: {
-                    statusHistory: {
-                        status: finalStatus,
-                        timestamp: now,
-                        changedBy: adminId,
-                        reason: `Dispute resolved by admin: ${notes || finalStatus}`
-                    }
-                }
-            },
-            { new: true }
-        )
-            .populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } })
-            .populate({ path: 'assignedTo', populate: { path: 'user', select: 'name email' } });
-
-        if (!updated) {
-            throw new ConflictError('Duty status changed — cannot resolve dispute');
-        }
-
-        return updated;
-    }
-
-
-
-    // Admin unlocks a locked start/end OTP, resetting it to 'NONE' so the normal
-    // trigger/request flow re-mints a fresh code.
-    async unlockDutyOtp(dutyId, otpType, adminId, reason) {
-        if (!['start', 'end'].includes(otpType)) {
-            throw new ValidationError("otpType must be 'start' or 'end'");
-        }
-
-        const field = `${otpType}Otp`;
-
-        const duty = await Duty.findById(dutyId);
-        if (!duty) {
-            throw new NotFoundError('Duty not found');
-        }
-
-        if (duty[field].status !== 'LOCKED') {
-            throw new ValidationError(`${otpType === 'start' ? 'Start' : 'End'} OTP is not locked`);
-        }
-
-        const now = getCurrentIST();
-        const updated = await Duty.findOneAndUpdate(
-            { _id: dutyId, [`${field}.status`]: 'LOCKED' },
-            {
-                $set: {
-                    [`${field}.status`]: 'NONE',
-                    [`${field}.attempts`]: 0,
-                    [`${field}.unlockedBy`]: adminId,
-                    [`${field}.unlockReason`]: reason
-                },
-                $push: {
-                    statusHistory: {
-                        status: duty.status,
-                        timestamp: now,
-                        changedBy: adminId,
-                        reason: `${otpType === 'start' ? 'Start' : 'End'} OTP unlocked by admin: ${reason}`
-                    }
-                }
-            },
-            { new: true }
-        );
-
-        if (!updated) {
-            throw new ConflictError('OTP status changed — cannot unlock');
         }
 
         return updated;

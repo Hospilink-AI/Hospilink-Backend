@@ -21,7 +21,9 @@ const {
     validateRejectionReason,
     validateSuspensionReason,
     validateAssignDuty,
-    
+    validateResolveDispute,
+    validateUnlockOtp,
+    validateAdminOverrideStatus,
 } = require('../middleware/admin.middleware');
 
 const { validateDutyCreation } = require('../middleware/validation.middleware');
@@ -97,5 +99,29 @@ router.put('/documents/:documentId/verify', validateObjectId('documentId'), admi
 router.put('/documents/:documentId/reject', validateObjectId('documentId'), validateRejectionReason, adminController.rejectDocument);
 
 router.post('/assign-duty', validateAssignDuty, adminController.assignDutyToStaff);
+
+
+// Duty Management endpoints for admin
+router.patch(
+    '/duties/:id/resolve-dispute',
+    validateObjectId('id'),
+    validateResolveDispute,
+    adminController.resolveDispute
+);
+
+router.patch(
+    '/duties/:id/unlock-otp',
+    validateObjectId('id'),
+    validateUnlockOtp,
+    adminController.unlockDutyOtp
+);
+
+router.patch(
+    '/duties/:id/admin-override',
+    validateObjectId('id'),
+    validateAdminOverrideStatus,
+    adminController.adminOverrideDutyStatus
+);
+
 
 module.exports = router;
