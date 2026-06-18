@@ -1396,35 +1396,44 @@ class NotificationEmitter {
         }
     }
 
+    // ─── Account suspension notifications ─────────────────────────────────────
+
+    /**
+     * Emit account suspended notification to the affected user
+     * @param {Object} profile - Hospital or MedicalStaff object
+     * @param {string} userId - User ID string
+     * @param {string} role - 'hospital' | 'staff'
+     * @param {string} reason - Suspension reason
+     */
     async emitAccountSuspended(profile, userId, role, reason) {
         try {
+            const name = role === 'hospital'
+                ? (profile.hospitalLegalName || 'Account')
+                : (profile.fullName || 'Account');
+
             const payload = {
                 type: 'ACCOUNT_SUSPENDED',
                 reason,
-                message: `Your account has been suspended. Reason: ${reason}. Please contact support.`,
+                message: `Your account has been suspended. Reason: ${reason}. Please contact support for assistance.`,
                 timestamp: new Date().toISOString()
             };
 
-            const { unreadCount } =
-                await notificationService.createNotificationWithCount(
-                    userId,
-                    'ACCOUNT_SUSPENDED',
-                    payload
-                );
-
-            await notificationDelivery.deliverToUser(
-                userId,
-                'ACCOUNT_SUSPENDED',
-                payload,
-                unreadCount
+            const { unreadCount } = await notificationService.createNotificationWithCount(
+                userId, 'ACCOUNT_SUSPENDED', payload
             );
-
-            logger.info(`Account suspended notification sent to ${role} user ${userId}`);
+            await notificationDelivery.deliverToUser(userId, 'ACCOUNT_SUSPENDED', payload, unreadCount);
+            console.log(`[NOTIFICATION] Account suspended notification sent to ${role} user ${userId}`);
         } catch (error) {
-            logger.error('Error emitting account suspended notification:', error);
+            console.error('[NOTIFICATION] Error emitting account suspended notification:', error);
         }
     }
 
+    /**
+     * Emit account activated (unsuspended) notification to the affected user
+     * @param {Object} profile - Hospital or MedicalStaff object
+     * @param {string} userId - User ID string
+     * @param {string} role - 'hospital' | 'staff'
+     */
     async emitAccountActivated(profile, userId, role) {
         try {
             const payload = {
@@ -1433,23 +1442,13 @@ class NotificationEmitter {
                 timestamp: new Date().toISOString()
             };
 
-            const { unreadCount } =
-                await notificationService.createNotificationWithCount(
-                    userId,
-                    'ACCOUNT_ACTIVATED',
-                    payload
-                );
-
-            await notificationDelivery.deliverToUser(
-                userId,
-                'ACCOUNT_ACTIVATED',
-                payload,
-                unreadCount
+            const { unreadCount } = await notificationService.createNotificationWithCount(
+                userId, 'ACCOUNT_ACTIVATED', payload
             );
-
-            logger.info(`Account activated notification sent to ${role} user ${userId}`);
+            await notificationDelivery.deliverToUser(userId, 'ACCOUNT_ACTIVATED', payload, unreadCount);
+            console.log(`[NOTIFICATION] Account activated notification sent to ${role} user ${userId}`);
         } catch (error) {
-            logger.error('Error emitting account activated notification:', error);
+            console.error('[NOTIFICATION] Error emitting account activated notification:', error);
         }
     }
 }

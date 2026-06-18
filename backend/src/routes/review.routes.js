@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const notificationController = require("../controllers/notification.controller");
 const reviewController = require("../controllers/review.controller");
-const { protect, authorize, checkSuspension } = require("../middleware/auth.middleware");
+const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
 const { validateReviewSubmission, validateStaffIdParam } = require("../middleware/validation.middleware");
 
 router.use(protect);
@@ -10,6 +10,8 @@ router.use(checkSuspension);
 // Hospital submits review for staff
 router.post(
     "/submit",
+    protect,
+    checkSuspension,
     authorize("hospital"),
     validateReviewSubmission,
     reviewController.submitReview
@@ -18,6 +20,8 @@ router.post(
 // Get staff reviews
 router.get(
     "/staff/:staffId",
+    protect,
+    checkSuspension,
     validateStaffIdParam,
     reviewController.getStaffReviews
 );

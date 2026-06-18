@@ -1045,6 +1045,40 @@ const validateAssignDuty = (req, res, next) => {
 };
 
 
+// Validate suspension reason for PATCH suspend endpoints
+const validateSuspensionReason = (req, res, next) => {
+    const { reason } = req.body;
+
+    // Reject unexpected fields
+    const allowedFields = ['reason'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid fields: ${unexpectedFields.join(', ')}. Only allowed: reason`
+        });
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Suspension reason is required and must be a non-empty string'
+        });
+    }
+
+    if (reason.length > 500) {
+        return res.status(400).json({
+            success: false,
+            message: 'Suspension reason cannot exceed 500 characters'
+        });
+    }
+
+    next();
+};
+
+
 module.exports = {
     validateAdminSignin,
     validateAdminOTP,

@@ -212,6 +212,10 @@ hospitalSchema.index({ isSuspended: 1, createdAt: -1 });
 // Index for cache invalidation queries
 hospitalSchema.index({ user: 1, verificationStatus: 1, rejectionReason: 1 });
 
+// Indexes for suspension queries
+hospitalSchema.index({ isSuspended: 1, createdAt: -1 });
+hospitalSchema.index({ verificationStatus: 1, isSuspended: 1 });
+
 
 // For geospatial queries, we need to create a virtual field that returns array format
 hospitalSchema.virtual('coordinatesArray').get(function () {

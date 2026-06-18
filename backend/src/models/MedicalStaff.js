@@ -282,6 +282,10 @@ medicalStaffSchema.index({ isSuspended: 1, createdAt: -1 });
 // Index for cache invalidation queries 
 medicalStaffSchema.index({ user: 1, verificationStatus: 1, rejectionReason: 1 });
 
+// Indexes for suspension queries
+medicalStaffSchema.index({ isSuspended: 1, createdAt: -1 });
+medicalStaffSchema.index({ verificationStatus: 1, isSuspended: 1 });
+
 // compound index for nearby staff queries 
 medicalStaffSchema.index({
     isAvailable: 1,

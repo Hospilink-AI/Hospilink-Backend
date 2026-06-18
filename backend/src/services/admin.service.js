@@ -2579,6 +2579,187 @@ class AdminService {
             message: `Successfully created ${createdDuties.length} ${createdDuties.length === 1 ? 'duty' : 'duties'}`
         };
     }
+
+    // ─── Account suspension ────────────────────────────────────────────────────
+
+    // PATCH /api/admin/hospitals/:hospitalId/suspend
+    async suspendHospital(hospitalId, reason) {
+        if (!reason) throw new ValidationError('Suspension reason is required');
+
+        const hospital = await Hospital.findById(hospitalId).populate('user', 'name email');
+        if (!hospital) throw new NotFoundError('Hospital not found');
+
+        if (hospital.isSuspended) {
+            throw new ConflictError('Hospital account is already suspended');
+        }
+
+        hospital.isSuspended = true;
+        hospital.suspensionReason = reason;
+        hospital.suspendedAt = new Date();
+        await hospital.save();
+
+        const userId = hospital.user._id;
+
+        // Invalidate all relevant caches immediately
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateHospitalSuspensionCache(userId),
+            CacheInvalidationService.invalidateHospitalVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`)
+        ]);
+
+        // Re-warm the suspension cache so the next request hits cache, not DB
+        await CacheInvalidationService.refreshHospitalSuspensionCache(userId);
+
+        logger.info(`Hospital ${hospitalId} suspended. Reason: ${reason}`);
+
+        // Fire-and-forget: email + notification
+        EmailService.sendAccountSuspendedEmail(hospital.user.email, hospital.hospitalLegalName, reason)
+            .catch(err => logger.error('Suspension email error:', err.message));
+
+        notificationEmitter.emitAccountSuspended(hospital, userId.toString(), 'hospital', reason)
+            .catch(err => logger.error('Suspension notification error:', err.message));
+
+        return {
+            id: hospital._id,
+            isSuspended: hospital.isSuspended,
+            suspensionReason: hospital.suspensionReason,
+            suspendedAt: hospital.suspendedAt,
+            message: 'Hospital account suspended successfully'
+        };
+    }
+
+    // PATCH /api/admin/hospitals/:hospitalId/unsuspend
+    async unsuspendHospital(hospitalId) {
+        const hospital = await Hospital.findById(hospitalId).populate('user', 'name email');
+        if (!hospital) throw new NotFoundError('Hospital not found');
+
+        if (!hospital.isSuspended) {
+            throw new ConflictError('Hospital account is not currently suspended');
+        }
+
+        hospital.isSuspended = false;
+        hospital.suspensionReason = null;
+        hospital.suspendedAt = null;
+        await hospital.save();
+
+        const userId = hospital.user._id;
+
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateHospitalSuspensionCache(userId),
+            CacheInvalidationService.invalidateHospitalVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`)
+        ]);
+
+        await CacheInvalidationService.refreshHospitalSuspensionCache(userId);
+
+        logger.info(`Hospital ${hospitalId} unsuspended`);
+
+        EmailService.sendAccountActivatedEmail(hospital.user.email, hospital.hospitalLegalName)
+            .catch(err => logger.error('Unsuspend email error:', err.message));
+
+        notificationEmitter.emitAccountActivated(hospital, userId.toString(), 'hospital')
+            .catch(err => logger.error('Unsuspend notification error:', err.message));
+
+        return {
+            id: hospital._id,
+            isSuspended: hospital.isSuspended,
+            suspensionReason: hospital.suspensionReason,
+            message: 'Hospital account unsuspended successfully'
+        };
+    }
+
+    // PATCH /api/admin/medical-staff/:staffId/suspend
+    async suspendMedicalStaff(staffId, reason) {
+        if (!reason) throw new ValidationError('Suspension reason is required');
+
+        const staff = await MedicalStaff.findById(staffId).populate('user', 'name email');
+        if (!staff) throw new NotFoundError('Medical staff not found');
+
+        if (staff.isSuspended) {
+            throw new ConflictError('Staff account is already suspended');
+        }
+
+        staff.isSuspended = true;
+        staff.suspensionReason = reason;
+        staff.suspendedAt = new Date();
+        await staff.save();
+
+        const userId = staff.user._id;
+
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateStaffSuspensionCache(userId),
+            CacheInvalidationService.invalidateStaffVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`),
+            cacheService.del(`staff_availability:${userId}`)
+        ]);
+
+        await CacheInvalidationService.refreshStaffSuspensionCache(userId);
+
+        logger.info(`Medical staff ${staffId} suspended. Reason: ${reason}`);
+
+        EmailService.sendAccountSuspendedEmail(staff.user.email, staff.fullName, reason)
+            .catch(err => logger.error('Suspension email error:', err.message));
+
+        notificationEmitter.emitAccountSuspended(staff, userId.toString(), 'staff', reason)
+            .catch(err => logger.error('Suspension notification error:', err.message));
+
+        return {
+            id: staff._id,
+            isSuspended: staff.isSuspended,
+            suspensionReason: staff.suspensionReason,
+            suspendedAt: staff.suspendedAt,
+            message: 'Staff account suspended successfully'
+        };
+    }
+
+    // PATCH /api/admin/medical-staff/:staffId/unsuspend
+    async unsuspendMedicalStaff(staffId) {
+        const staff = await MedicalStaff.findById(staffId).populate('user', 'name email');
+        if (!staff) throw new NotFoundError('Medical staff not found');
+
+        if (!staff.isSuspended) {
+            throw new ConflictError('Staff account is not currently suspended');
+        }
+
+        staff.isSuspended = false;
+        staff.suspensionReason = null;
+        staff.suspendedAt = null;
+        await staff.save();
+
+        const userId = staff.user._id;
+
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateStaffSuspensionCache(userId),
+            CacheInvalidationService.invalidateStaffVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`),
+            cacheService.del(`staff_availability:${userId}`)
+        ]);
+
+        await CacheInvalidationService.refreshStaffSuspensionCache(userId);
+
+        logger.info(`Medical staff ${staffId} unsuspended`);
+
+        EmailService.sendAccountActivatedEmail(staff.user.email, staff.fullName)
+            .catch(err => logger.error('Unsuspend email error:', err.message));
+
+        notificationEmitter.emitAccountActivated(staff, userId.toString(), 'staff')
+            .catch(err => logger.error('Unsuspend notification error:', err.message));
+
+        return {
+            id: staff._id,
+            isSuspended: staff.isSuspended,
+            suspensionReason: staff.suspensionReason,
+            message: 'Staff account unsuspended successfully'
+        };
+    }
 }
 
 module.exports = new AdminService();
