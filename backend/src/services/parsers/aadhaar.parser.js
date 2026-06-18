@@ -1,70 +1,109 @@
 module.exports = (text) => {
-
-    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-
+ 
+    const lines = text
+        .split("\n")
+        .map(l => l.trim())
+        .filter(Boolean);
+ 
     // NAME
-    let name;
+ 
+    let name = null;
+ 
     for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes("DOB") || /\d{2}\/\d{2}\/\d{4}/.test(lines[i])) {
-            name = lines[i - 1];
+ 
+        const line = lines[i];
+ 
+        if (
+            /DOB|Date of Birth/i.test(line)
+        ) {
+ 
+            const prevLine = lines[i - 1];
+ 
+            if (
+                prevLine &&
+                !/Government of India/i.test(prevLine) &&
+                !/भारत सरकार/i.test(prevLine)
+            ) {
+                name = prevLine
+                    .replace(/[^A-Za-z\s]/g, "")
+                    .replace(/\s+/g, " ")
+                    .trim();
+            }
+ 
             break;
         }
     }
-
-    if (name) {
-        name = name.replace(/[^A-Za-z\s]/g, "").trim();
-    }
-
+ 
     // DOB
-    const dob = text.match(/\d{2}\/\d{2}\/\d{4}/)?.[0];
-
+ 
+    let dob = null;
+ 
+    const dobMatch =
+        text.match(
+            /(DOB|Date of Birth)[^\d]*(\d{2}\/\d{2}\/\d{4})/i
+        );
+ 
+    if (dobMatch) {
+        dob = dobMatch[2];
+    }
+ 
+    // fallback
+    if (!dob) {
+        dob = text.match(/\d{2}\/\d{2}\/\d{4}/)?.[0] || null;
+    }
+ 
     // GENDER
-    let gender = text.match(/male|female/i)?.[0];
-    if (gender) {
-        gender = gender.toLowerCase() === "male" ? "Male" : "Female";
+ 
+    let gender = null;
+ 
+    if (/female/i.test(text)) {
+        gender = "Female";
+    } else if (/male/i.test(text)) {
+        gender = "Male";
     }
-
+ 
     // AADHAAR NUMBER
-    let aadhaarNumber = text.match(/\d{4}\s?\d{4}\s?\d{4}/)?.[0];
-
+ 
+    let aadhaarNumber =
+        text.match(/\d{4}\s?\d{4}\s?\d{4}/)?.[0];
+ 
     if (aadhaarNumber) {
-        aadhaarNumber = aadhaarNumber.replace(/\s/g, "");
-        aadhaarNumber = aadhaarNumber.replace(/(\d{4})(\d{4})(\d{4})/, "$1 $2 $3");
+        aadhaarNumber = aadhaarNumber
+            .replace(/\s/g, "")
+            .replace(
+                /(\d{4})(\d{4})(\d{4})/,
+                "$1 $2 $3"
+            );
     }
-
+ 
     // ADDRESS
     let address = "";
-
-    let rawAddress = text;
-
-    rawAddress = rawAddress
-        .replace(/[^A-Za-z0-9,:\-\/\s]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-
-    const startIndex = rawAddress.search(/(S\/O:|D\/O:|C\/O:)/i);
-
-    if (startIndex !== -1) {
-        rawAddress = rawAddress.substring(startIndex);
-    } else {
-        address = ""; 
+ 
+    const addressStart =
+        text.search(/(S\/O|D\/O|C\/O)/i);
+ 
+    if (addressStart !== -1) {
+ 
+        let addressText =
+            text.substring(addressStart);
+ 
+        const pinMatch =
+            addressText.match(/\d{6}/);
+ 
+        if (pinMatch) {
+ 
+            const pinEnd =
+                addressText.indexOf(pinMatch[0]) + 6;
+ 
+            address =
+                addressText.substring(0, pinEnd);
+ 
+            address = address
+                .replace(/\s+/g, " ")
+                .trim();
+        }
     }
-
-    // PIN
-    const pinIndex = rawAddress.search(/\d{6}/);
-
-    if (pinIndex !== -1) {
-        address = rawAddress.substring(0, pinIndex + 6);
-    }
-
-    address = address
-        .replace(/\b[A-Za-z]{1,2}\b/g, "")   
-        .replace(/\b\d{1,2}\b/g, "")         
-        .replace(/VID[:\s]*\d+/gi, "")       
-        .replace(/\s+/g, " ")
-        .trim();
-
-    // FINAL OUTPUT
+ 
     return {
         name,
         dob,
