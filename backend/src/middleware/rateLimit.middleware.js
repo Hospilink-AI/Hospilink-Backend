@@ -65,3 +65,17 @@ exports.staffAvailabilityRateLimit = createRateLimit(
     5, // 5 availability toggles per minute
     'Too many availability changes. Please try again later.'
 );
+
+// Phone OTP — 3 requests per 15 minutes (same window as email OTP)
+exports.phoneOtpRateLimit = createRateLimit(
+    15 * 60 * 1000,
+    3,
+    'Too many phone OTP requests. Please wait before requesting another.'
+);
+
+// Verify Phone OTP — separate limiter, 3 attempts per 15 minutes.
+exports.verifyPhoneOtpRateLimit = createRateLimit(
+    15 * 60 * 1000,
+    3,
+    'Too many OTP verification attempts. Please request a new OTP and try again later.'
+);

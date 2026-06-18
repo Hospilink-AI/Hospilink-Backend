@@ -16,6 +16,7 @@ const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');
 const logger = require('../utils/logger');
 const { formatRoleForDisplay } = require('../utils/helpers');
 const DashboardService = require('./dashboard.service');
+const SMSService = require('./sms.service');
 const {
     ValidationError,
     NotFoundError,
@@ -24,6 +25,17 @@ const {
 } = require('../middleware/error.middleware');
 
 class ProfileService {
+    // Returns true if normalizedPhone already belongs to another Hospital or MedicalStaff profile.
+    async isPhoneNumberRegistered(normalizedPhone) {
+        const [staffMatch, hospitalMatch] = await Promise.all([
+            MedicalStaff.findOne({ normalizedPhone }).select('_id').lean(),
+            Hospital.findOne({ normalizedPhone }).select('_id').lean()
+        ]);
+        return !!(staffMatch || hospitalMatch);
+    }
+
+
+    
     // Create medical staff profile
     async createMedicalStaffProfile(userId, profileData) {
         try {
@@ -54,6 +66,18 @@ class ProfileService {
             const existingProfile = await MedicalStaff.findOne({ user: userId });
             if (existingProfile) {
                 throw new ConflictError('Medical staff profile already exists');
+            }
+
+            // Phone must be OTP-verified before profile creation
+            const normalizedStaffPhone = SMSService.normalizePhone(profileData.phoneNumber);
+            const staffPhoneVerified = await cacheService.getPhoneVerified(userId, normalizedStaffPhone);
+            if (!staffPhoneVerified) {
+                throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
+            }
+
+            // Phone number must be unique across all hospital and staff accounts
+            if (await this.isPhoneNumberRegistered(normalizedStaffPhone)) {
+                throw new ConflictError('Phone number already registered with another account');
             }
 
             let coordinates = null;
@@ -88,6 +112,8 @@ class ProfileService {
                 state: profileData.state,
                 pincode: profileData.pincode,
                 phoneNumber: profileData.phoneNumber,
+                normalizedPhone: normalizedStaffPhone,
+                isPhoneVerified: true,
                 email: profileData.email,
                 coordinates: coordinates,
                 profileSummary: profileData.profileSummary || '',
@@ -98,6 +124,9 @@ class ProfileService {
             });
 
             await medicalStaffProfile.save();
+
+            // Consume the verified flag — single-use, clean up immediately after save
+            await cacheService.deletePhoneVerified(userId, normalizedStaffPhone);
 
             // Populate user data
             await medicalStaffProfile.populate('user', 'name email role isEmailVerified');
@@ -168,6 +197,18 @@ class ProfileService {
             const existingProfile = await Hospital.findOne({ user: userId });
             if (existingProfile) {
                 throw new ConflictError('Hospital profile already exists');
+            }
+
+            // Phone must be OTP-verified before profile creation
+            const normalizedHospitalPhone = SMSService.normalizePhone(profileData.phoneNumber);
+            const hospitalPhoneVerified = await cacheService.getPhoneVerified(userId, normalizedHospitalPhone);
+            if (!hospitalPhoneVerified) {
+                throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
+            }
+
+            // Phone number must be unique across all hospital and staff accounts
+            if (await this.isPhoneNumberRegistered(normalizedHospitalPhone)) {
+                throw new ConflictError('Phone number already registered with another account');
             }
 
             let coordinates;
@@ -250,6 +291,8 @@ class ProfileService {
                 state: profileData.state,
                 pincode: profileData.pincode,
                 phoneNumber: profileData.phoneNumber,
+                normalizedPhone: normalizedHospitalPhone,
+                isPhoneVerified: true,
                 servicesAvailable: profileData.servicesAvailable,
                 staffCount: profileData.staffCount,
                 description: profileData.description || '',
@@ -257,6 +300,9 @@ class ProfileService {
             });
 
             await hospitalProfile.save();
+
+            // Consume the verified flag — single-use, clean up immediately after save
+            await cacheService.deletePhoneVerified(userId, normalizedHospitalPhone);
 
             // Populate user data
             await hospitalProfile.populate('user', 'name email role isEmailVerified');

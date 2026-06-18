@@ -24,6 +24,9 @@ const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
 const notificationEmitter = require('./notificationEmitter');
 const s3Service = require('./s3.service');
+const OTPService = require('./otp.service');
+const SMSService = require('./sms.service');
+const { isWithinGeofence, GEOFENCE_RADIUS_KM } = require('./geofence.service');
 const {
     AppError,
     ValidationError,
@@ -35,6 +38,7 @@ const {
 
 // Per-duty Redis lock TTL in seconds — prevents thundering herd
 const DUTY_ACCEPT_LOCK_TTL = 10;
+const LOCATION_UPDATE_MAX_AGE_MS = parseInt(process.env.STAFF_LOCATION_MAX_AGE_MS, 10) || 90 * 1000;
 
 /**
  * Acquire a short-lived Redis lock for a specific duty acceptance attempt.
@@ -60,6 +64,29 @@ async function releaseDutyLock(dutyId, staffId) {
         await redis.del(`duty_accept_lock:${dutyId}:${staffId}`);
     } catch {
         // Best-effort — TTL will clean it up anyway
+    }
+}
+
+async function getRecentStaffLocation(staffUserId) {
+    try {
+        const dashboardLocation = await DashboardService.getDashboardLocation(staffUserId);
+        if (!dashboardLocation || typeof dashboardLocation.latitude !== 'number' || typeof dashboardLocation.longitude !== 'number' || !dashboardLocation.updatedAt) {
+            return null;
+        }
+
+        const timestamp = Date.parse(dashboardLocation.updatedAt);
+        if (Number.isNaN(timestamp) || (Date.now() - timestamp) > LOCATION_UPDATE_MAX_AGE_MS) {
+            return null;
+        }
+
+        return {
+            latitude: dashboardLocation.latitude,
+            longitude: dashboardLocation.longitude,
+            timestamp,
+            source: dashboardLocation.source || 'websocket'
+        };
+    } catch (error) {
+        return null;
     }
 }
 
@@ -633,22 +660,6 @@ class DutyService {
             duty.enrouteAt = getCurrentIST();
         }
 
-        if (newStatus === 'in-progress') {
-            const startValidation = duty.canStartDuty();
-            if (!startValidation.allowed) {
-                throw new ValidationError(startValidation.reason);
-            }
-            duty.startedAt = getCurrentIST();
-        }
-
-        if (newStatus === 'completed') {
-            const completeValidation = duty.canCompleteDuty();
-            if (!completeValidation.allowed) {
-                throw new ValidationError(completeValidation.reason);
-            }
-            duty.completedAt = getCurrentIST();
-        }
-
         // Update status and add to history
         const previousStatus = duty.status;
         duty.status = newStatus;
@@ -673,6 +684,7 @@ class DutyService {
 
         return duty;
     }
+
 
 
 
@@ -745,7 +757,10 @@ class DutyService {
 
         // Prepare bulk operations
         const bulkOps = [];
-        const dutiesForNotification = []; // Track duties that will be completed
+        const dutiesForNotification = []; // Track duties that will move to pending-confirmation
+
+        // Grace period after scheduled end time before a non-verified duty moves to pending-confirmation
+        const graceMinutes = parseInt(process.env.PENDING_CONFIRMATION_GRACE_MINUTES) || 30;
 
         for (const duty of dutiesToComplete) {
             // Create proper Date objects for duty end time in IST
@@ -757,25 +772,25 @@ class DutyService {
             const istDutyEndTime = new Date(istDutyDate);
             istDutyEndTime.setHours(endHours, endMinutes, 0, 0);
 
-            // Add 15 minutes grace period
-            const gracePeriodEndTime = new Date(istDutyEndTime.getTime() + 15 * 60 * 1000);
+            const gracePeriodEndTime = new Date(istDutyEndTime.getTime() + graceMinutes * 60 * 1000);
 
-            // Only complete if current IST time is past the grace period AND status is still 'in-progress'
-            if (istNow >= gracePeriodEndTime && duty.status === 'in-progress') {
+            // Only move to pending-confirmation if past the grace period, still 'in-progress',
+            // and the hospital hasn't already verified the end OTP
+            if (istNow >= gracePeriodEndTime && duty.status === 'in-progress' && duty.endOtp.status !== 'VERIFIED') {
                 bulkOps.push({
                     updateOne: {
                         filter: { _id: duty._id, status: 'in-progress' },
                         update: {
                             $set: {
-                                status: 'completed',
-                                completedAt: istNow
+                                status: 'pending-confirmation',
+                                pendingConfirmationAt: istNow
                             },
                             $push: {
                                 statusHistory: {
-                                    status: 'completed',
+                                    status: 'pending-confirmation',
                                     timestamp: istNow,
                                     changedBy: 'system',
-                                    reason: 'Automatically completed (not manually completed within 15 minutes after end time)'
+                                    reason: `Moved to pending-confirmation — hospital did not verify end OTP within ${graceMinutes} minutes of scheduled end time`
                                 }
                             }
                         }
@@ -788,36 +803,40 @@ class DutyService {
         }
 
         // Execute bulk operations if any
-        let completedCount = 0;
+        let movedCount = 0;
         if (bulkOps.length > 0) {
             const result = await Duty.bulkWrite(bulkOps);
-            completedCount = result.modifiedCount;
+            movedCount = result.modifiedCount;
 
-            // Send notifications for auto-completed duties
-            if (completedCount > 0 && dutiesForNotification.length > 0) {
+            // Send notifications for duties moved to pending-confirmation
+            if (movedCount > 0 && dutiesForNotification.length > 0) {
                 for (const duty of dutiesForNotification) {
                     try {
                         // Get staff details
                         const staff = await MedicalStaff.findById(duty.assignedTo._id || duty.assignedTo)
                             .populate('user', 'name');
 
-                        if (staff && duty.hospital && duty.hospital.user) {
+                        if (staff && staff.user && duty.hospital && duty.hospital.user) {
                             const hospitalUserId = duty.hospital.user._id?.toString() || duty.hospital.user.toString();
+                            const staffUserId = staff.user._id?.toString() || staff.user.toString();
 
-                            // Emit duty completed notification to hospital
-                            await notificationEmitter.emitDutyCompleted(duty, staff, hospitalUserId);
-                            console.log(`Auto-complete notification sent for duty ${duty._id}`);
+                            // Notify hospital (please confirm) and staff (free to accept new duties)
+                            await notificationEmitter.emitDutyPendingConfirmation(duty, staff, hospitalUserId, staffUserId);
+                            console.log(`Pending-confirmation notification sent for duty ${duty._id}`);
                         }
                     } catch (notifError) {
-                        console.error(`Error sending auto-complete notification for duty ${duty._id}:`, notifError);
+                        console.error(`Error sending pending-confirmation notification for duty ${duty._id}:`, notifError);
                         // Continue with other notifications even if one fails
                     }
                 }
             }
         }
 
-        return completedCount;
+        return movedCount;
     }
+
+
+
 
 
 
@@ -1832,6 +1851,11 @@ class DutyService {
                     startTime: duty.startTime,
                     endTime: duty.endTime,
                     duration: `${duty.duration}`
+                },
+                payment: {
+                    method: duty.paymentMethod || 'Unconfirmed',
+                    status: duty.isPaid === true ? 'Paid' : duty.isPaid === false ? 'Will Pay Later' : 'Unconfirmed by hospital',
+                    attestedAt: duty.paymentAttestedAt || null
                 }
             };
 
@@ -2478,6 +2502,550 @@ class DutyService {
         });
 
         return duty;
+    }
+
+
+
+    // Staff taps "Get OTP to mark as in-progress" once they're within range of the hospital.
+    // Re-checks the geofence server-side against the submitted coordinates, mints a Start OTP,
+    // and sends it via SMS to the hospital's registered phone number. The hospital reads the
+    // code aloud to the staff member, who then submits it via verify-start-otp.
+    async requestStartOtp(dutyId, userId) {
+        const medicalStaff = await MedicalStaff.findOne({ user: userId });
+        if (!medicalStaff) {
+            throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
+        }
+
+        const duty = await Duty.findById(dutyId).populate('hospital');
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (!duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
+            throw new ForbiddenError('You can only request a start OTP for duties assigned to you');
+        }
+
+        // Idempotency: already verified and moved to in-progress
+        if (duty.status === 'in-progress' && duty.startOtp.status === 'VERIFIED') {
+            return { duty, alreadyInProgress: true, expiresAt: null };
+        }
+
+        if (duty.status !== 'enroute') {
+            throw new ValidationError('Duty must be enroute before requesting a start OTP');
+        }
+
+        if (duty.startOtp.status === 'LOCKED') {
+            throw new ForbiddenError('Start OTP is locked — contact admin support');
+        }
+
+        // Time-window guard: OTP can only be requested within ±bufferMinutes of scheduled start.
+        // Enforced at generation — never issue a code when the check-in window is closed.
+        const now = getCurrentIST();
+        const bufferMinutes = 15;
+        const [startHours, startMinutes] = duty.startTime.split(':').map(Number);
+        const istDutyDate = toIST(new Date(duty.date));
+        const scheduledStartTime = new Date(istDutyDate);
+        scheduledStartTime.setHours(startHours, startMinutes, 0, 0);
+
+        const windowStart = new Date(scheduledStartTime.getTime() - bufferMinutes * 60 * 1000);
+        const windowEnd   = new Date(scheduledStartTime.getTime() + bufferMinutes * 60 * 1000);
+
+        if (now < windowStart) {
+            const opensAt  = windowStart.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            const startsAt = scheduledStartTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            throw new ValidationError(
+                `Check-in window has not opened yet. You can request a start OTP from ${opensAt} (${bufferMinutes} minutes before your ${startsAt} duty start).`
+            );
+        }
+
+        if (now > windowEnd) {
+            const windowStartStr = windowStart.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            const windowEndStr   = windowEnd.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            throw new ValidationError(
+                `Check-in window has closed. The start OTP window was ${windowStartStr} – ${windowEndStr}. Please contact admin if you need assistance.`
+            );
+        }
+
+        const hospitalLat = duty.hospital?.coordinates?.coordinates?.latitude;
+        const hospitalLng = duty.hospital?.coordinates?.coordinates?.longitude;
+        if (typeof hospitalLat !== 'number' || typeof hospitalLng !== 'number') {
+            throw new ValidationError('Hospital location is not configured — contact support');
+        }
+
+        const staffLocation = await getRecentStaffLocation(userId);
+        if (!staffLocation) {
+            throw new ValidationError('Unable to determine your current location. Ensure the app is online and sharing live GPS to the server.');
+        }
+
+        if (!isWithinGeofence(staffLocation.latitude, staffLocation.longitude, hospitalLat, hospitalLng)) {
+            const radiusMeters = Math.round(GEOFENCE_RADIUS_KM * 1000);
+            throw new ValidationError(`You must be within ${radiusMeters}m of the hospital to request a start OTP`);
+        }
+
+        const code = OTPService.generateOTP();
+        const expiryMinutes = parseInt(process.env.DUTY_START_OTP_EXPIRY_MINUTES) || 5;
+        const expiresAt = new Date(now.getTime() + expiryMinutes * 60 * 1000);
+
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: 'enroute' },
+            {
+                $set: {
+                    'startOtp.code': code,
+                    'startOtp.expiresAt': expiresAt,
+                    'startOtp.attempts': 0,
+                    'startOtp.status': 'PENDING',
+                    'startOtp.sentAt': now
+                }
+            },
+            { new: true }
+        );
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed — cannot request start OTP');
+        }
+
+        await this._sendHospitalOtpSms(duty.hospital, code, dutyId);
+
+        return { duty: updated, alreadyInProgress: false, expiresAt: updated.startOtp.expiresAt };
+    }
+
+
+
+    // Sends an OTP code to the staff member's own registered phone via SMS. Failures are
+    // logged but never thrown — OTP delivery issues shouldn't block the request/response.
+    async _sendStaffOtpSms(medicalStaff, code, dutyId, otpType) {
+        if (!medicalStaff?.phoneNumber) {
+            return;
+        }
+        try {
+            await SMSService.sendOTPSMS(medicalStaff.phoneNumber, code, medicalStaff.fullName);
+        } catch (smsError) {
+            console.error(`Error sending ${otpType} OTP SMS for duty ${dutyId}:`, smsError);
+        }
+    }
+
+    // Sends a Start OTP to the hospital's registered phone via SMS so the hospital can read
+    // it aloud to the arriving staff member. Failures are logged but never thrown.
+    async _sendHospitalOtpSms(hospital, code, dutyId) {
+        if (!hospital?.phoneNumber) {
+            return;
+        }
+        try {
+            await SMSService.sendOTPSMS(hospital.phoneNumber, code, hospital.hospitalLegalName);
+        } catch (smsError) {
+            console.error(`Error sending start OTP SMS to hospital for duty ${dutyId}:`, smsError);
+        }
+    }
+
+
+
+    // Staff submits the Start OTP (read out by the hospital) along with their current
+    // coordinates. Both the OTP and a fresh geofence check must pass to move 'enroute' ->
+    // 'in-progress'. Wrong OTP or out-of-range counts toward the shared lockout counter.
+    async verifyStartOtp(dutyId, userId, otp) {
+        const medicalStaff = await MedicalStaff.findOne({ user: userId });
+        if (!medicalStaff) {
+            throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
+        }
+
+        const duty = await Duty.findById(dutyId).populate('hospital');
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (!duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
+            throw new ForbiddenError('You can only verify OTP for duties assigned to you');
+        }
+
+        // Idempotency: already verified and moved to in-progress
+        if (duty.status === 'in-progress' && duty.startOtp.status === 'VERIFIED') {
+            return duty;
+        }
+
+        if (duty.status !== 'enroute') {
+            throw new ValidationError('Duty must be enroute before verifying start OTP');
+        }
+
+        if (duty.startOtp.status === 'LOCKED') {
+            throw new ForbiddenError('Start OTP is locked — contact admin support');
+        }
+
+        if (duty.startOtp.status !== 'PENDING' || !duty.startOtp.expiresAt || duty.startOtp.expiresAt <= getCurrentIST()) {
+            if (duty.startOtp.status === 'PENDING') {
+                await Duty.updateOne({ _id: dutyId }, { $set: { 'startOtp.status': 'EXPIRED' } });
+            }
+            throw new ValidationError('No active start OTP — move within range of the hospital to trigger one');
+        }
+
+        const hospitalLat = duty.hospital?.coordinates?.coordinates?.latitude;
+        const hospitalLng = duty.hospital?.coordinates?.coordinates?.longitude;
+        if (typeof hospitalLat !== 'number' || typeof hospitalLng !== 'number') {
+            throw new ValidationError('Hospital location is not configured — contact support');
+        }
+
+        const staffLocation = await getRecentStaffLocation(userId);
+        if (!staffLocation) {
+            throw new ValidationError('Unable to determine your current location. Ensure the app is online and sharing live GPS to the server.');
+        }
+
+        const geofenceOk = isWithinGeofence(staffLocation.latitude, staffLocation.longitude, hospitalLat, hospitalLng);
+        const otpOk = duty.startOtp.code === otp;
+
+        if (!geofenceOk || !otpOk) {
+            const attempts = duty.startOtp.attempts + 1;
+            const maxAttempts = parseInt(process.env.DUTY_OTP_MAX_ATTEMPTS) || 5;
+            const updateFields = { 'startOtp.attempts': attempts };
+            if (attempts >= maxAttempts) {
+                updateFields['startOtp.status'] = 'LOCKED';
+            }
+            await Duty.updateOne({ _id: dutyId }, { $set: updateFields });
+
+            const reasons = [];
+            if (!otpOk) reasons.push('incorrect OTP');
+            if (!geofenceOk) reasons.push('you are not within range of the hospital');
+
+            if (attempts >= maxAttempts) {
+                throw new ForbiddenError(`Verification failed (${reasons.join(' and ')}). Start OTP is now locked — contact admin support.`);
+            }
+            throw new ValidationError(`Verification failed: ${reasons.join(' and ')}. ${maxAttempts - attempts} attempt(s) remaining.`);
+        }
+
+        const now = getCurrentIST();
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: 'enroute' },
+            {
+                $set: {
+                    status: 'in-progress',
+                    startedAt: now,
+                    'startOtp.status': 'VERIFIED'
+                },
+                $push: {
+                    statusHistory: {
+                        status: 'in-progress',
+                        timestamp: now,
+                        changedBy: medicalStaff._id,
+                        reason: 'Start OTP verified — duty started'
+                    }
+                }
+            },
+            { new: true }
+        )
+            .populate({
+                path: 'hospital',
+                populate: { path: 'user', select: 'name email' }
+            })
+            .populate({
+                path: 'assignedTo',
+                populate: { path: 'user', select: 'name email' }
+            });
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed before verification could complete — please retry');
+        }
+
+        return updated;
+    }
+
+
+
+    // Staff requests an End OTP once the duty is in-progress and the scheduled end time has
+    // arrived. The code is sent via SMS to the staff's own registered phone number (never
+    // returned in the response) and read out to the hospital, who enters it via verifyEndOtp.
+    async requestEndOtp(dutyId, userId) {
+        const medicalStaff = await MedicalStaff.findOne({ user: userId });
+        if (!medicalStaff) {
+            throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
+        }
+
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (!duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
+            throw new ForbiddenError('You can only request an end OTP for duties assigned to you');
+        }
+
+        // Idempotency: an active OTP already exists — resend the same code via SMS
+        if (duty.status === 'in-progress' && duty.endOtp.status === 'PENDING' && duty.endOtp.expiresAt > getCurrentIST()) {
+            await this._sendStaffOtpSms(medicalStaff, duty.endOtp.code, dutyId, 'end');
+            return { expiresAt: duty.endOtp.expiresAt };
+        }
+
+        if (duty.endOtp.status === 'LOCKED') {
+            throw new ForbiddenError('End OTP is locked — contact admin support');
+        }
+
+        const validation = duty.canRequestEndOtp();
+        if (!validation.allowed) {
+            throw new ValidationError(validation.reason);
+        }
+
+        const code = OTPService.generateOTP();
+        const expiryMinutes = parseInt(process.env.DUTY_END_OTP_EXPIRY_MINUTES) || 30;
+        const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+        const now = getCurrentIST();
+
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: 'in-progress' },
+            {
+                $set: {
+                    'endOtp.code': code,
+                    'endOtp.expiresAt': expiresAt,
+                    'endOtp.attempts': 0,
+                    'endOtp.status': 'PENDING',
+                    'endOtp.sentAt': now
+                }
+            },
+            { new: true }
+        );
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed — cannot request end OTP');
+        }
+
+        await this._sendStaffOtpSms(medicalStaff, code, dutyId, 'end');
+
+        return { expiresAt: updated.endOtp.expiresAt };
+    }
+
+
+
+    // Hospital enters the End OTP (read out by the staff) along with a payment attestation
+    // (method + paid/unpaid). Moves 'in-progress'/'pending-confirmation' -> 'completed'.
+    async verifyEndOtp(dutyId, hospitalUserId, otp, paymentMethod, isPaid) {
+        const hospital = await Hospital.findOne({ user: hospitalUserId });
+        if (!hospital) {
+            throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
+        }
+
+        const duty = await Duty.findById(dutyId).populate('hospital');
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (duty.hospital._id.toString() !== hospital._id.toString()) {
+            throw new ForbiddenError('You can only verify OTP for your own duties');
+        }
+
+        // Idempotency: already completed via end OTP
+        if (duty.status === 'completed' && duty.endOtp.status === 'VERIFIED') {
+            return Duty.findById(dutyId)
+                .populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } })
+                .populate({ path: 'assignedTo', populate: { path: 'user', select: 'name email' } });
+        }
+
+        const validation = duty.canVerifyEndOtp();
+        if (!validation.allowed) {
+            if (duty.endOtp.status === 'LOCKED') {
+                throw new ForbiddenError(validation.reason);
+            }
+            if (duty.endOtp.status === 'PENDING' && (!duty.endOtp.expiresAt || duty.endOtp.expiresAt <= getCurrentIST())) {
+                await Duty.updateOne({ _id: dutyId }, { $set: { 'endOtp.status': 'EXPIRED' } });
+            }
+            throw new ValidationError(validation.reason);
+        }
+
+        const otpOk = duty.endOtp.code === otp;
+
+        if (!otpOk) {
+            const attempts = duty.endOtp.attempts + 1;
+            const maxAttempts = parseInt(process.env.DUTY_OTP_MAX_ATTEMPTS) || 5;
+            const updateFields = { 'endOtp.attempts': attempts };
+            if (attempts >= maxAttempts) {
+                updateFields['endOtp.status'] = 'LOCKED';
+            }
+            await Duty.updateOne({ _id: dutyId }, { $set: updateFields });
+
+            if (attempts >= maxAttempts) {
+                throw new ForbiddenError('Incorrect OTP. End OTP is now locked — contact admin support.');
+            }
+            throw new ValidationError(`Incorrect OTP. ${maxAttempts - attempts} attempt(s) remaining.`);
+        }
+
+        const now = getCurrentIST();
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: { $in: ['in-progress', 'pending-confirmation'] } },
+            {
+                $set: {
+                    status: 'completed',
+                    completedAt: now,
+                    paymentMethod,
+                    isPaid,
+                    paymentAttestedAt: now,
+                    paymentAttestedBy: hospitalUserId,
+                    'endOtp.status': 'VERIFIED'
+                },
+                $push: {
+                    statusHistory: {
+                        status: 'completed',
+                        timestamp: now,
+                        changedBy: hospitalUserId,
+                        reason: 'End OTP verified by hospital — duty completed'
+                    }
+                }
+            },
+            { new: true }
+        )
+            .populate({
+                path: 'hospital',
+                populate: { path: 'user', select: 'name email' }
+            })
+            .populate({
+                path: 'assignedTo',
+                populate: { path: 'user', select: 'name email' }
+            });
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed before verification could complete — please retry');
+        }
+
+        return updated;
+    }
+
+
+
+    // Re-mints the End OTP — used when the original expired, or staff never tapped "End Duty"
+    // and the duty fell into 'pending-confirmation'. Either staff (who reads the code) or
+    // hospital (who enters it) may trigger this; the new code is sent via SMS to the staff's
+    // own registered phone (never returned in the response or an in-app notification).
+    async regenerateEndOtp(dutyId, userId, userRole) {
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (userRole === 'staff') {
+            const medicalStaff = await MedicalStaff.findOne({ user: userId });
+            if (!medicalStaff || !duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
+                throw new ForbiddenError('You can only regenerate OTP for duties assigned to you');
+            }
+        } else if (userRole === 'hospital') {
+            const hospital = await Hospital.findOne({ user: userId });
+            if (!hospital || duty.hospital.toString() !== hospital._id.toString()) {
+                throw new ForbiddenError('You can only regenerate OTP for your own duties');
+            }
+        }
+
+        if (!['in-progress', 'pending-confirmation'].includes(duty.status)) {
+            throw new ValidationError('End OTP can only be regenerated while the duty is in progress or pending confirmation');
+        }
+
+        if (duty.endOtp.status === 'LOCKED') {
+            throw new ForbiddenError('End OTP is locked — contact admin support');
+        }
+
+        if (duty.endOtp.status === 'PENDING' && duty.endOtp.expiresAt && duty.endOtp.expiresAt > getCurrentIST()) {
+            throw new ValidationError('An end OTP is still active — wait for it to expire before requesting a new one');
+        }
+
+        const code = OTPService.generateOTP();
+        const expiryMinutes = parseInt(process.env.DUTY_END_OTP_EXPIRY_MINUTES) || 30;
+        const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+        const now = getCurrentIST();
+
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: { $in: ['in-progress', 'pending-confirmation'] } },
+            {
+                $set: {
+                    'endOtp.code': code,
+                    'endOtp.expiresAt': expiresAt,
+                    'endOtp.attempts': 0,
+                    'endOtp.status': 'PENDING',
+                    'endOtp.sentAt': now
+                }
+            },
+            { new: true }
+        ).populate({
+            path: 'assignedTo',
+            populate: { path: 'user', select: 'name email' }
+        });
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed — cannot regenerate end OTP');
+        }
+
+        // The new code is only ever sent via SMS to staff's own phone — they read it out to the hospital
+        await this._sendStaffOtpSms(updated.assignedTo, code, dutyId, 'end');
+
+        // Notify staff in-app that a fresh OTP was sent (without exposing the code)
+        if (updated.assignedTo?.user?._id) {
+            notificationEmitter.emitEndOtpRegenerated(
+                updated,
+                updated.assignedTo.user._id.toString(),
+                expiresAt
+            ).catch(err => console.error(`Error sending end OTP regenerated notification for duty ${dutyId}:`, err));
+        }
+
+        return { expiresAt: updated.endOtp.expiresAt };
+    }
+
+
+
+    // Either party (staff or hospital) raises a dispute on a duty that's awaiting hospital
+    // confirmation, or was recently completed (within DUTY_DISPUTE_WINDOW_HOURS).
+    async raiseDispute(dutyId, userId, userRole, reason) {
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (userRole === 'staff') {
+            const medicalStaff = await MedicalStaff.findOne({ user: userId });
+            if (!medicalStaff || !duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
+                throw new ForbiddenError('You can only raise a dispute for duties assigned to you');
+            }
+        } else if (userRole === 'hospital') {
+            const hospital = await Hospital.findOne({ user: userId });
+            if (!hospital || duty.hospital.toString() !== hospital._id.toString()) {
+                throw new ForbiddenError('You can only raise a dispute for your own duties');
+            }
+        } else {
+            throw new ForbiddenError('Only staff or hospital can raise a dispute');
+        }
+
+        if (!['pending-confirmation', 'completed'].includes(duty.status)) {
+            throw new ValidationError('A dispute can only be raised while a duty is pending confirmation or recently completed');
+        }
+
+        if (duty.status === 'completed') {
+            const windowHours = parseInt(process.env.DUTY_DISPUTE_WINDOW_HOURS) || 48;
+            const windowEnd = new Date((duty.completedAt || duty.updatedAt).getTime() + windowHours * 60 * 60 * 1000);
+            if (getCurrentIST() > windowEnd) {
+                throw new ValidationError(`Completed duties can only be disputed within ${windowHours} hours of completion`);
+            }
+        }
+
+        const now = getCurrentIST();
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: duty.status },
+            {
+                $set: {
+                    status: 'disputed',
+                    disputedAt: now,
+                    disputeRaisedBy: userId,
+                    disputeRaisedByRole: userRole,
+                    disputeReason: reason
+                },
+                $push: {
+                    statusHistory: {
+                        status: 'disputed',
+                        timestamp: now,
+                        changedBy: userId,
+                        reason: `Dispute raised by ${userRole}: ${reason}`
+                    }
+                }
+            },
+            { new: true }
+        )
+            .populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } })
+            .populate({ path: 'assignedTo', populate: { path: 'user', select: 'name email' } });
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed — cannot raise dispute');
+        }
+
+        return updated;
     }
 }
 

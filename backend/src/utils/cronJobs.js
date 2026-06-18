@@ -115,7 +115,7 @@ class CronJobs {
                 const hasLock = await acquireCronLock('auto-complete', 55);
                 if (!hasLock) return;
 
-                const completed = await DutyService.autoCompleteDuties();
+                const movedToPending = await DutyService.autoCompleteDuties();
                 const expired = await DutyService.expireUnacceptedDuties();
                 const reminders = DutyService.sendNavigationReminders ? await DutyService.sendNavigationReminders() : 0;
                 const unassigned15 = DutyService.checkUnassigned15MinDuties ? await DutyService.checkUnassigned15MinDuties() : 0;
@@ -137,14 +137,14 @@ class CronJobs {
                     }
                 }
 
-                if (completed > 0) {
-                    console.log(`Auto-completed ${completed} duties at ${new Date().toLocaleString()}`);
+                if (movedToPending > 0) {
+                    console.log(`Moved ${movedToPending} duties to pending-confirmation at ${new Date().toLocaleString()}`);
 
-                    // Log auto-complete activity
+                    // Log pending-confirmation activity
                     activityLogEmitter.emitSystemActivity(
-                        ACTIVITY_ACTIONS.DUTY_AUTO_COMPLETED,
-                        { dutiesCompleted: completed, timestamp: new Date().toISOString() }
-                    ).catch(err => console.error('Error logging auto-complete:', err));
+                        ACTIVITY_ACTIONS.DUTY_PENDING_CONFIRMATION,
+                        { dutiesMoved: movedToPending, timestamp: new Date().toISOString() }
+                    ).catch(err => console.error('Error logging pending-confirmation:', err));
                 }
                 if (expired > 0) {
                     console.log(`Auto-expired ${expired} duties at ${new Date().toLocaleString()}`);

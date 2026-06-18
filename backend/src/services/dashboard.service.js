@@ -294,36 +294,19 @@ class DashboardService {
         };
     }
 
-    // Get staff location with fallback logic (used by duty-assignment features)
+    // Get staff location for duties using only dashboard websocket location.
     async getStaffLocationForDuties(userId) {
         try {
             const location = await this.getDashboardLocation(userId);
 
-            if (location) {
-                return {
-                    location,
-                    source: 'websocket',
-                    permissionGranted: true
-                };
-            }
-
-            // Fallback to profile location
-            const staff = await MedicalStaff.findOne({ user: userId })
-                .select('coordinates')
-                .lean();
-
-            if (!staff || !staff.coordinates || !staff.coordinates.coordinates) {
+            if (!location) {
                 throw new NotFoundError('Staff location not found. Please grant location permission on the dashboard.');
             }
 
             return {
-                location: {
-                    latitude: staff.coordinates.coordinates.latitude,
-                    longitude: staff.coordinates.coordinates.longitude,
-                    source: 'profile'
-                },
-                source: 'profile',
-                permissionGranted: false
+                location,
+                source: 'websocket',
+                permissionGranted: true
             };
         } catch (error) {
             throw error;

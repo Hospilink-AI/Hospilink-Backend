@@ -401,6 +401,132 @@ class NotificationEmitter {
     }
 
     /**
+     * Notify staff that a new End OTP has been generated for their duty and sent via SMS
+     * @param {Object} duty - Duty object
+     * @param {string} staffUserId - Staff user ID
+     * @param {Date} expiresAt - OTP expiry timestamp
+     */
+    async emitEndOtpRegenerated(duty, staffUserId, expiresAt) {
+        try {
+            if (!duty || !staffUserId) {
+                console.error('Missing required parameters for emitEndOtpRegenerated');
+                return;
+            }
+
+            const dutyIdShort = duty._id.toString().slice(-6);
+
+            const payload = {
+                type: 'END_OTP_REGENERATED',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime
+                },
+                expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+                message: `A new end OTP for duty #${dutyIdShort} has been sent to your registered mobile number via SMS. Share it with the hospital to mark the duty complete.`,
+                timestamp: new Date().toISOString()
+            };
+
+            try {
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    staffUserId,
+                    'END_OTP_REGENERATED',
+                    payload
+                );
+
+                await notificationDelivery.deliverToUser(staffUserId, 'END_OTP_REGENERATED', payload, unreadCount);
+
+                console.log(`End OTP regenerated notification sent to staff ${staffUserId}`);
+            } catch (error) {
+                console.error(`Error sending end OTP regenerated notification to staff ${staffUserId}:`, error);
+            }
+        } catch (error) {
+            console.error('Error emitting end OTP regenerated notification:', error);
+        }
+    }
+
+    /**
+     * Notify both hospital and staff that a duty has moved to pending-confirmation
+     * (hospital did not verify the end OTP within the grace period after duty end time)
+     * @param {Object} duty - Duty object
+     * @param {Object} staff - Medical staff object (populated with user)
+     * @param {string} hospitalUserId - Hospital user ID
+     * @param {string} staffUserId - Staff user ID
+     */
+    async emitDutyPendingConfirmation(duty, staff, hospitalUserId, staffUserId) {
+        try {
+            if (!duty || !staff || !hospitalUserId || !staffUserId) {
+                console.error('Missing required parameters for emitDutyPendingConfirmation');
+                return;
+            }
+
+            const staffName = staff.fullName || staff.user?.name || 'Staff Member';
+            const dutyIdShort = duty._id.toString().slice(-6);
+
+            const basePayload = {
+                type: 'DUTY_PENDING_CONFIRMATION',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime
+                },
+                staff: {
+                    id: staff._id.toString(),
+                    name: staffName,
+                    role: duty.staffRole
+                },
+                timestamp: new Date().toISOString()
+            };
+
+            // Notify hospital — please confirm the end OTP
+            try {
+                const hospitalPayload = {
+                    ...basePayload,
+                    message: `Duty #${dutyIdShort} has ended but is awaiting your confirmation. Please verify the end OTP from ${staffName} to mark it as completed.`
+                };
+
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    hospitalUserId,
+                    'DUTY_PENDING_CONFIRMATION',
+                    hospitalPayload
+                );
+
+                await notificationDelivery.deliverToUser(hospitalUserId, 'DUTY_PENDING_CONFIRMATION', hospitalPayload, unreadCount);
+
+                console.log(`Pending-confirmation notification sent to hospital ${hospitalUserId}`);
+            } catch (error) {
+                console.error(`Error sending pending-confirmation notification to hospital ${hospitalUserId}:`, error);
+            }
+
+            // Notify staff — they're free to accept new duties
+            try {
+                const staffPayload = {
+                    ...basePayload,
+                    message: `Duty #${dutyIdShort} is now pending hospital confirmation. You're free to accept new duties.`
+                };
+
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    staffUserId,
+                    'DUTY_PENDING_CONFIRMATION',
+                    staffPayload
+                );
+
+                await notificationDelivery.deliverToUser(staffUserId, 'DUTY_PENDING_CONFIRMATION', staffPayload, unreadCount);
+
+                console.log(`Pending-confirmation notification sent to staff ${staffUserId}`);
+            } catch (error) {
+                console.error(`Error sending pending-confirmation notification to staff ${staffUserId}:`, error);
+            }
+        } catch (error) {
+            console.error('Error emitting duty pending-confirmation notification:', error);
+        }
+    }
+
+    /**
      * Emit navigate to duty reminder notification to staff
      * @param {Object} duty - Duty object
      * @param {Object} staff - Medical staff object
@@ -731,15 +857,67 @@ class NotificationEmitter {
                     'DUTY_COMPLETED',
                     payload
                 );
-                
+
                 await notificationDelivery.deliverToUser(hospitalUserId, 'DUTY_COMPLETED', payload, unreadCount);
-                
+
                 console.log(`Duty completed notification sent to hospital ${hospitalUserId}`);
             } catch (error) {
                 console.error(`Error sending duty completed notification to hospital ${hospitalUserId}:`, error);
             }
         } catch (error) {
             console.error('Error emitting duty completed notification:', error);
+        }
+    }
+
+    /**
+     * Prompt staff to rate the hospital after a duty is marked completed
+     * @param {Object} duty - Duty object
+     * @param {Object} hospital - Hospital object
+     * @param {string} staffUserId - Staff user ID
+     */
+    async emitRateHospitalPrompt(duty, hospital, staffUserId) {
+        try {
+            if (!duty || !hospital || !staffUserId) {
+                console.error('Missing required parameters for emitRateHospitalPrompt');
+                return;
+            }
+
+            const hospitalName = hospital.hospitalLegalName || hospital.user?.name || 'the hospital';
+            const dutyIdShort = duty._id.toString().slice(-6);
+
+            const payload = {
+                type: 'RATE_HOSPITAL_PROMPT',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime
+                },
+                hospital: {
+                    id: hospital._id.toString(),
+                    name: hospitalName
+                },
+                message: `Duty #${dutyIdShort} at ${hospitalName} has been completed. Please rate your experience.`,
+                completedAt: new Date().toISOString(),
+                timestamp: new Date().toISOString()
+            };
+
+            try {
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    staffUserId,
+                    'RATE_HOSPITAL_PROMPT',
+                    payload
+                );
+
+                await notificationDelivery.deliverToUser(staffUserId, 'RATE_HOSPITAL_PROMPT', payload, unreadCount);
+
+                console.log(`Rate-hospital prompt sent to staff ${staffUserId}`);
+            } catch (error) {
+                console.error(`Error sending rate-hospital prompt to staff ${staffUserId}:`, error);
+            }
+        } catch (error) {
+            console.error('Error emitting rate-hospital prompt:', error);
         }
     }
 

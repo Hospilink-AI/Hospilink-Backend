@@ -847,7 +847,7 @@ const validateDutyStatusChange = (req, res, next) => {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
     }
     
-    const allowedStatuses = ['enroute', 'in-progress', 'completed'];
+    const allowedStatuses = ['enroute'];
     if (!status || !allowedStatuses.includes(status)) {
         errors.push(`Invalid status. Allowed: ${allowedStatuses.join(', ')}`);
     }
@@ -866,6 +866,136 @@ const validateDutyStatusChange = (req, res, next) => {
     
     next();
 };
+
+
+
+
+
+// Validation for requesting a Start OTP (staff taps "Get OTP" within range of the hospital)
+const validateRequestStartOtp = (req, res, next) => {
+    const errors = [];
+
+    const allowedFields = [];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for verifying the Start OTP (geofence handshake)
+const validateVerifyStartOtp = (req, res, next) => {
+    const { otp } = req.body;
+    const errors = [];
+
+    const allowedFields = ['otp'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!otp || !/^\d{6}$/.test(otp)) {
+        errors.push('OTP must be exactly 6 digits');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for verifying the End OTP + payment attestation
+const validateVerifyEndOtp = (req, res, next) => {
+    const { otp, paymentMethod, isPaid } = req.body;
+    const errors = [];
+
+    const allowedFields = ['otp', 'paymentMethod', 'isPaid'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!otp || !/^\d{6}$/.test(otp)) {
+        errors.push('OTP must be exactly 6 digits');
+    }
+
+    const validPaymentMethods = ['cash', 'upi', 'bank', 'will_pay_later'];
+    if (!paymentMethod || !validPaymentMethods.includes(paymentMethod)) {
+        errors.push(`paymentMethod is required. Allowed: ${validPaymentMethods.join(', ')}`);
+    }
+
+    if (typeof isPaid !== 'boolean') {
+        errors.push('isPaid must be a boolean');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for raising a dispute (staff or hospital)
+const validateRaiseDispute = (req, res, next) => {
+    const { reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['reason'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        errors.push('reason is required');
+    } else if (reason.length > 1000) {
+        errors.push('reason cannot exceed 1000 characters');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
 
 
 
@@ -1606,6 +1736,59 @@ const validateHospitalDutyRouteMap = (req, res, next) => {
 };
 
 
+// Phone OTP validators (profile creation flow) 
+const validateSendPhoneOTP = (req, res, next) => {
+    const { phoneNumber } = req.body;
+    const errors = [];
+
+    const allowedFields = ['phoneNumber'];
+    const unexpected = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpected.length > 0) {
+        errors.push(`Unexpected fields: ${unexpected.join(', ')}`);
+    }
+
+    if (!phoneNumber || phoneNumber.trim().length === 0) {
+        errors.push('Phone number is required');
+    } else if (!/^\+91\s?[6-9]\d{9}$/.test(phoneNumber.trim())) {
+        errors.push('Phone number must be a valid Indian mobile number starting with +91');
+    }
+
+    if (errors.length > 0) {
+        throw new ValidationError(errors.join(', '));
+    }
+
+    next();
+};
+
+
+
+
+const validateVerifyPhoneOTP = (req, res, next) => {
+    const { phoneNumber, otp } = req.body;
+    const errors = [];
+
+    const allowedFields = ['phoneNumber', 'otp'];
+    const unexpected = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpected.length > 0) {
+        errors.push(`Unexpected fields: ${unexpected.join(', ')}`);
+    }
+
+    if (!phoneNumber || phoneNumber.trim().length === 0) {
+        errors.push('Phone number is required');
+    } else if (!/^\+91\s?[6-9]\d{9}$/.test(phoneNumber.trim())) {
+        errors.push('Phone number must be a valid Indian mobile number starting with +91');
+    }
+
+    if (!otp || !/^\d{6}$/.test(otp)) {
+        errors.push('OTP must be exactly 6 digits');
+    }
+
+    if (errors.length > 0) {
+        throw new ValidationError(errors.join(', '));
+    }
+
+    next();
+};
 
 
 module.exports = {
@@ -1625,6 +1808,10 @@ module.exports = {
     validateNearbyStaff,
     validateDutyAcceptance,
     validateDutyStatusChange,
+    validateRequestStartOtp,
+    validateVerifyStartOtp,
+    validateVerifyEndOtp,
+    validateRaiseDispute,
     validateDutyCancellation,
     validateDutyEdit,
     validatePagination,
@@ -1642,5 +1829,7 @@ module.exports = {
     validateDashboardLocationPermission,
     validateDashboardLocationUpdate,
     validateHospitalActiveDutiesQuery,
-    validateHospitalDutyRouteMap
+    validateHospitalDutyRouteMap,
+    validateSendPhoneOTP,
+    validateVerifyPhoneOTP
 };
