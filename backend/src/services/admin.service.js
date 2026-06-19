@@ -804,7 +804,6 @@ class AdminService {
     // GET /api/admin/hospitals/:id — preview modal
     async getHospitalDetail(hospitalId) {
         const hospital = await Hospital.findById(hospitalId)
-            .select('hospitalLegalName currentAddress city state pincode staffCount servicesAvailable isProfileComplete verificationStatus coordinates createdAt')
             .populate('user', 'name email createdAt')
             .lean();
 
@@ -844,6 +843,9 @@ class AdminService {
             servicesAvailable: hospital.servicesAvailable,
             verificationStatus: hospital.verificationStatus,
             rejectionReason: hospital.rejectionReason,
+            isSuspended: hospital.isSuspended || false,
+            suspensionReason: hospital.suspensionReason || null,
+            suspendedAt: hospital.suspendedAt || null,
             isProfileComplete: hospital.isProfileComplete,
             coordinates: {
                 latitude: hospital.coordinates?.coordinates?.latitude,
@@ -1382,6 +1384,9 @@ class AdminService {
             isProfileComplete: staff.isProfileComplete,
             verificationStatus: staff.verificationStatus || 'pending',
             rejectionReason: staff.rejectionReason,
+            isSuspended: staff.isSuspended || false,
+            suspensionReason: staff.suspensionReason || null,
+            suspendedAt: staff.suspendedAt || null,
             experience: staff.experience,
             averageRating: staff.averageRating,
             totalRatings: staff.totalRatings,
