@@ -11,7 +11,6 @@ router.post(
     protect,
     authorize("hospital", "staff"),
     checkSuspension,
-    authorize("hospital"),
     validateReviewSubmission,
     reviewController.submitReview
 );
