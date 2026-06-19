@@ -11,6 +11,7 @@ const {
     validateRequestStartOtp,
     validateVerifyStartOtp,
     validateVerifyEndOtp,
+    validateResendOtp,
     validateDutyCancellation,
     validateDutyEdit,
     validatePagination,
@@ -94,10 +95,11 @@ router.post(
 );
 
 router.post(
-    '/duties/:id/regenerate-end-otp',
-    authorize('staff', 'hospital'),
+    '/duties/:id/resend-otp',
+    authorize('staff'),
     validateObjectId('id'),
-    dutyController.regenerateEndOtp
+    validateResendOtp,
+    dutyController.resendOtp
 );
 
 router.post(

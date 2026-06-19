@@ -965,6 +965,38 @@ const validateVerifyEndOtp = (req, res, next) => {
 
 
 
+// Validation for resending an OTP — 'start' (staff-only, sent to hospital's phone) or
+// 'end' (staff sent to staff's phone)
+const validateResendOtp = (req, res, next) => {
+    const { otpType } = req.body;
+    const errors = [];
+
+    const allowedFields = ['otpType'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    const validOtpTypes = ['start', 'end'];
+    if (!otpType || !validOtpTypes.includes(otpType)) {
+        errors.push(`otpType is required. Allowed: ${validOtpTypes.join(', ')}`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
 
 // Validation for duty cancellation
 const validateDutyCancellation = (req, res, next) => {
@@ -1778,6 +1810,7 @@ module.exports = {
     validateRequestStartOtp,
     validateVerifyStartOtp,
     validateVerifyEndOtp,
+    validateResendOtp,
     validateDutyCancellation,
     validateDutyEdit,
     validatePagination,
