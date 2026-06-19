@@ -44,10 +44,6 @@ module.exports = (text) => {
                 value = lines[i + 1];
             }
 
-            console.log("LEGAL CURRENT:", lines[i]);
-            console.log("LEGAL NEXT:", lines[i + 1]);
-            console.log("LEGAL NEXT 2:", lines[i + 2]);
-            console.log("LEGAL NEXT 3:", lines[i + 3]);
             legalName = clean(value);
 
             // fallback after clean

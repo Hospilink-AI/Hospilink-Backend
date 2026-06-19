@@ -10,6 +10,11 @@ const idfyService = require("./idfy.service");
 const { extractTextFromPDF } = require("./pdf.service");
 const { isDocumentExpired } = require("../utils/documentExpiryValidator");
 const logger = require('../utils/logger');
+const {
+    ValidationError,
+    NotFoundError,
+    ConflictError
+} = require('../middleware/error.middleware');
 
 const getAllowedDocs = (role) => {
     const config = requiredDocsConfig[role];
@@ -29,7 +34,7 @@ const validateDocumentType = (role, documentType) => {
     const allowedDocs = getAllowedDocs(role);
 
     if (!allowedDocs.includes(documentType)) {
-        throw new Error(
+        throw new ValidationError(
             `Invalid documentType "${documentType}" for role "${role}". Allowed types: ${allowedDocs.join(", ")}`
         );
     }
@@ -149,7 +154,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 // Continue with upload even if S3 delete fails
             }
         } else {
-            throw new Error(`${documentType} already uploaded. Use replace=true to update.`);
+            throw new ConflictError(`${documentType} already uploaded. Use replace=true to update.`);
         }
     }
 
@@ -186,7 +191,107 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             if (parserMap[documentType]) {
                 extractedData = parserMap[documentType](extractedText);
             }
-            // Note: extractedData intentionally not logged — contains PII (Aadhaar, PAN, DOB)
+
+            // ==========================================
+            // DOCUMENT TYPE VALIDATION
+            // ==========================================
+
+            if (documentType === "aadhaar-card") {
+
+                const upperText = extractedText.toUpperCase();
+
+                const isAadhaar =
+                    upperText.includes("UNIQUE IDENTIFICATION AUTHORITY OF INDIA") ||
+                    upperText.includes("AADHAAR") ||
+                    upperText.includes("GOVERNMENT OF INDIA");
+
+                if (!isAadhaar) {
+
+                    await deleteFromS3(key);
+
+                    throw new ValidationError(
+                        "Uploaded file is not an Aadhaar Card. Please upload a valid Aadhaar card."
+                    );
+                }
+
+                const aadhaarNumber = String(extractedData?.aadhaarNumber || "").replace(/\s/g, "");
+
+                if (
+                    !aadhaarNumber ||
+                    !/^\d{12}$/.test(aadhaarNumber)
+                ) {
+                    await deleteFromS3(key);
+
+                    throw new ValidationError(
+                        "Invalid Aadhaar Card uploaded. Please upload a valid Aadhaar card."
+                    );
+                }
+            }
+
+            if (documentType === "pan-card") {
+
+                const upperText = extractedText.toUpperCase();
+
+                const isPanCard =
+                    upperText.includes("INCOME TAX DEPARTMENT") ||
+                    upperText.includes("PERMANENT ACCOUNT NUMBER");
+
+                if (!isPanCard) {
+
+                    await deleteFromS3(key);
+
+                    throw new ValidationError(
+                        "Uploaded file is not a PAN Card. Please upload a valid PAN card."
+                    );
+                }
+
+                const panNumber = String(extractedData?.panNumber || "").replace(/\s/g, "").toUpperCase();
+
+                if (
+                    !panNumber ||
+                    !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber)
+                ) {
+
+                    await deleteFromS3(key);
+
+                    throw new ValidationError(
+                        "Invalid PAN Card uploaded. Please upload a valid PAN card."
+                    );
+                }
+            }
+
+            if (documentType === "gst-certificate") {
+
+                const gstNumber = String(extractedData?.registrationNumber || "").replace(/\s/g, "").toUpperCase();
+
+                if (
+                    !gstNumber ||
+                    !/^\d{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]{3}$/.test(gstNumber)
+                ) {
+                    await deleteFromS3(key);
+
+                    throw new ValidationError(
+                        "Invalid GST Certificate uploaded. Please upload a valid GST certificate."
+                    );
+                }
+            }
+
+            if (documentType === "cin-certificate") {
+
+                const cin = String(extractedData?.cin || "").replace(/\s/g, "").toUpperCase();
+
+                if (
+                    !cin ||
+                    !/^[A-Z]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$/.test(cin)
+                ) {
+                    await deleteFromS3(key);
+
+                    throw new ValidationError(
+                        "Invalid CIN Certificate uploaded. Please upload a valid Certificate of Incorporation."
+                    );
+                }
+            }
+
             // EXPIRY VALIDATION
 
             const expirySupportedDocs = [
@@ -204,49 +309,123 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 expirySupportedDocs.includes(documentType) &&
                 isDocumentExpired(extractedData)
             ) {
+                const expiredDate =
+                    extractedData.validThru ||
+                    extractedData.validity ||
+                    extractedData.expiryDate;
 
                 verificationStatus = "rejected";
 
                 verificationMeta = {
                     provider: "expiry-validator",
                     status: "expired",
-                    verifiedAt: new Date()
+                    verifiedAt: new Date(),
+                    rejectionReason: `Document expired on ${expiredDate}`
                 };
+                // Remove uploaded file from S3
+                try {
+                    await deleteFromS3(key);
+                } catch (s3Err) {
+                    logger.error(`Failed to delete expired document from S3: ${s3Err.message}`);
+                }
 
-                logger.info(`Document rejected: expired type=${documentType}`);
+                throw new ValidationError(
+                    `Document verification failed. This document expired on ${expiredDate}. Please upload a valid non-expired document.`);
             }
 
-            // Hospital Certificate Verification
-            if (
-                verificationStatus !== "rejected" &&
-                (
-                    documentType === "rohini-certificate" ||
-                    documentType === "cghs-certificate" ||
-                    documentType === "nabh-certificate"
-                )
-            ) {
-                try {
-                    const hospitalVerificationService = require("./hospitalVerification.service");
+            // // Hospital Certificate Verification 
+            // if (
+            //     verificationStatus !== "rejected" &&
+            //     (
+            //         documentType === "rohini-certificate" ||
+            //         documentType === "cghs-certificate" ||
+            //         documentType === "nabh-certificate"
+            //     )
+            // ) {
+            //     try {
+            //         const hospitalVerificationService = require("./hospitalVerification.service");
 
-                    const result = await hospitalVerificationService.verifyHospital({
-                        certificateNumber: extractedData.rohiniId || extractedData.certificateNumber,
-                        hospitalName: extractedData.hospitalName,
-                        city: extractedData.location || extractedData.city
-                    });
+            //         const result = await hospitalVerificationService.verifyHospital({
+            //             certificateNumber: extractedData.rohiniId || extractedData.certificateNumber,
+            //             hospitalName: extractedData.hospitalName,
+            //             city: extractedData.location || extractedData.city
+            //         });
 
-                    logger.info(`Hospital verification result: status=${result.status} source=${result.source} type=${documentType}`);
+            //         console.log("HOSPITAL VERIFICATION RESULT:", result);
 
-                    verificationStatus = result.status;
+            //         verificationStatus = result.status;
+
+            //         verificationMeta = {
+            //             provider: result.source,
+            //             status: result.status,
+            //             verifiedAt: new Date()
+            //         };
+
+            //     } catch (err) {
+            //         console.error("Hospital verification error:", err);
+            //         verificationStatus = "manual-pending-verification";
+            //     }
+            // }
+            // ==========================================
+            // NEW: CALL MEDICAL DOCUMENT VERIFICATION API
+            // ==========================================
+            const mdvsSupportedDocs = [
+                "mcim-certificate", "ncim-certificate", "license-permit",
+                "rohini-certificate", "cghs-certificate", "nabh-certificate"
+            ];
+
+            if (verificationStatus !== "rejected" && mdvsSupportedDocs.includes(documentType)) {
+
+                const mdvsService = require("./mdvs.service");
+
+                // Call the API with the file buffer
+                const mdvsResult = await mdvsService.verifyMedicalDocument(
+                    file.buffer,
+                    file.originalname,
+                    documentType,
+                    extractedData,
+                    user.role
+                );
+
+                if (!mdvsResult) {
+                    verificationStatus = "manual-pending-verification";
+                }
+                else if (mdvsResult.success === false) {
+
+                    await deleteFromS3(key);
+
+                    throw new ValidationError(
+                        mdvsResult.message ||
+                        "Invalid document uploaded for selected document type."
+                    );
+                }
+                else {
+
+                    const vResult = mdvsResult.verificationResult;
+
+                    if (mdvsResult.extractedData) {
+                        extractedData = {
+                            ...extractedData,
+                            ...mdvsResult.extractedData
+                        };
+                    }
+
+                    if (
+                        vResult.verificationStatus === "VERIFIED" ||
+                        vResult.status === "auto-verified"
+                    ) {
+                        verificationStatus = "auto-verified";
+                    } else {
+                        verificationStatus = "manual-pending-verification";
+                    }
 
                     verificationMeta = {
-                        provider: result.source,
-                        status: result.status,
-                        verifiedAt: new Date()
+                        provider: vResult.source || "mdvs-api",
+                        method: vResult.qrMethod || vResult.matchedBy || "provider-scrape",
+                        status: verificationStatus,
+                        verifiedAt: new Date(),
+                        rawResponse: vResult
                     };
-
-                } catch (err) {
-                    console.error("Hospital verification error:", err);
-                    verificationStatus = "manual-pending-verification";
                 }
             }
 
@@ -317,11 +496,15 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             type: documentType,
                             createdAt: new Date()
                         };
-                        processIdfyResultAsync(
-                            userDocs._id,
-                            idfyResponse.request_id,
-                            documentType
-                        );
+                        try {
+                            processIdfyResultAsync(
+                                userDocs._id,
+                                idfyResponse.request_id,
+                                documentType
+                            );
+                        } catch (err) {
+                            logger.error(err.message);
+                        }
                     } else {
                         logger.warn(`IDFY request_id missing for type=${documentType}`);
                     }
@@ -341,40 +524,43 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
                     const idfyResponse = await idfyService.verifyAadhaarDigilocker(referenceId);
 
+                    console.log("AADHAAR CREATE RESPONSE:", JSON.stringify(idfyResponse, null, 2));
                     if (idfyResponse && idfyResponse.request_id) {
                         logger.info(`Aadhaar Digilocker task queued: requestId=${idfyResponse.request_id}`);
 
                         // Check if redirect_url is directly in the initial response
-                        let redirectUrl = idfyResponse.redirect_url || idfyResponse.redirect_uri || null;
+                        // let redirectUrl = idfyResponse.redirect_url || idfyResponse.redirect_uri || null;
 
-                        if (!redirectUrl) {
-                            // Poll up to 3 times with short delays — if IDFY fails fast, stop early
-                            for (let attempt = 1; attempt <= 3; attempt++) {
-                                await new Promise(res => setTimeout(res, 1500));
-                                const taskResult = await idfyService.getTaskResult(idfyResponse.request_id);
-                                const task = taskResult?.[0];
+                        // if (!redirectUrl) {
+                        //     // Poll up to 3 times with short delays — if IDFY fails fast, stop early
+                        //     for (let attempt = 1; attempt <= 3; attempt++) {
+                        //         await new Promise(res => setTimeout(res, 1500));
+                        //         const taskResult = await idfyService.getTaskResult(idfyResponse.request_id);
+                        //         const task = taskResult?.[0];
 
-                                // If IDFY already failed, no point continuing
-                                if (task?.status === "failed") {
-                                    logger.warn(`Aadhaar Digilocker task failed: ${task.error} - ${task.message}`);
-                                    break;
-                                }
+                        //         // If IDFY already failed, no point continuing
+                        //         if (task?.status === "failed") {
+                        //             logger.warn(`Aadhaar Digilocker task failed: ${task.error} - ${task.message}`);
+                        //             break;
+                        //         }
 
-                                const sourceOutput = task?.result?.source_output;
-                                redirectUrl =
-                                    task?.result?.redirect_url ||
-                                    task?.result?.redirect_uri ||
-                                    sourceOutput?.redirect_url ||
-                                    sourceOutput?.redirect_uri ||
-                                    task?.redirect_url ||
-                                    null;
+                        //         const sourceOutput = task?.result?.source_output;
+                        //         redirectUrl =
+                        //             task?.result?.redirect_url ||
+                        //             task?.result?.redirect_uri ||
+                        //             sourceOutput?.redirect_url ||
+                        //             sourceOutput?.redirect_uri ||
+                        //             task?.redirect_url ||
+                        //             null;
 
-                                if (redirectUrl) {
-                                    logger.info(`Aadhaar redirect_url obtained on attempt ${attempt}`);
-                                    break;
-                                }
-                            }
-                        }
+                        //         if (redirectUrl) {
+                        //             logger.info(`Aadhaar redirect_url obtained on attempt ${attempt}`);
+                        //             break;
+                        //         }
+                        //     }
+                        // }
+
+                        let redirectUrl = null;
 
                         verificationMeta = {
                             provider: "idfy-digilocker",
@@ -382,9 +568,27 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             referenceId: referenceId,
                             status: "initiated",
                             type: "aadhaar-card",
-                            redirectUrl,
+                            redirectUrl: null,
                             createdAt: new Date()
                         };
+
+                        for (let i = 0; i < 5; i++) {
+
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+
+                            const taskResult = await idfyService.getTaskResult(
+                                idfyResponse.request_id
+                            );
+
+                            redirectUrl =
+                                taskResult?.[0]?.result?.source_output?.redirect_url ||
+                                taskResult?.[0]?.result?.redirect_url ||
+                                taskResult?.[0]?.source_output?.redirect_url;
+
+                            if (redirectUrl) {
+                                break;
+                            }
+                        }
 
                     }
 
@@ -393,109 +597,111 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 }
             }
 
-            const {
-                extractQRFromBuffer,
-                detectQRType,
-                decodeBase64QR,
-                fetchQRUrlData
-            } = require("./qr.service");
+            // const {
+            //     extractQRFromBuffer,
+            //     detectQRType,
+            //     decodeBase64QR,
+            //     fetchQRUrlData
+            // } = require("./qr.service");
 
-            if (
-                verificationStatus !== "rejected" &&
-                (
-                    documentType === "mcim-certificate" ||
-                    documentType === "ncim-certificate" ||
-                    documentType === "license-permit"
-                )
-            ) {
-                const parseMCIMHtml = require("./parsers/mcimHtml.parser");
-                const parseNCIMHtml = require("./parsers/ncimHtml.parser");
-                const { compareCertificateData } = require("../utils/compare");
+            // if (
+            //     verificationStatus !== "rejected" &&
+            //     (
+            //         documentType === "mcim-certificate" ||
+            //         documentType === "ncim-certificate" ||
+            //         documentType === "license-permit"
+            //     )
+            // ) {
+            //     const parseMCIMHtml = require("./parsers/mcimHtml.parser");
+            //     const parseNCIMHtml = require("./parsers/ncimHtml.parser");
+            //     const { compareCertificateData } = require("../utils/compare");
 
-                let qrRaw = null;
-                let qrType = null;
-                let qrMatched = false;
+            //     let qrRaw = null;
+            //     let qrType = null;
+            //     let qrMatched = false;
 
-                try {
-                    qrRaw = await extractQRFromBuffer(file.buffer);
-                    qrType = detectQRType(qrRaw);
-                    // QR raw data not logged — may contain encoded PII
+            //     try {
+            //         qrRaw = await extractQRFromBuffer(file.buffer);
+            //         qrType = detectQRType(qrRaw);
 
-                    // URL QR
-                    if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "url") {
+            //         console.log("QR RAW:", qrRaw);
+            //         console.log("QR TYPE:", qrType);
 
-                        const html = await fetchQRUrlData(qrRaw);
+            //         // URL QR
+            //         if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "url") {
 
-                        if (html) {
-                            let qrData = {};
+            //             const html = await fetchQRUrlData(qrRaw);
 
-                            if (documentType === "mcim-certificate" || documentType === "license-permit") {
-                                qrData = parseMCIMHtml(html);
-                            }
+            //             if (html) {
+            //                 let qrData = {};
 
-                            if (documentType === "ncim-certificate") {
-                                qrData = parseNCIMHtml(html);
-                            }
+            //                 if (documentType === "mcim-certificate" || documentType === "license-permit") {
+            //                     qrData = parseMCIMHtml(html);
+            //                 }
 
-                            const normalizedOCR = {
-                                name: extractedData.doctorName || extractedData.name,
-                                registrationNumber: extractedData.registrationNumber || extractedData.licenseNumber
-                            };
+            //                 if (documentType === "ncim-certificate") {
+            //                     qrData = parseNCIMHtml(html);
+            //                 }
 
-                            const result = compareCertificateData(normalizedOCR, qrData);
+            //                 const normalizedOCR = {
+            //                     name: extractedData.doctorName || extractedData.name,
+            //                     registrationNumber: extractedData.registrationNumber || extractedData.licenseNumber
+            //                 };
 
-                            if (result === "match" || result === "partial") {
-                                verificationStatus = "auto-verified";
-                                qrMatched = true;
-                            } else {
-                                verificationStatus = "manual-pending-verification";
-                            }
-                        } else {
-                            verificationStatus = "manual-pending-verification";
-                        }
-                    }
-                    // BASE64 QR
-                    else if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "base64") {
+            //                 const result = compareCertificateData(normalizedOCR, qrData);
 
-                        const decoded = decodeBase64QR(qrRaw);
-                        // Decoded QR not logged — contains registration numbers
+            //                 if (result === "match" || result === "partial") {
+            //                     verificationStatus = "auto-verified";
+            //                     qrMatched = true;
+            //                 } else {
+            //                     verificationStatus = "manual-pending-verification";
+            //                 }
+            //             } else {
+            //                 verificationStatus = "manual-pending-verification";
+            //             }
+            //         }
+            //         // BASE64 QR
+            //         else if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "base64") {
 
-                        let ocrReg = extractedData.registrationNumber;
+            //             const decoded = decodeBase64QR(qrRaw);
+            //             console.log("DECODED QR:", decoded);
 
-                        // simple fallback
-                        if (!ocrReg && decoded) {
-                            ocrReg = decoded;
-                        }
+            //             let ocrReg = extractedData.registrationNumber;
 
-                        if (decoded && ocrReg) {
-                            const ocrNumber = ocrReg.toString().replace(/\D/g, "");
+            //             // simple fallback
+            //             if (!ocrReg && decoded) {
+            //                 ocrReg = decoded;
+            //             }
 
-                            if (ocrNumber.endsWith(decoded)) {
-                                verificationStatus = "auto-verified";
-                                qrMatched = true;
-                            } else {
-                                verificationStatus = "manual-pending-verification";
-                            }
-                            extractedData.registrationNumber = ocrNumber;
-                        } else if (verificationStatus !== "auto-verified") {
-                            verificationStatus = "manual-pending-verification";
-                        }
-                    }
-                    // NO QR → DO NOT OVERRIDE IF ALREADY VERIFIED
-                    else if (
-                        verificationStatus !== "auto-verified" &&
-                        documentType !== "aadhaar-card"
-                    ) {
-                        verificationStatus = "manual-pending-verification";
-                    }
-                } catch (err) {
-                    console.error("QR verification error:", err);
-                    verificationStatus = "manual-pending-verification";
-                }
-                if (!qrMatched) {
-                    verificationStatus = "manual-pending-verification";
-                }
-            }
+            //             if (decoded && ocrReg) {
+            //                 const ocrNumber = ocrReg.toString().replace(/\D/g, "");
+
+            //                 if (ocrNumber.endsWith(decoded)) {
+            //                     verificationStatus = "auto-verified";
+            //                     qrMatched = true;
+            //                 } else {
+            //                     verificationStatus = "manual-pending-verification";
+            //                 }
+            //                 extractedData.registrationNumber = ocrNumber;
+            //             } else if (verificationStatus !== "auto-verified") {
+            //                 verificationStatus = "manual-pending-verification";
+            //             }
+            //         }
+            //         // NO QR → DO NOT OVERRIDE IF ALREADY VERIFIED
+            //         else if (
+            //             verificationStatus !== "auto-verified" &&
+            //             documentType !== "aadhaar-card"
+            //         ) {
+            //             verificationStatus = "manual-pending-verification";
+            //         }
+            //     } catch (err) {
+            //         console.error("QR verification error:", err);
+            //         verificationStatus = "manual-pending-verification";
+            //     }
+            //     if (!qrMatched) {
+            //         verificationStatus = "manual-pending-verification";
+            //     }
+            // }
 
             // auto verification 
             if (
@@ -505,6 +711,92 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             ) {
                 verificationStatus = "pending";
             }
+
+            // NAME VALIDATION
+
+            // const normalizeName = (value = "") => {
+            //     return value
+            //         .toString()
+            //         .toLowerCase()
+            //         .replace(/dr\.?/gi, "")
+            //         .replace(/mr\.?/gi, "")
+            //         .replace(/mrs\.?/gi, "")
+            //         .replace(/ms\.?/gi, "")
+            //         .replace(/[^a-z\s]/g, "")
+            //         .replace(/\s+/g, " ")
+            //         .trim();
+            // };
+
+            // const isNameMatching = (userName, documentName) => {
+
+            //     if (!userName || !documentName) {
+            //         return false;
+            //     }
+
+            //     const normalizedUser = normalizeName(userName);
+            //     const normalizedDoc = normalizeName(documentName);
+
+            //     if (normalizedUser === normalizedDoc) {
+            //         return true;
+            //     }
+
+            //     if (
+            //         normalizedUser.includes(normalizedDoc) ||
+            //         normalizedDoc.includes(normalizedUser)
+            //     ) {
+            //         return true;
+            //     }
+
+            //     const userWords = normalizedUser.split(" ");
+            //     const docWords = normalizedDoc.split(" ");
+
+            //     const matchedWords = userWords.filter(word =>
+            //         docWords.includes(word)
+            //     );
+
+            //     return matchedWords.length >= 2;
+            // };
+
+            // let extractedDocumentName = null;
+
+            // if (documentType === "aadhaar-card") {
+            //     extractedDocumentName = extractedData.name;
+            // }
+
+            // if (documentType === "pan-card") {
+            //     extractedDocumentName = extractedData.name;
+            // }
+
+            // if (
+            //     documentType === "mcim-certificate" ||
+            //     documentType === "ncim-certificate"
+            // ) {
+            //     extractedDocumentName = extractedData.doctorName;
+            // }
+
+            // if (documentType === "license-permit") {
+            //     extractedDocumentName = extractedData.name;
+            // }
+
+            // if (
+            //     user.role === "staff" &&
+            //     extractedDocumentName
+            // ) {
+
+            //     const matched = isNameMatching(
+            //         user.name,
+            //         extractedDocumentName
+            //     );
+
+            //     if (!matched) {
+
+            //         await deleteFromS3(key);
+
+            //         throw new Error(
+            //             `Name mismatch detected. User profile name "${user.name}" does not match document name "${extractedDocumentName}". Please upload a document with the correct name.`
+            //         );
+            //     }
+            // }
 
         }
     } catch (err) {
@@ -529,10 +821,17 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
     let redirectUrl = null;
 
-    if (documentType === "aadhaar-card") {
-        // redirectUrl is stored in verificationMeta from the initial IDFY response.
-        // No need for a separate getTaskResult call — the URL is available immediately.
-        redirectUrl = verificationMeta?.redirectUrl || null;
+    if (verificationMeta?.requestId && documentType === "aadhaar-card") {
+
+        const result = await idfyService.getTaskResult(
+            verificationMeta.requestId
+        );
+
+        redirectUrl =
+            result?.[0]?.result?.source_output?.redirect_url ||
+            result?.[0]?.result?.redirect_url ||
+            result?.[0]?.source_output?.redirect_url ||
+            null;
     }
 
     return {
@@ -677,13 +976,13 @@ exports.getDocumentById = async (user, documentId) => {
     });
 
     if (!docRecord) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     const doc = docRecord.documents.id(documentId);
 
     if (!doc || doc.isDeleted) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     const signedUrl = await generatePreSignedURL(doc.s3Key);
@@ -708,21 +1007,21 @@ exports.verifyDocument = async (documentId, adminId) => {
     }).populate('userId', 'name email');
 
     if (!docRecord) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     const document = docRecord.documents.id(documentId);
 
     if (!document) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     if (document.isDeleted) {
-        throw new Error("Document is deleted");
+        throw new ConflictError("Document is deleted");
     }
 
     if (document.verificationStatus === "verified") {
-        throw new Error("Document already verified");
+        throw new ConflictError("Document already verified");
     }
 
     document.verificationStatus = "verified";
@@ -770,22 +1069,22 @@ exports.rejectDocument = async (documentId, adminId, reason) => {
     }).populate('userId', 'name email');
 
     if (!docRecord) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     const document = docRecord.documents.id(documentId);
 
     if (!document) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     if (document.isDeleted) {
-        throw new Error("Document is deleted");
+        throw new ConflictError("Document is deleted");
     }
 
     // Prevent rejecting already verified documents
     if (document.verificationStatus === "verified") {
-        throw new Error("Verified document cannot be rejected");
+        throw new ConflictError("Verified document cannot be rejected");
     }
 
     document.verificationStatus = "rejected";
@@ -887,17 +1186,17 @@ exports.deleteDocument = async (user, documentId) => {
     });
 
     if (!docRecord) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     const document = docRecord.documents.id(documentId);
 
     if (!document) {
-        throw new Error("Document not found");
+        throw new NotFoundError("Document not found");
     }
 
     if (document.isDeleted) {
-        throw new Error("Document already deleted");
+        throw new ConflictError("Document already deleted");
     }
     await deleteFromS3(document.s3Key);
 

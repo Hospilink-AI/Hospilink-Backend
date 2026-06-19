@@ -6,7 +6,7 @@ const Review = require('../models/Review');
 const Document = require('../models/Document');
 const User = require('../models/User');
 const { generatePreSignedURL } = require('./s3.service');
-const { calculateDutyDuration, formatDuration, formatRoleForDisplay } = require('../utils/helpers');
+const { calculateDutyDuration, getCurrentIST, formatDuration, formatRoleForDisplay} = require('../utils/helpers');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
 const { ALLOWED_ROLES } = require('../utils/constants');
 const geocodingService = require('./geocoding.service');
@@ -19,6 +19,11 @@ const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
 const notificationEmitter = require('./notificationEmitter');
 const DashboardService = require('./dashboard.service');
+const {
+    ValidationError,
+    NotFoundError,
+    ConflictError
+} = require('../middleware/error.middleware');
 
 /**
  * Escape all special regex characters in a user-supplied string before
@@ -64,7 +69,7 @@ class AdminService {
             // Single date filter
             const targetDate = this.parseDDMMYYYY(date);
             if (!targetDate) {
-                throw new Error('Invalid date format. Use DD-MM-YYYY format');
+                throw new ValidationError('Invalid date format. Use DD-MM-YYYY format');
             }
 
             dateFilter = {
@@ -77,11 +82,11 @@ class AdminService {
             const end = this.parseDDMMYYYY(endDate);
 
             if (!start || !end) {
-                throw new Error('Invalid date format. Use DD-MM-YYYY format (e.g., 15-03-2024)');
+                throw new ValidationError('Invalid date format. Use DD-MM-YYYY format');
             }
 
             if (start > end) {
-                throw new Error('Start date must be before or equal to end date');
+                throw new ValidationError('Start date must be before or equal to end date');
             }
 
             dateFilter = {
@@ -391,7 +396,7 @@ class AdminService {
         try {
             // Input validation
             if (radiusKm < 1 || radiusKm > 100) {
-                throw new Error('Radius must be between 1km and 100km');
+                throw new ValidationError('Radius must be between 1km and 100km');
             }
 
             // Check cache first (1 minute for admin queries)
@@ -411,7 +416,7 @@ class AdminService {
                 .lean();
 
             if (!hospital) {
-                throw new Error('Hospital not found');
+                throw new NotFoundError('Hospital not found');
             }
 
             const hospitalLat = hospital.coordinates.coordinates.latitude;
@@ -799,11 +804,10 @@ class AdminService {
     // GET /api/admin/hospitals/:id — preview modal
     async getHospitalDetail(hospitalId) {
         const hospital = await Hospital.findById(hospitalId)
-            .select('hospitalLegalName currentAddress city state pincode staffCount servicesAvailable isProfileComplete verificationStatus coordinates createdAt')
             .populate('user', 'name email createdAt')
             .lean();
 
-        if (!hospital) throw new Error('Hospital not found');
+        if (!hospital) throw new NotFoundError('Hospital not found');
 
         // Documents are stored against the User's _id, not the Hospital profile's _id
         const docRecord = await Document.findOne({ userId: hospital.user._id }).lean();
@@ -839,6 +843,9 @@ class AdminService {
             servicesAvailable: hospital.servicesAvailable,
             verificationStatus: hospital.verificationStatus,
             rejectionReason: hospital.rejectionReason,
+            isSuspended: hospital.isSuspended || false,
+            suspensionReason: hospital.suspensionReason || null,
+            suspendedAt: hospital.suspendedAt || null,
             isProfileComplete: hospital.isProfileComplete,
             coordinates: {
                 latitude: hospital.coordinates?.coordinates?.latitude,
@@ -859,11 +866,11 @@ class AdminService {
     // PATCH /api/admin/hospitals/:id/verify
     async verifyHospital(hospitalId) {
         const hospital = await Hospital.findById(hospitalId).populate('user', 'name email');
-        if (!hospital) throw new Error('Hospital not found');
+        if (!hospital) throw new NotFoundError('Hospital not found');
 
         // Allow: pending → verified, rejected → verified
         if (hospital.verificationStatus === 'verified') {
-            throw new Error('Hospital is already verified');
+            throw new ConflictError('Hospital is already verified');
         }
 
         const previousStatus = hospital.verificationStatus;
@@ -915,18 +922,18 @@ class AdminService {
 
     // PATCH /api/admin/hospitals/:id/reject
     async rejectHospital(hospitalId, reason) {
-        if (!reason) throw new Error('Rejection reason is required');
+        if (!reason) throw new ValidationError('Rejection reason is required');
 
         const hospital = await Hospital.findById(hospitalId).populate('user', 'name email');
-        if (!hospital) throw new Error('Hospital not found');
+        if (!hospital) throw new NotFoundError('Hospital not found');
 
         // Allow: pending → rejected only
         // verified → rejected is NOT allowed
         if (hospital.verificationStatus === 'verified') {
-            throw new Error('Verified hospital cannot be rejected. Verification is final.');
+            throw new ConflictError('Verified hospital cannot be rejected. Verification is final.');
         }
         if (hospital.verificationStatus === 'rejected') {
-            throw new Error('Hospital is already rejected');
+            throw new ConflictError('Hospital is already rejected');
         }
 
         const previousStatus = hospital.verificationStatus;
@@ -1324,7 +1331,7 @@ class AdminService {
             .populate('user', 'name email createdAt')
             .lean();
 
-        if (!staff) throw new Error('Medical staff not found');
+        if (!staff) throw new NotFoundError('Medical staff not found');
 
         // Documents are stored against the User's _id, not the MedicalStaff profile's _id
         const docRecord = await Document.findOne({ userId: staff.user._id }).lean();
@@ -1377,6 +1384,9 @@ class AdminService {
             isProfileComplete: staff.isProfileComplete,
             verificationStatus: staff.verificationStatus || 'pending',
             rejectionReason: staff.rejectionReason,
+            isSuspended: staff.isSuspended || false,
+            suspensionReason: staff.suspensionReason || null,
+            suspendedAt: staff.suspendedAt || null,
             experience: staff.experience,
             averageRating: staff.averageRating,
             totalRatings: staff.totalRatings,
@@ -1395,11 +1405,11 @@ class AdminService {
     // PATCH /api/admin/medical-staff/:staffId/verify — verify medical staff account
     async verifyMedicalStaff(staffId) {
         const staff = await MedicalStaff.findById(staffId).populate('user', 'name email');
-        if (!staff) throw new Error('Medical staff not found');
+        if (!staff) throw new NotFoundError('Medical staff not found');
 
         // Allow: pending → verified, rejected → verified
         if (staff.verificationStatus === 'verified') {
-            throw new Error('Medical staff is already verified');
+            throw new ConflictError('Medical staff is already verified');
         }
 
         const previousStatus = staff.verificationStatus;
@@ -1457,18 +1467,18 @@ class AdminService {
 
     // PATCH /api/admin/medical-staff/:staffId/reject — reject medical staff account
     async rejectMedicalStaff(staffId, reason) {
-        if (!reason) throw new Error('Rejection reason is required');
-        
+        if (!reason) throw new ValidationError('Rejection reason is required');
+
         const staff = await MedicalStaff.findById(staffId).populate('user', 'name email');
-        if (!staff) throw new Error('Medical staff not found');
+        if (!staff) throw new NotFoundError('Medical staff not found');
 
         // Allow: pending → rejected only
         // verified → rejected is NOT allowed
         if (staff.verificationStatus === 'verified') {
-            throw new Error('Verified medical staff cannot be rejected. Verification is final.');
+            throw new ConflictError('Verified medical staff cannot be rejected. Verification is final.');
         }
         if (staff.verificationStatus === 'rejected') {
-            throw new Error('Medical staff is already rejected');
+            throw new ConflictError('Medical staff is already rejected');
         }
 
         const previousStatus = staff.verificationStatus;
@@ -1701,7 +1711,7 @@ class AdminService {
             // Role-based filtering
             if (role) {
                 if (!ALLOWED_ROLES.includes(role)) {
-                    throw new Error(`Invalid role: ${role}`);
+                    throw new ValidationError(`Invalid role: ${role}`);
                 }
                 query.staffRole = role;
             }
@@ -1834,16 +1844,16 @@ class AdminService {
                 .lean(); // Use lean for better performance
 
             if (!duty) {
-                throw new Error('Duty not found');
+                throw new NotFoundError('Duty not found');
             }
 
             // Verify duty is in active state
             if (!['assigned', 'enroute', 'in-progress'].includes(duty.status)) {
-                throw new Error('Duty is not in active state');
+                throw new ValidationError('Duty is not in active state');
             }
 
             if (!duty.assignedTo) {
-                throw new Error('Duty is not assigned to any staff');
+                throw new ValidationError('Duty is not assigned to any staff');
             }
 
             const staff = duty.assignedTo;
@@ -2215,6 +2225,412 @@ class AdminService {
             console.error('Error in getDutyHistory:', error);
             throw error;
         }
+    }
+
+
+    
+    // Create duty for hospital from admin panel
+    // POST /api/admin/duties
+    async createDutyForHospital(hospitalId, dutyPayload) {
+        const {
+            staff_role,
+            date,
+            end_date,
+            start_time,
+            end_time,
+            urgency,
+            description,
+            offered_rate,
+            is_overnight_duty,
+            staff_count,
+            duty_sub_type
+        } = dutyPayload;
+
+        // Fetch and validate hospital
+        const hospital = await Hospital.findById(hospitalId)
+            .select('hospitalLegalName currentAddress city state pincode coordinates servicesAvailable staffCount isProfileComplete verificationStatus user')
+            .populate('user', '_id name');
+
+        if (!hospital) {
+            const error = new Error('Hospital not found');
+            error.statusCode = 404;
+            throw error;
+        }
+
+        // Check hospital verification status
+        if (hospital.verificationStatus !== 'verified') {
+            const statusMessages = {
+                pending: 'Cannot create duty: hospital verification is still pending.',
+                rejected: 'Cannot create duty: hospital has been rejected and is not verified.'
+            };
+            const message = statusMessages[hospital.verificationStatus] || 'Cannot create duty: hospital is not verified.';
+            const error = new Error(message);
+            error.statusCode = 403;
+            throw error;
+        }
+
+        // Determine number of duties to create (default to 1 if staff_count not provided)
+        const numberOfDuties = staff_count ? parseInt(staff_count) : 1;
+
+        const dutyData = {
+            staffRole: staff_role,
+            date,
+            endDate: end_date,
+            startTime: start_time,
+            endTime: end_time,
+            urgency,
+            description,
+            offeredRate: offered_rate,
+            isOvernightDuty: is_overnight_duty || false,
+            ...(staff_role === 'rmo' && { dutySubType: duty_sub_type })
+        };
+
+        // Create multiple duties based on staff_count
+        const createdDuties = [];
+        for (let i = 0; i < numberOfDuties; i++) {
+            // Use the hospital's own user ID so existing service logic works unchanged
+            const DutyService = require('./duty.service');
+            const result = await DutyService.createDuty(dutyData, hospital.user._id);
+            createdDuties.push(result.duty);
+        }
+
+        // Notify matching staff + hospital (same as hospital flow)
+        try {
+            const matchingStaff = await MedicalStaff.find({
+                jobRole: staff_role,
+                isAvailable: true
+            }).populate('user', '_id');
+
+            // Filter out staff with null user references and map to user IDs
+            const staffUserIds = matchingStaff
+                .filter(s => s.user && s.user._id)
+                .map(s => s.user._id.toString());
+
+            const hospitalUserId = hospital.user._id.toString();
+
+            // Send notifications for all created duties
+            for (const duty of createdDuties) {
+                await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, hospitalUserId);
+            }
+
+            // Notify all admins if this is an emergency duty
+            if (urgency === 'emergency') {
+                const admins = await User.find({ role: 'admin' }).select('_id');
+                if (admins.length) {
+                    const adminIds = admins.map(a => a._id.toString());
+                    
+                    // Send emergency alerts for all created duties
+                    for (const duty of createdDuties) {
+                        await notificationEmitter.emitEmergencyAdminAlert(duty, hospital, adminIds, 'emergency_created');
+
+                        const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+                        if (alertEmail) {
+                            require('./email.service').sendEmergencyAdminAlertEmail(
+                                alertEmail, 'Admin', duty, hospital, 'emergency_created'
+                            ).catch(err => logger.error(`Error sending emergency alert email: ${err.message}`));
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            logger.error('Admin createDuty: notification error - ' + err.message);
+        }
+
+        return {
+            success: true,
+            duties: createdDuties,
+            count: createdDuties.length,
+            message: `Successfully created ${createdDuties.length} ${createdDuties.length === 1 ? 'duty' : 'duties'}`
+        };
+    }
+
+    // ─── Account suspension ────────────────────────────────────────────────────
+
+    // PATCH /api/admin/hospitals/:hospitalId/suspend
+    async suspendHospital(hospitalId, reason) {
+        if (!reason) throw new ValidationError('Suspension reason is required');
+
+        const hospital = await Hospital.findById(hospitalId).populate('user', 'name email');
+        if (!hospital) throw new NotFoundError('Hospital not found');
+
+        if (hospital.isSuspended) {
+            throw new ConflictError('Hospital account is already suspended');
+        }
+
+        hospital.isSuspended = true;
+        hospital.suspensionReason = reason;
+        hospital.suspendedAt = new Date();
+        await hospital.save();
+
+        const userId = hospital.user._id;
+
+        // Invalidate all relevant caches immediately
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateHospitalSuspensionCache(userId),
+            CacheInvalidationService.invalidateHospitalVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`)
+        ]);
+
+        // Re-warm the suspension cache so the next request hits cache, not DB
+        await CacheInvalidationService.refreshHospitalSuspensionCache(userId);
+
+        logger.info(`Hospital ${hospitalId} suspended. Reason: ${reason}`);
+
+        // Fire-and-forget: email + notification
+        EmailService.sendAccountSuspendedEmail(hospital.user.email, hospital.hospitalLegalName, reason)
+            .catch(err => logger.error('Suspension email error:', err.message));
+
+        notificationEmitter.emitAccountSuspended(hospital, userId.toString(), 'hospital', reason)
+            .catch(err => logger.error('Suspension notification error:', err.message));
+
+        return {
+            id: hospital._id,
+            isSuspended: hospital.isSuspended,
+            suspensionReason: hospital.suspensionReason,
+            suspendedAt: hospital.suspendedAt,
+            message: 'Hospital account suspended successfully'
+        };
+    }
+
+    // PATCH /api/admin/hospitals/:hospitalId/unsuspend
+    async unsuspendHospital(hospitalId) {
+        const hospital = await Hospital.findById(hospitalId).populate('user', 'name email');
+        if (!hospital) throw new NotFoundError('Hospital not found');
+
+        if (!hospital.isSuspended) {
+            throw new ConflictError('Hospital account is not currently suspended');
+        }
+
+        hospital.isSuspended = false;
+        hospital.suspensionReason = null;
+        hospital.suspendedAt = null;
+        await hospital.save();
+
+        const userId = hospital.user._id;
+
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateHospitalSuspensionCache(userId),
+            CacheInvalidationService.invalidateHospitalVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`)
+        ]);
+
+        await CacheInvalidationService.refreshHospitalSuspensionCache(userId);
+
+        logger.info(`Hospital ${hospitalId} unsuspended`);
+
+        EmailService.sendAccountActivatedEmail(hospital.user.email, hospital.hospitalLegalName)
+            .catch(err => logger.error('Unsuspend email error:', err.message));
+
+        notificationEmitter.emitAccountActivated(hospital, userId.toString(), 'hospital')
+            .catch(err => logger.error('Unsuspend notification error:', err.message));
+
+        return {
+            id: hospital._id,
+            isSuspended: hospital.isSuspended,
+            suspensionReason: hospital.suspensionReason,
+            message: 'Hospital account unsuspended successfully'
+        };
+    }
+
+    // PATCH /api/admin/medical-staff/:staffId/suspend
+    async suspendMedicalStaff(staffId, reason) {
+        if (!reason) throw new ValidationError('Suspension reason is required');
+
+        const staff = await MedicalStaff.findById(staffId).populate('user', 'name email');
+        if (!staff) throw new NotFoundError('Medical staff not found');
+
+        if (staff.isSuspended) {
+            throw new ConflictError('Staff account is already suspended');
+        }
+
+        staff.isSuspended = true;
+        staff.suspensionReason = reason;
+        staff.suspendedAt = new Date();
+        await staff.save();
+
+        const userId = staff.user._id;
+
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateStaffSuspensionCache(userId),
+            CacheInvalidationService.invalidateStaffVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`),
+            cacheService.del(`staff_availability:${userId}`)
+        ]);
+
+        await CacheInvalidationService.refreshStaffSuspensionCache(userId);
+
+        logger.info(`Medical staff ${staffId} suspended. Reason: ${reason}`);
+
+        EmailService.sendAccountSuspendedEmail(staff.user.email, staff.fullName, reason)
+            .catch(err => logger.error('Suspension email error:', err.message));
+
+        notificationEmitter.emitAccountSuspended(staff, userId.toString(), 'staff', reason)
+            .catch(err => logger.error('Suspension notification error:', err.message));
+
+        return {
+            id: staff._id,
+            isSuspended: staff.isSuspended,
+            suspensionReason: staff.suspensionReason,
+            suspendedAt: staff.suspendedAt,
+            message: 'Staff account suspended successfully'
+        };
+    }
+
+    // PATCH /api/admin/medical-staff/:staffId/unsuspend
+    async unsuspendMedicalStaff(staffId) {
+        const staff = await MedicalStaff.findById(staffId).populate('user', 'name email');
+        if (!staff) throw new NotFoundError('Medical staff not found');
+
+        if (!staff.isSuspended) {
+            throw new ConflictError('Staff account is not currently suspended');
+        }
+
+        staff.isSuspended = false;
+        staff.suspensionReason = null;
+        staff.suspendedAt = null;
+        await staff.save();
+
+        const userId = staff.user._id;
+
+        await Promise.allSettled([
+            CacheInvalidationService.invalidateStaffSuspensionCache(userId),
+            CacheInvalidationService.invalidateStaffVerificationCache(userId),
+            cacheService.invalidateUserProfiles(userId.toString()),
+            cacheService.invalidateProfileStatus(userId.toString()),
+            cacheService.del(`session:${userId}`),
+            cacheService.del(`staff_availability:${userId}`)
+        ]);
+
+        await CacheInvalidationService.refreshStaffSuspensionCache(userId);
+
+        logger.info(`Medical staff ${staffId} unsuspended`);
+
+        EmailService.sendAccountActivatedEmail(staff.user.email, staff.fullName)
+            .catch(err => logger.error('Unsuspend email error:', err.message));
+
+        notificationEmitter.emitAccountActivated(staff, userId.toString(), 'staff')
+            .catch(err => logger.error('Unsuspend notification error:', err.message));
+
+        return {
+            id: staff._id,
+            isSuspended: staff.isSuspended,
+            suspensionReason: staff.suspensionReason,
+            message: 'Staff account unsuspended successfully'
+        };
+    }
+
+
+
+
+    // Admin overrides duty status
+    async adminOverrideDutyStatus(dutyId, adminUserId, newStatus, reason) {
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        const allowedTransitions = {
+            'available': ['assigned', 'enroute', 'in-progress', 'completed'],
+            'assigned': ['available', 'enroute', 'in-progress', 'completed'],
+            'enroute': ['available', 'assigned', 'in-progress', 'completed'],
+            'in-progress': ['completed'],
+            'pending-confirmation': ['completed'],
+            'completed': []
+        };
+
+        if (!allowedTransitions[duty.status]) {
+            throw new ValidationError(`Admin override is not allowed from status ${duty.status}`);
+        }
+
+        if (!allowedTransitions[duty.status].includes(newStatus)) {
+            throw new ValidationError(`Invalid override transition from ${duty.status} to ${newStatus}`);
+        }
+
+        const previousStatus = duty.status;
+        duty.status = newStatus;
+        duty.statusHistory.push({
+            status: newStatus,
+            timestamp: getCurrentIST(),
+            changedBy: adminUserId,
+            reason,
+            manualOverride: true,
+            overriddenFromStatus: previousStatus
+        });
+
+        await duty.save();
+
+        await duty.populate({
+            path: 'assignedTo',
+            populate: {
+                path: 'user',
+                select: 'name email'
+            }
+        });
+
+        await duty.populate({
+            path: 'hospital',
+            populate: {
+                path: 'user',
+                select: 'name email'
+            }
+        });
+
+        return duty;
+    }
+
+
+
+
+    // Admin unlocks a locked start/end OTP
+    async unlockDutyOtp(dutyId, otpType, adminId, reason) {
+        if (!['start', 'end'].includes(otpType)) {
+            throw new ValidationError("otpType must be 'start' or 'end'");
+        }
+
+        const field = `${otpType}Otp`;
+
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (duty[field].status !== 'LOCKED') {
+            throw new ValidationError(`${otpType === 'start' ? 'Start' : 'End'} OTP is not locked`);
+        }
+
+        const now = getCurrentIST();
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, [`${field}.status`]: 'LOCKED' },
+            {
+                $set: {
+                    [`${field}.status`]: 'NONE',
+                    [`${field}.attempts`]: 0,
+                    [`${field}.unlockedBy`]: adminId,
+                    [`${field}.unlockReason`]: reason
+                },
+                $push: {
+                    statusHistory: {
+                        status: duty.status,
+                        timestamp: now,
+                        changedBy: adminId,
+                        reason: `${otpType === 'start' ? 'Start' : 'End'} OTP unlocked by admin: ${reason}`
+                    }
+                }
+            },
+            { new: true }
+        );
+
+        if (!updated) {
+            throw new ConflictError('OTP status changed — cannot unlock');
+        }
+
+        return updated;
     }
 }
 

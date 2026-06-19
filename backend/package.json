@@ -55,6 +55,7 @@
         "sharp": "^0.34.5",
         "socket.io": "^4.8.3",
         "turndown": "^7.2.4",
+        "twilio": "^5.13.1",
         "uuid": "^9.0.1",
         "validator": "^13.15.35",
         "winston": "^3.19.0",

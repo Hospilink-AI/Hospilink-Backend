@@ -524,6 +524,9 @@ function receiptTemplate(data) {
             <div class="section">
                 <h4>Payment</h4>
                 <p class="highlight">₹${data.totalEarning || 0}</p>
+                <p>Method: ${data.payment?.method || 'Unconfirmed'}</p>
+                <p>Status: ${data.payment?.status || 'Unconfirmed by hospital'}</p>
+                <p>Attested On: ${data.payment?.attestedAt ? new Date(data.payment.attestedAt).toLocaleString() : '-'}</p>
             </div>
 
             <!-- FOOTER -->

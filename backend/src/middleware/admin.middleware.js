@@ -1012,6 +1012,113 @@ const validateAssignDuty = (req, res, next) => {
 };
 
 
+// Validate suspension reason for PATCH suspend endpoints
+const validateSuspensionReason = (req, res, next) => {
+    const { reason } = req.body;
+
+    // Reject unexpected fields
+    const allowedFields = ['reason'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid fields: ${unexpectedFields.join(', ')}. Only allowed: reason`
+        });
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Suspension reason is required and must be a non-empty string'
+        });
+    }
+
+    if (reason.length > 500) {
+        return res.status(400).json({
+            success: false,
+            message: 'Suspension reason cannot exceed 500 characters'
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for admin override of duty status
+const validateAdminOverrideStatus = (req, res, next) => {
+    const { status, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['status', 'reason'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    const allowedStatuses = ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'completed'];
+    if (!status || !allowedStatuses.includes(status)) {
+        errors.push(`Invalid status. Allowed: ${allowedStatuses.join(', ')}`);
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length < 10 || reason.trim().length > 500) {
+        errors.push('Reason is required and must be between 10 and 500 characters');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for admin unlocking a locked start/end OTP
+const validateUnlockOtp = (req, res, next) => {
+    const { otpType, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['otpType', 'reason'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    const validOtpTypes = ['start', 'end'];
+    if (!otpType || !validOtpTypes.includes(otpType)) {
+        errors.push(`otpType is required. Allowed: ${validOtpTypes.join(', ')}`);
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        errors.push('reason is required');
+    } else if (reason.length > 1000) {
+        errors.push('reason cannot exceed 1000 characters');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
 module.exports = {
     validateAdminSignin,
     validateAdminOTP,
@@ -1029,5 +1136,8 @@ module.exports = {
     validateDocumentsListQuery,
     validateObjectId,
     validateRejectionReason,
-    validateAssignDuty
+    validateSuspensionReason,
+    validateAssignDuty,
+    validateAdminOverrideStatus,
+    validateUnlockOtp,
 };

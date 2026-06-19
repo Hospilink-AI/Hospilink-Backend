@@ -106,7 +106,7 @@ exports.extractQRFromBuffer = async (buffer) => {
             return null;
 
         } catch (err) {
-            console.error("PDF QR ERROR:", err.message);
+            logger.error(`PDF QR extraction error: ${err.message}`);
             return null;
         }
 
@@ -183,7 +183,7 @@ exports.extractQRFromBuffer = async (buffer) => {
 
     } catch (err) {
 
-        console.error("QR extraction failed:", err);
+        logger.error(`QR extraction failed: ${err.message}`);
 
         return null;
     }

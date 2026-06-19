@@ -19,8 +19,10 @@ const {
     validateDocumentsListQuery,
     validateObjectId,
     validateRejectionReason,
+    validateSuspensionReason,
     validateAssignDuty,
-    
+    validateUnlockOtp,
+    validateAdminOverrideStatus,
 } = require('../middleware/admin.middleware');
 
 const { validateDutyCreation } = require('../middleware/validation.middleware');
@@ -53,6 +55,8 @@ router.get('/hospitals/stats', adminController.getHospitalStats);
 router.get('/hospitals/:hospitalId', validateObjectId('hospitalId'), adminController.getHospitalDetail);
 router.patch('/hospitals/:hospitalId/verify', validateObjectId('hospitalId'), adminController.verifyHospital);
 router.patch('/hospitals/:hospitalId/reject', validateObjectId('hospitalId'), validateRejectionReason, adminController.rejectHospital);
+router.patch('/hospitals/:hospitalId/suspend', validateObjectId('hospitalId'), validateSuspensionReason, adminController.suspendHospital);
+router.patch('/hospitals/:hospitalId/unsuspend', validateObjectId('hospitalId'), adminController.unsuspendHospital);
 
 //dashboard api's
 router.post('/create-duty', validateDutyCreation, adminController.createDutyForHospital);
@@ -67,6 +71,8 @@ router.get('/medical-staff', validateMedicalStaffListQuery, adminController.getM
 router.get('/medical-staff-list', validateMedicalStaffListVerified, adminController.getVerifiedMedicalStaffList);
 router.patch('/medical-staff/:staffId/verify', validateObjectId('staffId'), adminController.verifyMedicalStaff);
 router.patch('/medical-staff/:staffId/reject', validateObjectId('staffId'), validateRejectionReason, adminController.rejectMedicalStaff);
+router.patch('/medical-staff/:staffId/suspend', validateObjectId('staffId'), validateSuspensionReason, adminController.suspendMedicalStaff);
+router.patch('/medical-staff/:staffId/unsuspend', validateObjectId('staffId'), adminController.unsuspendMedicalStaff);
 
 router.get('/nearby-staff', validateNearbyStaffQuery, adminController.getNearbyAvailableStaff);
 
@@ -92,5 +98,22 @@ router.put('/documents/:documentId/verify', validateObjectId('documentId'), admi
 router.put('/documents/:documentId/reject', validateObjectId('documentId'), validateRejectionReason, adminController.rejectDocument);
 
 router.post('/assign-duty', validateAssignDuty, adminController.assignDutyToStaff);
+
+
+// Duty Management endpoints for admin
+router.patch(
+    '/duties/:id/unlock-otp',
+    validateObjectId('id'),
+    validateUnlockOtp,
+    adminController.unlockDutyOtp
+);
+
+router.patch(
+    '/duties/:id/admin-override',
+    validateObjectId('id'),
+    validateAdminOverrideStatus,
+    adminController.adminOverrideDutyStatus
+);
+
 
 module.exports = router;

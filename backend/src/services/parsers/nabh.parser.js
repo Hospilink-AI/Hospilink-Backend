@@ -1,7 +1,5 @@
 module.exports = (text = "") => {
 
-    console.log("NABH PARSER STARTED");
-
     // NORMALIZATION
 
     const normalized = text
@@ -31,8 +29,6 @@ module.exports = (text = "") => {
         !/^\W+$/.test(line) &&
         line.length > 2
     );
-
-    console.log("USEFUL LINES:\n", usefulLines);
 
     // OUTPUT OBJECT
 

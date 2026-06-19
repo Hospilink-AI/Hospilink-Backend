@@ -732,7 +732,7 @@ const validateNearbyStaff = (req, res, next) => {
 
 // Validation for duty creation to prevent past/invalid times
 const validateDutyCreation = (req, res, next) => {
-    const { date, start_time, urgency, staff_count } = req.body;
+    const { date, start_time, urgency, staff_count, staff_role, duty_sub_type } = req.body;
     const errors = [];
     
     // Validate staff_count if provided
@@ -740,6 +740,14 @@ const validateDutyCreation = (req, res, next) => {
         const count = parseInt(staff_count);
         if (isNaN(count) || count < 1 || count > 50) {
             errors.push('staff_count must be a number between 1 and 50');
+        }
+    }
+
+    // RMO sub-type: required when role is rmo, forbidden otherwise
+    if (staff_role === 'rmo') {
+        const validSubTypes = ['ward', 'icu', 'casualty'];
+        if (!duty_sub_type || !validSubTypes.includes(duty_sub_type)) {
+            errors.push('Sub-type is required for RMO duties');
         }
     }
     
@@ -839,7 +847,7 @@ const validateDutyStatusChange = (req, res, next) => {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
     }
     
-    const allowedStatuses = ['enroute', 'in-progress', 'completed'];
+    const allowedStatuses = ['enroute'];
     if (!status || !allowedStatuses.includes(status)) {
         errors.push(`Invalid status. Allowed: ${allowedStatuses.join(', ')}`);
     }
@@ -858,6 +866,135 @@ const validateDutyStatusChange = (req, res, next) => {
     
     next();
 };
+
+
+
+
+
+// Validation for requesting a Start OTP (staff taps "Get OTP" within range of the hospital)
+const validateRequestStartOtp = (req, res, next) => {
+    const errors = [];
+
+    const allowedFields = [];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for verifying the Start OTP (geofence handshake)
+const validateVerifyStartOtp = (req, res, next) => {
+    const { otp } = req.body;
+    const errors = [];
+
+    const allowedFields = ['otp'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!otp || !/^\d{6}$/.test(otp)) {
+        errors.push('OTP must be exactly 6 digits');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for verifying the End OTP + payment attestation
+const validateVerifyEndOtp = (req, res, next) => {
+    const { otp, paymentMethod, isPaid } = req.body;
+    const errors = [];
+
+    const allowedFields = ['otp', 'paymentMethod', 'isPaid'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!otp || !/^\d{6}$/.test(otp)) {
+        errors.push('OTP must be exactly 6 digits');
+    }
+
+    const validPaymentMethods = ['cash', 'upi', 'bank', 'will_pay_later'];
+    if (!paymentMethod || !validPaymentMethods.includes(paymentMethod)) {
+        errors.push(`paymentMethod is required. Allowed: ${validPaymentMethods.join(', ')}`);
+    }
+
+    if (typeof isPaid !== 'boolean') {
+        errors.push('isPaid must be a boolean');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for resending an OTP — 'start' (staff-only, sent to hospital's phone) or
+// 'end' (staff sent to staff's phone)
+const validateResendOtp = (req, res, next) => {
+    const { otpType } = req.body;
+    const errors = [];
+
+    const allowedFields = ['otpType'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    const validOtpTypes = ['start', 'end'];
+    if (!otpType || !validOtpTypes.includes(otpType)) {
+        errors.push(`otpType is required. Allowed: ${validOtpTypes.join(', ')}`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
 
 
 
@@ -1008,35 +1145,35 @@ const validatePagination = (req, res, next) => {
 
 
 
-// Validation for review submission
+// Validation for review submission (hospital -> staff)
 const validateReviewSubmission = (req, res, next) => {
-    const { rating, comment, staffId } = req.body;
+    const { rating, review, duty_id } = req.body;
     const errors = [];
-    
+
     // Check for unexpected fields
-    const allowedFields = ['rating', 'comment', 'staffId'];
+    const allowedFields = ['rating', 'review', 'duty_id'];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
-    
+
     if (unexpectedFields.length > 0) {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
     }
-    
+
     // Rating validation
     if (rating === undefined || typeof rating !== 'number' || rating < 1 || rating > 5) {
         errors.push('Rating must be a number between 1 and 5');
     }
-    
-    // Comment validation
-    if (comment && (typeof comment !== 'string' || comment.length > 1000)) {
-        errors.push('Comment must be a string with maximum 1000 characters');
+
+    // Review validation
+    if (review && (typeof review !== 'string' || review.length > 1000)) {
+        errors.push('Review must be a string with maximum 1000 characters');
     }
-    
-    // Staff ID validation
-    if (!staffId || !/^[0-9a-fA-F]{24}$/.test(staffId)) {
-        errors.push('Valid staffId is required');
+
+    // Duty ID validation
+    if (!duty_id || !/^[0-9a-fA-F]{24}$/.test(duty_id)) {
+        errors.push('Valid duty_id is required');
     }
-    
+
     if (errors.length > 0) {
         return res.status(400).json({
             success: false,
@@ -1044,7 +1181,7 @@ const validateReviewSubmission = (req, res, next) => {
             errors: errors
         });
     }
-    
+
     next();
 };
 
@@ -1598,6 +1735,59 @@ const validateHospitalDutyRouteMap = (req, res, next) => {
 };
 
 
+// Phone OTP validators (profile creation flow) 
+const validateSendPhoneOTP = (req, res, next) => {
+    const { phoneNumber } = req.body;
+    const errors = [];
+
+    const allowedFields = ['phoneNumber'];
+    const unexpected = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpected.length > 0) {
+        errors.push(`Unexpected fields: ${unexpected.join(', ')}`);
+    }
+
+    if (!phoneNumber || phoneNumber.trim().length === 0) {
+        errors.push('Phone number is required');
+    } else if (!/^\+91\s?[6-9]\d{9}$/.test(phoneNumber.trim())) {
+        errors.push('Phone number must be a valid Indian mobile number starting with +91');
+    }
+
+    if (errors.length > 0) {
+        throw new ValidationError(errors.join(', '));
+    }
+
+    next();
+};
+
+
+
+
+const validateVerifyPhoneOTP = (req, res, next) => {
+    const { phoneNumber, otp } = req.body;
+    const errors = [];
+
+    const allowedFields = ['phoneNumber', 'otp'];
+    const unexpected = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpected.length > 0) {
+        errors.push(`Unexpected fields: ${unexpected.join(', ')}`);
+    }
+
+    if (!phoneNumber || phoneNumber.trim().length === 0) {
+        errors.push('Phone number is required');
+    } else if (!/^\+91\s?[6-9]\d{9}$/.test(phoneNumber.trim())) {
+        errors.push('Phone number must be a valid Indian mobile number starting with +91');
+    }
+
+    if (!otp || !/^\d{6}$/.test(otp)) {
+        errors.push('OTP must be exactly 6 digits');
+    }
+
+    if (errors.length > 0) {
+        throw new ValidationError(errors.join(', '));
+    }
+
+    next();
+};
 
 
 module.exports = {
@@ -1617,6 +1807,10 @@ module.exports = {
     validateNearbyStaff,
     validateDutyAcceptance,
     validateDutyStatusChange,
+    validateRequestStartOtp,
+    validateVerifyStartOtp,
+    validateVerifyEndOtp,
+    validateResendOtp,
     validateDutyCancellation,
     validateDutyEdit,
     validatePagination,
@@ -1634,5 +1828,7 @@ module.exports = {
     validateDashboardLocationPermission,
     validateDashboardLocationUpdate,
     validateHospitalActiveDutiesQuery,
-    validateHospitalDutyRouteMap
+    validateHospitalDutyRouteMap,
+    validateSendPhoneOTP,
+    validateVerifyPhoneOTP
 };

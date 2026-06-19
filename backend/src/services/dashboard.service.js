@@ -3,6 +3,11 @@ const Duty = require('../models/Duty');
 const { getCurrentIST } = require('../utils/helpers');
 const redisClient = require('../config/redis');
 const geocodingService = require('./geocoding.service');
+const {
+    ValidationError,
+    NotFoundError,
+    ForbiddenError
+} = require('../middleware/error.middleware');
 
 class DashboardService {
     // Get staff overview — rating with month-over-month growth
@@ -11,7 +16,7 @@ class DashboardService {
             .select('averageRating totalRatings');
 
         if (!medicalStaff) {
-            throw new Error('Medical staff profile not found');
+            throw new NotFoundError('Medical staff profile not found');
         }
 
         const now = getCurrentIST();
@@ -106,7 +111,7 @@ class DashboardService {
     async getUpcomingDuties(userId) {
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {
-            throw new Error('Medical staff profile not found');
+            throw new NotFoundError('Medical staff profile not found');
         }
 
         const now = getCurrentIST();
@@ -200,7 +205,7 @@ class DashboardService {
     async getAvailabilityStatus(userId) {
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {
-            throw new Error('Medical staff profile not found');
+            throw new NotFoundError('Medical staff profile not found');
         }
 
         return {
@@ -248,7 +253,7 @@ class DashboardService {
 
         const permitted = await this.isDashboardLocationPermitted(userId);
         if (!permitted) {
-            throw new Error('Location permission not granted');
+            throw new ForbiddenError('Location permission not granted');
         }
 
         const client = await redisClient.getClientAsync();
@@ -289,39 +294,22 @@ class DashboardService {
         };
     }
 
-    // Get staff location with fallback logic (used by duty-assignment features)
+    // Get staff location for duties using only dashboard websocket location.
     async getStaffLocationForDuties(userId) {
         try {
             const location = await this.getDashboardLocation(userId);
 
-            if (location) {
-                return {
-                    location,
-                    source: 'websocket',
-                    permissionGranted: true
-                };
-            }
-
-            // Fallback to profile location
-            const staff = await MedicalStaff.findOne({ user: userId })
-                .select('coordinates')
-                .lean();
-
-            if (!staff || !staff.coordinates || !staff.coordinates.coordinates) {
-                throw new Error('Staff location not found. Please grant location permission on the dashboard.');
+            if (!location) {
+                throw new NotFoundError('Staff location not found. Please grant location permission on the dashboard.');
             }
 
             return {
-                location: {
-                    latitude: staff.coordinates.coordinates.latitude,
-                    longitude: staff.coordinates.coordinates.longitude,
-                    source: 'profile'
-                },
-                source: 'profile',
-                permissionGranted: false
+                location,
+                source: 'websocket',
+                permissionGranted: true
             };
         } catch (error) {
-            throw new Error(`Failed to get staff location: ${error.message}`);
+            throw error;
         }
     }
 }

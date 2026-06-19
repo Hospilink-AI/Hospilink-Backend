@@ -354,6 +354,25 @@ class ActivityLogEmitter {
     }
 
     
+    // Log admin override of duty status
+    async logDutyStatusOverridden(duty, admin, fromStatus, toStatus, reason, req) {
+        const actor = {
+            userId: admin._id || admin.id,
+            name: admin.name,
+            role: 'admin',
+            email: admin.email
+        };
+
+        const details = {
+            fromStatus,
+            toStatus,
+            reason
+        };
+
+        return this.emitDutyActivity(ACTIVITY_ACTIONS.DUTY_STATUS_OVERRIDDEN, duty, actor, details, req);
+    }
+
+    
     // Log document verification
     async logDocumentVerification(document, admin, verified, req) {
         const action = verified ? ACTIVITY_ACTIONS.DOCUMENT_VERIFIED_BY_ADMIN : ACTIVITY_ACTIONS.DOCUMENT_REJECTED_BY_ADMIN;

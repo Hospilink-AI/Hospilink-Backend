@@ -24,9 +24,21 @@ const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
 const notificationEmitter = require('./notificationEmitter');
 const s3Service = require('./s3.service');
+const OTPService = require('./otp.service');
+const SMSService = require('./sms.service');
+const { isWithinGeofence, GEOFENCE_RADIUS_KM } = require('./geofence.service');
+const {
+    AppError,
+    ValidationError,
+    NotFoundError,
+    ConflictError,
+    ForbiddenError,
+    UnprocessableEntityError
+} = require('../middleware/error.middleware');
 
 // Per-duty Redis lock TTL in seconds — prevents thundering herd
 const DUTY_ACCEPT_LOCK_TTL = 10;
+const LOCATION_UPDATE_MAX_AGE_MS = parseInt(process.env.STAFF_LOCATION_MAX_AGE_MS, 10) || 90 * 1000;
 
 /**
  * Acquire a short-lived Redis lock for a specific duty acceptance attempt.
@@ -55,12 +67,35 @@ async function releaseDutyLock(dutyId, staffId) {
     }
 }
 
+async function getRecentStaffLocation(staffUserId) {
+    try {
+        const dashboardLocation = await DashboardService.getDashboardLocation(staffUserId);
+        if (!dashboardLocation || typeof dashboardLocation.latitude !== 'number' || typeof dashboardLocation.longitude !== 'number' || !dashboardLocation.updatedAt) {
+            return null;
+        }
+
+        const timestamp = Date.parse(dashboardLocation.updatedAt);
+        if (Number.isNaN(timestamp) || (Date.now() - timestamp) > LOCATION_UPDATE_MAX_AGE_MS) {
+            return null;
+        }
+
+        return {
+            latitude: dashboardLocation.latitude,
+            longitude: dashboardLocation.longitude,
+            timestamp,
+            source: dashboardLocation.source || 'websocket'
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
 class DutyService {
     async createDuty(dutyData, userId) {
         // Find the hospital profile for this user
         const hospital = await Hospital.findOne({ user: userId });
         if (!hospital) {
-            throw new Error('Hospital profile not found. Please complete your profile first.');
+            throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
         }
 
         // Additional server-side validation (double-check)
@@ -77,7 +112,7 @@ class DutyService {
         const bufferTime = new Date(dutyStartTime.getTime() - 15 * 60 * 1000);
 
         if (bufferTime <= now) {
-            throw new Error('Duty start time must be at least 15 minutes in the future. Cannot create duties for past or immediate times.');
+            throw new ValidationError('Duty start time must be at least 15 minutes in the future. Cannot create duties for past or immediate times.');
         }
 
         const duty = await Duty.create({
@@ -117,7 +152,7 @@ class DutyService {
             const next = new Date(d);
             next.setDate(next.getDate() + 1);
             match.date = { $gte: d, $lt: next };
-        // Date range filter
+            // Date range filter
         } else if (startDate || endDate) {
             match.date = {};
             if (startDate) match.date.$gte = new Date(startDate);
@@ -133,7 +168,7 @@ class DutyService {
         if (status) {
             // If status is provided, validate it's one of the active statuses
             if (!activeStatuses.includes(status)) {
-                throw new Error('Invalid status. Only available, assigned, enroute, in-progress are allowed');
+                throw new ValidationError('Invalid status. Only available, assigned, enroute, in-progress are allowed');
             }
             match.status = status;
         } else {
@@ -199,19 +234,19 @@ class DutyService {
     // Duty history for hospital — shows only completed, cancelled, expired, incomplete statuses
     async getDutyHistory({ hospitalUserId, date, startDate, endDate, status, staffRole, page = 1, limit = 10 }) {
         const { skip } = getPaginationParams(page, limit);
-    
+
         const hospital = await Hospital.findOne({ user: hospitalUserId });
         if (!hospital) return { duties: [], pagination: getPaginationMeta(0, page, limit) };
-    
+
         const match = { hospital: hospital._id };
-    
+
         // Single date filter
         if (date) {
             const d = new Date(date);
             const next = new Date(d);
             next.setDate(next.getDate() + 1);
             match.date = { $gte: d, $lt: next };
-        // Date range filter
+            // Date range filter
         } else if (startDate || endDate) {
             match.date = {};
             if (startDate) match.date.$gte = new Date(startDate);
@@ -221,22 +256,22 @@ class DutyService {
                 match.date.$lt = end;
             }
         }
-    
+
         // Only show historical statuses for duties-history endpoint
         const historicalStatuses = ['completed', 'cancelled', 'expired', 'incomplete'];
         if (status) {
             // If status is provided, validate it's one of the historical statuses
             if (!historicalStatuses.includes(status)) {
-                throw new Error('Invalid status. Only completed, cancelled, expired, incomplete are allowed');
+                throw new ValidationError('Invalid status. Only completed, cancelled, expired, incomplete are allowed');
             }
             match.status = status;
         } else {
             // Default to showing only historical statuses
             match.status = { $in: historicalStatuses };
         }
-    
+
         if (staffRole) match.staffRole = staffRole;
-    
+
         const [duties, total] = await Promise.all([
             Duty.find(match)
                 .populate({
@@ -250,7 +285,7 @@ class DutyService {
                 .limit(parseInt(limit)),
             Duty.countDocuments(match)
         ]);
-    
+
         const formatted = await Promise.all(duties.map(async (duty) => {
             const staff = duty.assignedTo;
             const hoursCompleted = calculateDutyDuration(
@@ -295,7 +330,7 @@ class DutyService {
                 cancellation: duty.cancellation || null
             };
         }));
-    
+
         return {
             duties: formatted,
             pagination: getPaginationMeta(total, parseInt(page), parseInt(limit))
@@ -310,7 +345,7 @@ class DutyService {
         // (e.g. double-tap, network retry) within the lock window.
         const staffLockAcquired = await acquireDutyLock(dutyId, userId.toString());
         if (!staffLockAcquired) {
-            throw new Error('Your acceptance request is already being processed. Please wait.');
+            throw new ConflictError('Your acceptance request is already being processed. Please wait.');
         }
 
         // Use a MongoDB session for the overlap check + atomic claim so both
@@ -325,7 +360,7 @@ class DutyService {
                 // ── 1. Load staff profile ─────────────────────────────────────
                 const medicalStaff = await MedicalStaff.findOne({ user: userId }).session(session);
                 if (!medicalStaff) {
-                    throw new Error('Medical staff profile not found. Please complete your profile first.');
+                    throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
                 }
 
                 // ── 2. Load duty for validation ───────────────────────────────
@@ -334,20 +369,20 @@ class DutyService {
                     .session(session);
 
                 if (!duty) {
-                    throw new Error('Duty not found');
+                    throw new NotFoundError('Duty not found');
                 }
 
                 // ── 3. Role check ─────────────────────────────────────────────
                 const normalizedStaffRole = normalizeRole(medicalStaff.jobRole);
-                const normalizedDutyRole  = normalizeRole(duty.staffRole);
+                const normalizedDutyRole = normalizeRole(duty.staffRole);
 
                 if (normalizedStaffRole !== normalizedDutyRole) {
-                    throw new Error(`Role mismatch: This duty requires a ${duty.staffRole}, but your profile shows ${medicalStaff.jobRole}`);
+                    throw new ForbiddenError(`Role mismatch: This duty requires a ${duty.staffRole}, but your profile shows ${medicalStaff.jobRole}`);
                 }
 
                 // ── 4. Status check ───────────────────────────────────────────
                 if (duty.status !== 'available') {
-                    throw new Error('Duty is no longer available');
+                    throw new ConflictError('Duty is no longer available');
                 }
 
                 // ── 5. Start time check ───────────────────────────────────────
@@ -358,7 +393,7 @@ class DutyService {
                 dutyStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
 
                 if (now >= dutyStartTime) {
-                    throw new Error('Cannot accept duty after start time.');
+                    throw new UnprocessableEntityError('Cannot accept duty after start time.');
                 }
 
                 // ── 6. Overlap check (inside transaction = consistent read) ───
@@ -375,7 +410,7 @@ class DutyService {
 
                 for (const existingDuty of existingDuties) {
                     if (doDutiesOverlap(duty, existingDuty)) {
-                        throw new Error(
+                        throw new ConflictError(
                             `Time conflict: You already have a duty from ${existingDuty.startTime} to ${existingDuty.endTime}. ` +
                             `New duty from ${duty.startTime} to ${duty.endTime} overlaps.`
                         );
@@ -409,7 +444,7 @@ class DutyService {
                 ).populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } });
 
                 if (!claimedDuty) {
-                    throw new Error('Duty is no longer available');
+                    throw new ConflictError('Duty is no longer available');
                 }
 
             }); // transaction auto-commits or auto-aborts
@@ -592,7 +627,7 @@ class DutyService {
         // Find the medical staff profile for this user
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {
-            throw new Error('Medical staff profile not found. Please complete your profile first.');
+            throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
         }
 
         const duty = await Duty.findById(dutyId)
@@ -605,37 +640,24 @@ class DutyService {
             });
 
         if (!duty) {
-            throw new Error('Duty not found');
+            throw new NotFoundError('Duty not found');
         }
 
         // Validate staff assignment
         const validation = duty.canChangeStatus(newStatus, medicalStaff._id);
         if (!validation.allowed) {
-            throw new Error(validation.reason);
+            if (validation.reason.includes('assigned to you')) {
+                throw new ForbiddenError(validation.reason);
+            }
+            throw new ValidationError(validation.reason);
         }
 
         // Additional timing validations
         if (newStatus === 'enroute') {
             if (duty.status !== 'assigned') {
-                throw new Error('Duty must be assigned before marking enroute');
+                throw new ValidationError('Duty must be assigned before marking enroute');
             }
             duty.enrouteAt = getCurrentIST();
-        }
-
-        if (newStatus === 'in-progress') {
-            const startValidation = duty.canStartDuty();
-            if (!startValidation.allowed) {
-                throw new Error(startValidation.reason);
-            }
-            duty.startedAt = getCurrentIST();
-        }
-
-        if (newStatus === 'completed') {
-            const completeValidation = duty.canCompleteDuty();
-            if (!completeValidation.allowed) {
-                throw new Error(completeValidation.reason);
-            }
-            duty.completedAt = getCurrentIST();
         }
 
         // Update status and add to history
@@ -665,6 +687,7 @@ class DutyService {
 
 
 
+
     async getDutyStatusHistory(dutyId, userId, userRole) {
         // Find the medical staff profile for this user (if staff)
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
@@ -683,21 +706,21 @@ class DutyService {
             });
 
         if (!duty) {
-            throw new Error('Duty not found');
+            throw new NotFoundError('Duty not found');
         }
 
         // Authorization check
         if (userRole === 'staff') {
             if (!medicalStaff) {
-                throw new Error('Medical staff profile not found');
+                throw new NotFoundError('Medical staff profile not found');
             }
             if (!duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
-                throw new Error('You can only view status history for duties assigned to you');
+                throw new ForbiddenError('You can only view status history for duties assigned to you');
             }
         } else if (userRole === 'hospital') {
             const hospital = await Hospital.findOne({ user: userId });
             if (!hospital || duty.hospital._id.toString() !== hospital._id.toString()) {
-                throw new Error('You can only view status history for your own duties');
+                throw new ForbiddenError('You can only view status history for your own duties');
             }
         }
 
@@ -716,7 +739,7 @@ class DutyService {
 
 
 
-    async autoCompleteDuties() {
+    async moveDutiesToPendingConfirmation() {
         // Use getCurrentIST() for consistent time handling
         const istNow = getCurrentIST();
 
@@ -734,7 +757,10 @@ class DutyService {
 
         // Prepare bulk operations
         const bulkOps = [];
-        const dutiesForNotification = []; // Track duties that will be completed
+        const dutiesForNotification = []; // Track duties that will move to pending-confirmation
+
+        // Grace period after scheduled end time before a non-verified duty moves to pending-confirmation
+        const graceMinutes = parseInt(process.env.PENDING_CONFIRMATION_GRACE_MINUTES) || 30;
 
         for (const duty of dutiesToComplete) {
             // Create proper Date objects for duty end time in IST
@@ -746,25 +772,25 @@ class DutyService {
             const istDutyEndTime = new Date(istDutyDate);
             istDutyEndTime.setHours(endHours, endMinutes, 0, 0);
 
-            // Add 15 minutes grace period
-            const gracePeriodEndTime = new Date(istDutyEndTime.getTime() + 15 * 60 * 1000);
+            const gracePeriodEndTime = new Date(istDutyEndTime.getTime() + graceMinutes * 60 * 1000);
 
-            // Only complete if current IST time is past the grace period AND status is still 'in-progress'
-            if (istNow >= gracePeriodEndTime && duty.status === 'in-progress') {
+            // Only move to pending-confirmation if past the grace period, still 'in-progress',
+            // and the hospital hasn't already verified the end OTP
+            if (istNow >= gracePeriodEndTime && duty.status === 'in-progress' && duty.endOtp.status !== 'VERIFIED') {
                 bulkOps.push({
                     updateOne: {
                         filter: { _id: duty._id, status: 'in-progress' },
                         update: {
                             $set: {
-                                status: 'completed',
-                                completedAt: istNow
+                                status: 'pending-confirmation',
+                                pendingConfirmationAt: istNow
                             },
                             $push: {
                                 statusHistory: {
-                                    status: 'completed',
+                                    status: 'pending-confirmation',
                                     timestamp: istNow,
                                     changedBy: 'system',
-                                    reason: 'Automatically completed (not manually completed within 15 minutes after end time)'
+                                    reason: `Moved to pending-confirmation — hospital did not verify end OTP within ${graceMinutes} minutes of scheduled end time`
                                 }
                             }
                         }
@@ -777,36 +803,40 @@ class DutyService {
         }
 
         // Execute bulk operations if any
-        let completedCount = 0;
+        let movedCount = 0;
         if (bulkOps.length > 0) {
             const result = await Duty.bulkWrite(bulkOps);
-            completedCount = result.modifiedCount;
+            movedCount = result.modifiedCount;
 
-            // Send notifications for auto-completed duties
-            if (completedCount > 0 && dutiesForNotification.length > 0) {
+            // Send notifications for duties moved to pending-confirmation
+            if (movedCount > 0 && dutiesForNotification.length > 0) {
                 for (const duty of dutiesForNotification) {
                     try {
                         // Get staff details
                         const staff = await MedicalStaff.findById(duty.assignedTo._id || duty.assignedTo)
                             .populate('user', 'name');
 
-                        if (staff && duty.hospital && duty.hospital.user) {
+                        if (staff && staff.user && duty.hospital && duty.hospital.user) {
                             const hospitalUserId = duty.hospital.user._id?.toString() || duty.hospital.user.toString();
+                            const staffUserId = staff.user._id?.toString() || staff.user.toString();
 
-                            // Emit duty completed notification to hospital
-                            await notificationEmitter.emitDutyCompleted(duty, staff, hospitalUserId);
-                            console.log(`Auto-complete notification sent for duty ${duty._id}`);
+                            // Notify hospital (please confirm) and staff (free to accept new duties)
+                            await notificationEmitter.emitDutyPendingConfirmation(duty, staff, hospitalUserId, staffUserId);
+                            console.log(`Pending-confirmation notification sent for duty ${duty._id}`);
                         }
                     } catch (notifError) {
-                        console.error(`Error sending auto-complete notification for duty ${duty._id}:`, notifError);
+                        console.error(`Error sending pending-confirmation notification for duty ${duty._id}:`, notifError);
                         // Continue with other notifications even if one fails
                     }
                 }
             }
         }
 
-        return completedCount;
+        return movedCount;
     }
+
+
+
 
 
 
@@ -1041,12 +1071,12 @@ class DutyService {
     async getOngoingDutiesForStaff(userId) {
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {
-            throw new Error('Medical staff profile not found');
+            throw new NotFoundError('Medical staff profile not found');
         }
 
         const duties = await Duty.find({
             assignedTo: medicalStaff._id,
-            status: { $in: ['assigned', 'enroute', 'in-progress'] }
+            status: { $in: ['enroute', 'in-progress'] }
         })
             .populate({
                 path: 'hospital',
@@ -1065,17 +1095,17 @@ class DutyService {
         // Find the hospital profile for this user
         const hospital = await Hospital.findOne({ user: userId });
         if (!hospital) {
-            throw new Error('Hospital profile not found. Please complete your profile first.');
+            throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
         }
 
         const duty = await Duty.findById(dutyId);
         if (!duty) {
-            throw new Error('Duty not found');
+            throw new NotFoundError('Duty not found');
         }
 
         // Verify this duty belongs to the requesting hospital
         if (duty.hospital.toString() !== hospital._id.toString()) {
-            throw new Error('You can only edit your own duties');
+            throw new ForbiddenError('You can only edit your own duties');
         }
 
         const isEmergencyOrCritical = duty.urgency === 'emergency';
@@ -1086,7 +1116,7 @@ class DutyService {
         if (isEmergencyOrCritical && isPricingOnlyUpdate) {
             const pricingValidation = duty.canEditPricing();
             if (!pricingValidation.allowed) {
-                throw new Error(pricingValidation.reason);
+                throw new ValidationError(pricingValidation.reason);
             }
             duty.offeredRate = updateData.offeredRate;
             await duty.save();
@@ -1099,9 +1129,9 @@ class DutyService {
         if (!editValidation.allowed) {
             // For emergency duties that are still available, suggest pricing-only edit
             if (isEmergencyOrCritical && duty.status === 'available') {
-                throw new Error('Emergency duties can only have their pricing edited within 30 minutes of start time. Use offeredRate only.');
+                throw new ValidationError('Emergency duties can only have their pricing edited within 30 minutes of start time. Use offeredRate only.');
             }
-            throw new Error(editValidation.reason);
+            throw new ValidationError(editValidation.reason);
         }
 
         // Validate and update allowed fields
@@ -1128,7 +1158,7 @@ class DutyService {
             newStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
             const bufferTime = new Date(newStartTime.getTime() - 15 * 60 * 1000);
             if (bufferTime <= now) {
-                throw new Error('New start time must be at least 15 minutes in the future');
+                throw new ValidationError('New start time must be at least 15 minutes in the future');
             }
         }
 
@@ -1170,7 +1200,7 @@ class DutyService {
             .populate('statusHistory.changedBy', 'name email role');
 
         if (!duty) {
-            throw new Error('Duty not found');
+            throw new NotFoundError('Duty not found');
         }
 
         // Role-based authorization
@@ -1180,7 +1210,7 @@ class DutyService {
             // Find medical staff profile
             const medicalStaff = await MedicalStaff.findOne({ user: userId });
             if (!medicalStaff) {
-                throw new Error('Medical staff profile not found');
+                throw new NotFoundError('Medical staff profile not found');
             }
 
             // Staff can view available duties OR duties assigned to them
@@ -1191,11 +1221,11 @@ class DutyService {
             const isExpired = duty.status === 'expired';
 
             if (!isAssigned && !isAvailable) {
-                throw new Error('Access denied: You can only view available duties or duties assigned to you');
+                throw new ForbiddenError('Access denied: You can only view available duties or duties assigned to you');
             }
 
             if (isExpired) {
-                throw new Error('Access denied: This duty has expired and is no longer available');
+                throw new ForbiddenError('Access denied: This duty has expired and is no longer available');
             }
 
             // Add distance information for staff members only (always show distance)
@@ -1326,23 +1356,23 @@ class DutyService {
             // Find hospital profile
             const hospital = await Hospital.findOne({ user: userId });
             if (!hospital) {
-                throw new Error('Hospital profile not found');
+                throw new NotFoundError('Hospital profile not found');
             }
 
             // Hospital can only view their own duties
             if (duty.hospital._id.toString() !== hospital._id.toString()) {
-                throw new Error('Access denied: You can only view your hospital duties');
+                throw new ForbiddenError('Access denied: You can only view your hospital duties');
             }
 
             // Add distance/time ONLY when duty is assigned (accepted by staff)
-            const shouldShowDistance = duty.status === 'assigned' || 
-                                    duty.status === 'enroute' || 
-                                    duty.status === 'in-progress';
+            const shouldShowDistance = duty.status === 'assigned' ||
+                duty.status === 'enroute' ||
+                duty.status === 'in-progress';
 
             if (shouldShowDistance && duty.assignedTo && duty.assignedTo.user) {
                 try {
                     console.log(`Hospital viewing assigned duty ${duty._id} - calculating staff distance`);
-                    
+
                     // Get assigned staff's real-time location
                     const locationInfo = await DashboardService.getStaffLocationForDuties(duty.assignedTo.user._id);
                     const staffLat = locationInfo.location.latitude;
@@ -1401,7 +1431,7 @@ class DutyService {
         } else if (userRole === 'admin') {
             // Admin can view any duty — fall through to return below
         } else {
-            throw new Error('Access denied: insufficient role to view duty details');
+            throw new ForbiddenError('Access denied: insufficient role to view duty details');
         }
 
         // For hospital users (or when distance calculation fails), add review data and return
@@ -1442,7 +1472,7 @@ class DutyService {
             // Get staff information for role filtering
             const staff = await MedicalStaff.findOne({ user: staffId });
             if (!staff) {
-                throw new Error('Staff profile not found');
+                throw new NotFoundError('Staff profile not found');
             }
 
             console.log(`Processing available duties for staff ${staffId}:`, {
@@ -1562,7 +1592,7 @@ class DutyService {
             };
         } catch (error) {
             console.error('Error in getAvailableJobsWithDistance:', error.message);
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -1574,12 +1604,12 @@ class DutyService {
             const duty = await Duty.findById(dutyId).populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates');
 
             if (!duty) {
-                throw new Error('Duty not found');
+                throw new NotFoundError('Duty not found');
             }
 
             // Add proper null check before accessing location properties
             if (!currentLocation || !currentLocation.latitude || !currentLocation.longitude) {
-                throw new Error('Staff location is required to get route information. Please enable location in your dashboard or update your profile location.');
+                throw new ValidationError('Staff location is required to get route information. Please enable location in your dashboard or update your profile location.');
             }
 
             const staffLat = currentLocation.latitude;
@@ -1591,7 +1621,7 @@ class DutyService {
                 !duty.hospital.coordinates.coordinates.latitude ||
                 !duty.hospital.coordinates.coordinates.longitude) {
 
-                throw new Error('Hospital location not found');
+                throw new NotFoundError('Hospital location not found');
             }
 
             //  Access named coordinates
@@ -1653,36 +1683,40 @@ class DutyService {
                 };
             } catch (error) {
                 console.error('Directions API failed:', error.message);
-                throw new Error(`Unable to get route information: ${error.message}`);
+                throw new AppError('Unable to get route information. Please try again.', 503);
             }
         } catch (error) {
-            throw new Error(error.message);
+            throw error;
         }
     }
 
 
 
-    async getCompletedDutiesForStaff(staffUserId, page = 1, limit = 10) {
+    async getCompletedDutiesForStaff(staffUserId, page = 1, limit = 10, statusFilter = null) {
+        const TERMINAL_STATUSES = ['completed', 'cancelled', 'incomplete'];
+
+        if (statusFilter && !TERMINAL_STATUSES.includes(statusFilter)) {
+            throw new ValidationError(`Invalid status filter. Allowed values: ${TERMINAL_STATUSES.join(', ')}`);
+        }
+
         try {
-            // Find the medical staff profile for this user
             const staff = await MedicalStaff.findOne({ user: staffUserId });
             if (!staff) {
-                throw new Error('Medical staff profile not found');
+                throw new NotFoundError('Medical staff profile not found');
             }
 
-            // Import pagination utilities
             const paginationParams = getPaginationParams(page, limit);
 
-            // Get total count for pagination metadata
+            const statusQuery = statusFilter ? statusFilter : { $in: TERMINAL_STATUSES };
+
             const totalDuties = await Duty.countDocuments({
                 assignedTo: staff._id,
-                status: 'completed'
+                status: statusQuery
             });
 
-            // Find completed duties with pagination
             const duties = await Duty.find({
                 assignedTo: staff._id,
-                status: 'completed'
+                status: statusQuery
             })
                 .populate('hospital', 'hospitalLegalName currentAddress city state pincode')
                 .populate({
@@ -1692,29 +1726,26 @@ class DutyService {
                         select: 'name email role'
                     }
                 })
-                .sort({ completedAt: -1 }) // Most recent first
+                .sort({ completedAt: -1, cancelledAt: -1, expiredAt: -1, incompleteAt: -1 })
                 .skip(paginationParams.skip)
                 .limit(paginationParams.limit);
 
-            // Fetch reviews for these duties in single query (optimized)
+            // Fetch reviews for completed duties only (in single batch query)
             const dutyIds = duties.map(duty => duty._id);
             const reviews = await Review.find({
                 duty: { $in: dutyIds }
             }).select('duty rating review createdAt');
 
-            // Create lookup map for O(1) access
             const reviewMap = {};
             reviews.forEach(review => {
                 reviewMap[review.duty.toString()] = review;
             });
 
-            // Calculate summary statistics
             let totalHours = 0;
             let totalEarnings = 0;
             let lastDutyDate = null;
 
             const dutiesWithDetails = duties.map(duty => {
-                // Calculate duration for this duty
                 const duration = calculateDutyDuration(
                     duty.date,
                     duty.startTime,
@@ -1723,12 +1754,16 @@ class DutyService {
                     duty.endDate
                 );
 
-                totalHours += duration;
-                totalEarnings += duty.totalPayment || 0;
+                // Only accumulate hours and earnings for completed duties
+                if (duty.status === 'completed') {
+                    totalHours += duration;
+                    totalEarnings += duty.totalPayment || 0;
+                }
 
-                // Track the most recent duty date
-                if (!lastDutyDate || duty.completedAt > lastDutyDate) {
-                    lastDutyDate = duty.completedAt;
+                // Use the most relevant status timestamp for lastDutyDate
+                const dutyTimestamp = duty.completedAt || duty.cancelledAt || duty.expiredAt || duty.incompleteAt;
+                if (!lastDutyDate || dutyTimestamp > lastDutyDate) {
+                    lastDutyDate = dutyTimestamp;
                 }
 
                 return {
@@ -1736,6 +1771,7 @@ class DutyService {
                     hospital: duty.hospital,
                     assignedTo: duty.assignedTo,
                     staffRole: duty.staffRole,
+                    dutySubType: duty.dutySubType,
                     status: duty.status,
                     date: duty.date,
                     endDate: duty.endDate,
@@ -1754,7 +1790,11 @@ class DutyService {
                         duty.endDate
                     ),
                     assignedAt: duty.assignedAt,
-                    completedAt: duty.completedAt,
+                    completedAt: duty.completedAt || null,
+                    cancelledAt: duty.cancelledAt || null,
+                    expiredAt: duty.expiredAt || null,
+                    incompleteAt: duty.incompleteAt || null,
+                    cancellation: duty.cancellation || null,
                     statusHistory: duty.statusHistory,
                     rating: reviewMap[duty._id.toString()] ? {
                         rating: reviewMap[duty._id.toString()].rating,
@@ -1776,7 +1816,7 @@ class DutyService {
             };
 
         } catch (error) {
-            throw new Error(`Error fetching completed duties: ${error.message}`);
+            throw error;
         }
     }
 
@@ -1790,7 +1830,7 @@ class DutyService {
         // ========= RECEIPT =========
         if (dutyId) {
             const duty = duties.find(d => d._id.toString() === dutyId);
-            if (!duty) throw new Error('Duty not found');
+            if (!duty) throw new NotFoundError('Duty not found');
 
             const receiptData = {
                 staff: {
@@ -1811,6 +1851,11 @@ class DutyService {
                     startTime: duty.startTime,
                     endTime: duty.endTime,
                     duration: `${duty.duration}`
+                },
+                payment: {
+                    method: duty.paymentMethod || 'Unconfirmed',
+                    status: duty.isPaid === true ? 'Paid' : duty.isPaid === false ? 'Will Pay Later' : 'Unconfirmed by hospital',
+                    attestedAt: duty.paymentAttestedAt || null
                 }
             };
 
@@ -1972,7 +2017,7 @@ class DutyService {
             // Add role filter if specified
             if (role) {
                 if (!ALLOWED_ROLES.includes(role)) {
-                    throw new Error(`Invalid role: ${role}`);
+                    throw new ValidationError(`Invalid role: ${role}`);
                 }
                 query.staffRole = role;
             }
@@ -1981,7 +2026,7 @@ class DutyService {
             if (status) {
                 const allowedStatuses = ['assigned', 'enroute', 'in-progress'];
                 if (!allowedStatuses.includes(status)) {
-                    throw new Error(`Invalid status: ${status}`);
+                    throw new ValidationError(`Invalid status: ${status}`);
                 }
                 query.status = status;
             }
@@ -2070,16 +2115,16 @@ class DutyService {
                 .populate('hospital', 'hospitalLegalName location currentAddress coordinates');
 
             if (!duty) {
-                throw new Error('Duty not found or does not belong to your hospital');
+                throw new NotFoundError('Duty not found or does not belong to your hospital');
             }
 
             // Verify duty is in active state
             if (!['assigned', 'enroute', 'in-progress'].includes(duty.status)) {
-                throw new Error('Duty is not in active state');
+                throw new ValidationError('Duty is not in active state');
             }
 
             if (!duty.assignedTo) {
-                throw new Error('Duty is not assigned to any staff');
+                throw new ValidationError('Duty is not assigned to any staff');
             }
 
             // Use hospital-specific route formatting (not admin service)
@@ -2131,7 +2176,7 @@ class DutyService {
             }
 
             if (!currentLocation) {
-                throw new Error('Unable to determine staff location');
+                throw new ValidationError('Unable to determine staff location');
             }
 
             // Get route information
@@ -2169,7 +2214,7 @@ class DutyService {
                     avgRating: staff.averageRating || 0,
                     address: staff.currentAddress ? `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : `${staff.city}, ${staff.state} - ${staff.pincode}`,
                     currentAddress: staff.currentAddress,
-                    city: staff.city, 
+                    city: staff.city,
                     state: staff.state,
                     pincode: staff.pincode,
                     location: {
@@ -2366,43 +2411,43 @@ class DutyService {
     }
 
 
-    
+
     async assignDutyByAdmin({ hospitalId, dutyId, staffId, adminId }) {
 
         // 1. Hospital validation
         const hospital = await Hospital.findById(hospitalId);
         if (!hospital) {
-            throw new Error('Hospital not found');
+            throw new NotFoundError('Hospital not found');
         }
 
         // 2. Duty validation
         const duty = await Duty.findById(dutyId);
         if (!duty) {
-            throw new Error('Duty not found');
+            throw new NotFoundError('Duty not found');
         }
 
         // 3. Check duty belongs to hospital
         if (duty.hospital.toString() !== hospitalId) {
-            throw new Error('Duty does not belong to this hospital');
+            throw new UnprocessableEntityError('Duty does not belong to this hospital');
         }
 
         // 4. Only one staff can take duty
         if (duty.status !== 'available') {
-            throw new Error('Duty is already assigned or not available');
+            throw new ConflictError('Duty is already assigned or not available');
         }
 
         // 5. Staff validation
         const staff = await MedicalStaff.findById(staffId);
         if (!staff) {
-            throw new Error('Medical staff not found');
+            throw new NotFoundError('Medical staff not found');
         }
 
-        // 6. Role match 
+        // 6. Role match
         const normalizedStaffRole = normalizeRole(staff.jobRole);
         const normalizedDutyRole = normalizeRole(duty.staffRole);
 
         if (normalizedStaffRole !== normalizedDutyRole) {
-            throw new Error(`Role mismatch: duty requires ${duty.staffRole}`);
+            throw new UnprocessableEntityError(`Role mismatch: duty requires ${duty.staffRole}`);
         }
 
         // 7. Time validation (same as hospital)
@@ -2415,7 +2460,7 @@ class DutyService {
         dutyStartTime.setHours(parseInt(startHours), parseInt(startMinutes), 0, 0);
 
         if (now >= dutyStartTime) {
-            throw new Error('Cannot assign duty after start time');
+            throw new UnprocessableEntityError('Cannot assign duty after start time');
         }
 
         // 8. Overlap check 
@@ -2430,7 +2475,7 @@ class DutyService {
 
         for (const existing of existingDuties) {
             if (doDutiesOverlap(duty, existing)) {
-                throw new Error('Staff already has overlapping duty');
+                throw new ConflictError('Staff already has overlapping duty');
             }
         }
 
@@ -2458,6 +2503,490 @@ class DutyService {
 
         return duty;
     }
+
+
+
+    // Staff taps "Get OTP to mark as in-progress" once they're within range of the hospital.
+    // Re-checks the geofence server-side against the submitted coordinates, mints a Start OTP,
+    // and sends it via SMS to the hospital's registered phone number. The hospital reads the
+    // code aloud to the staff member, who then submits it via verify-start-otp.
+    async requestStartOtp(dutyId, userId) {
+        const medicalStaff = await MedicalStaff.findOne({ user: userId });
+        if (!medicalStaff) {
+            throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
+        }
+
+        const duty = await Duty.findById(dutyId).populate('hospital');
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (!duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
+            throw new ForbiddenError('You can only request a start OTP for duties assigned to you');
+        }
+
+        // Idempotency: already verified and moved to in-progress
+        if (duty.status === 'in-progress' && duty.startOtp.status === 'VERIFIED') {
+            return { duty, alreadyInProgress: true, expiresAt: null };
+        }
+
+        if (duty.status !== 'enroute') {
+            throw new ValidationError('Duty must be enroute before requesting a start OTP');
+        }
+
+        if (duty.startOtp.status === 'LOCKED') {
+            throw new ForbiddenError('Start OTP is locked — contact admin support');
+        }
+
+        // Time-window guard: OTP can only be requested within ±bufferMinutes of scheduled start.
+        // Enforced at generation — never issue a code when the check-in window is closed.
+        const now = getCurrentIST();
+        const bufferMinutes = 15;
+        const [startHours, startMinutes] = duty.startTime.split(':').map(Number);
+        const istDutyDate = toIST(new Date(duty.date));
+        const scheduledStartTime = new Date(istDutyDate);
+        scheduledStartTime.setHours(startHours, startMinutes, 0, 0);
+
+        const windowStart = new Date(scheduledStartTime.getTime() - bufferMinutes * 60 * 1000);
+        const windowEnd   = new Date(scheduledStartTime.getTime() + bufferMinutes * 60 * 1000);
+
+        if (now < windowStart) {
+            const opensAt  = windowStart.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            const startsAt = scheduledStartTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            throw new ValidationError(
+                `Check-in window has not opened yet. You can request a start OTP from ${opensAt} (${bufferMinutes} minutes before your ${startsAt} duty start).`
+            );
+        }
+
+        if (now > windowEnd) {
+            const windowStartStr = windowStart.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            const windowEndStr   = windowEnd.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+            throw new ValidationError(
+                `Check-in window has closed. The start OTP window was ${windowStartStr} – ${windowEndStr}. Please contact admin if you need assistance.`
+            );
+        }
+
+        const hospitalLat = duty.hospital?.coordinates?.coordinates?.latitude;
+        const hospitalLng = duty.hospital?.coordinates?.coordinates?.longitude;
+        if (typeof hospitalLat !== 'number' || typeof hospitalLng !== 'number') {
+            throw new ValidationError('Hospital location is not configured — contact support');
+        }
+
+        const staffLocation = await getRecentStaffLocation(userId);
+        if (!staffLocation) {
+            throw new ValidationError('Unable to determine your current location. Ensure the app is online and sharing live GPS to the server.');
+        }
+
+        if (!isWithinGeofence(staffLocation.latitude, staffLocation.longitude, hospitalLat, hospitalLng)) {
+            const radiusMeters = Math.round(GEOFENCE_RADIUS_KM * 1000);
+            throw new ValidationError(`You must be within ${radiusMeters}m of the hospital to request a start OTP`);
+        }
+
+        const code = OTPService.generateOTP();
+        const expiryMinutes = parseInt(process.env.DUTY_START_OTP_EXPIRY_MINUTES) || 5;
+        const expiresAt = new Date(now.getTime() + expiryMinutes * 60 * 1000);
+
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: 'enroute' },
+            {
+                $set: {
+                    'startOtp.code': code,
+                    'startOtp.expiresAt': expiresAt,
+                    'startOtp.attempts': 0,
+                    'startOtp.status': 'PENDING',
+                    'startOtp.sentAt': now
+                }
+            },
+            { new: true }
+        );
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed — cannot request start OTP');
+        }
+
+        await this._sendHospitalOtpSms(duty.hospital, code, dutyId);
+
+        return { duty: updated, alreadyInProgress: false, expiresAt: updated.startOtp.expiresAt };
+    }
+
+
+
+    // Sends an OTP code to the staff member's own registered phone via SMS. Failures are
+    // logged but never thrown — OTP delivery issues shouldn't block the request/response.
+    async _sendStaffOtpSms(medicalStaff, code, dutyId, otpType) {
+        if (!medicalStaff?.phoneNumber) {
+            return;
+        }
+        try {
+            await SMSService.sendOTPSMS(medicalStaff.phoneNumber, code, medicalStaff.fullName);
+        } catch (smsError) {
+            console.error(`Error sending ${otpType} OTP SMS for duty ${dutyId}:`, smsError);
+        }
+    }
+
+    // Sends a Start OTP to the hospital's registered phone via SMS so the hospital can read
+    // it aloud to the arriving staff member. Failures are logged but never thrown.
+    async _sendHospitalOtpSms(hospital, code, dutyId) {
+        if (!hospital?.phoneNumber) {
+            return;
+        }
+        try {
+            await SMSService.sendOTPSMS(hospital.phoneNumber, code, hospital.hospitalLegalName);
+        } catch (smsError) {
+            console.error(`Error sending start OTP SMS to hospital for duty ${dutyId}:`, smsError);
+        }
+    }
+
+
+
+    // Staff submits the Start OTP (read out by the hospital) along with their current
+    // coordinates. Both the OTP and a fresh geofence check must pass to move 'enroute' ->
+    // 'in-progress'. Wrong OTP or out-of-range counts toward the shared lockout counter.
+    async verifyStartOtp(dutyId, userId, otp) {
+        const medicalStaff = await MedicalStaff.findOne({ user: userId });
+        if (!medicalStaff) {
+            throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
+        }
+
+        const duty = await Duty.findById(dutyId).populate('hospital');
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (!duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
+            throw new ForbiddenError('You can only verify OTP for duties assigned to you');
+        }
+
+        // Idempotency: already verified and moved to in-progress
+        if (duty.status === 'in-progress' && duty.startOtp.status === 'VERIFIED') {
+            return duty;
+        }
+
+        if (duty.status !== 'enroute') {
+            throw new ValidationError('Duty must be enroute before verifying start OTP');
+        }
+
+        if (duty.startOtp.status === 'LOCKED') {
+            throw new ForbiddenError('Start OTP is locked — contact admin support');
+        }
+
+        if (duty.startOtp.status !== 'PENDING' || !duty.startOtp.expiresAt || duty.startOtp.expiresAt <= getCurrentIST()) {
+            if (duty.startOtp.status === 'PENDING') {
+                await Duty.updateOne({ _id: dutyId }, { $set: { 'startOtp.status': 'EXPIRED' } });
+            }
+            throw new ValidationError('No active start OTP — move within range of the hospital to trigger one');
+        }
+
+        const hospitalLat = duty.hospital?.coordinates?.coordinates?.latitude;
+        const hospitalLng = duty.hospital?.coordinates?.coordinates?.longitude;
+        if (typeof hospitalLat !== 'number' || typeof hospitalLng !== 'number') {
+            throw new ValidationError('Hospital location is not configured — contact support');
+        }
+
+        const staffLocation = await getRecentStaffLocation(userId);
+        if (!staffLocation) {
+            throw new ValidationError('Unable to determine your current location. Ensure the app is online and sharing live GPS to the server.');
+        }
+
+        const geofenceOk = isWithinGeofence(staffLocation.latitude, staffLocation.longitude, hospitalLat, hospitalLng);
+        const otpOk = duty.startOtp.code === otp;
+
+        if (!geofenceOk || !otpOk) {
+            const attempts = duty.startOtp.attempts + 1;
+            const maxAttempts = parseInt(process.env.DUTY_OTP_MAX_ATTEMPTS) || 5;
+            const updateFields = { 'startOtp.attempts': attempts };
+            if (attempts >= maxAttempts) {
+                updateFields['startOtp.status'] = 'LOCKED';
+            }
+            await Duty.updateOne({ _id: dutyId }, { $set: updateFields });
+
+            const reasons = [];
+            if (!otpOk) reasons.push('incorrect OTP');
+            if (!geofenceOk) reasons.push('you are not within range of the hospital');
+
+            if (attempts >= maxAttempts) {
+                throw new ForbiddenError(`Verification failed (${reasons.join(' and ')}). Start OTP is now locked — contact admin support.`);
+            }
+            throw new ValidationError(`Verification failed: ${reasons.join(' and ')}. ${maxAttempts - attempts} attempt(s) remaining.`);
+        }
+
+        const now = getCurrentIST();
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: 'enroute' },
+            {
+                $set: {
+                    status: 'in-progress',
+                    startedAt: now,
+                    'startOtp.status': 'VERIFIED'
+                },
+                $push: {
+                    statusHistory: {
+                        status: 'in-progress',
+                        timestamp: now,
+                        changedBy: medicalStaff._id,
+                        reason: 'Start OTP verified — duty started'
+                    }
+                }
+            },
+            { new: true }
+        )
+            .populate({
+                path: 'hospital',
+                populate: { path: 'user', select: 'name email' }
+            })
+            .populate({
+                path: 'assignedTo',
+                populate: { path: 'user', select: 'name email' }
+            });
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed before verification could complete — please retry');
+        }
+
+        return updated;
+    }
+
+
+
+    // Staff requests an End OTP once the duty is in-progress and the scheduled end time has
+    // arrived. The code is sent via SMS to the staff's own registered phone number (never
+    // returned in the response) and read out to the hospital, who enters it via verifyEndOtp.
+    async requestEndOtp(dutyId, userId) {
+        const medicalStaff = await MedicalStaff.findOne({ user: userId });
+        if (!medicalStaff) {
+            throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
+        }
+
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (!duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
+            throw new ForbiddenError('You can only request an end OTP for duties assigned to you');
+        }
+
+        // Idempotency: an active OTP already exists — resend the same code via SMS
+        if (duty.status === 'in-progress' && duty.endOtp.status === 'PENDING' && duty.endOtp.expiresAt > getCurrentIST()) {
+            await this._sendStaffOtpSms(medicalStaff, duty.endOtp.code, dutyId, 'end');
+            return { expiresAt: duty.endOtp.expiresAt };
+        }
+
+        if (duty.endOtp.status === 'LOCKED') {
+            throw new ForbiddenError('End OTP is locked — contact admin support');
+        }
+
+        const validation = duty.canRequestEndOtp();
+        if (!validation.allowed) {
+            throw new ValidationError(validation.reason);
+        }
+
+        const code = OTPService.generateOTP();
+        const expiryMinutes = parseInt(process.env.DUTY_END_OTP_EXPIRY_MINUTES) || 30;
+        const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+        const now = getCurrentIST();
+
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: 'in-progress' },
+            {
+                $set: {
+                    'endOtp.code': code,
+                    'endOtp.expiresAt': expiresAt,
+                    'endOtp.attempts': 0,
+                    'endOtp.status': 'PENDING',
+                    'endOtp.sentAt': now
+                }
+            },
+            { new: true }
+        );
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed — cannot request end OTP');
+        }
+
+        await this._sendStaffOtpSms(medicalStaff, code, dutyId, 'end');
+
+        return { expiresAt: updated.endOtp.expiresAt };
+    }
+
+
+
+    // Hospital enters the End OTP (read out by the staff) along with a payment attestation
+    // (method + paid/unpaid). Moves 'in-progress'/'pending-confirmation' -> 'completed'.
+    async verifyEndOtp(dutyId, hospitalUserId, otp, paymentMethod, isPaid) {
+        const hospital = await Hospital.findOne({ user: hospitalUserId });
+        if (!hospital) {
+            throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
+        }
+
+        const duty = await Duty.findById(dutyId).populate('hospital');
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (duty.hospital._id.toString() !== hospital._id.toString()) {
+            throw new ForbiddenError('You can only verify OTP for your own duties');
+        }
+
+        // Idempotency: already completed via end OTP
+        if (duty.status === 'completed' && duty.endOtp.status === 'VERIFIED') {
+            return Duty.findById(dutyId)
+                .populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } })
+                .populate({ path: 'assignedTo', populate: { path: 'user', select: 'name email' } });
+        }
+
+        const validation = duty.canVerifyEndOtp();
+        if (!validation.allowed) {
+            if (duty.endOtp.status === 'LOCKED') {
+                throw new ForbiddenError(validation.reason);
+            }
+            if (duty.endOtp.status === 'PENDING' && (!duty.endOtp.expiresAt || duty.endOtp.expiresAt <= getCurrentIST())) {
+                await Duty.updateOne({ _id: dutyId }, { $set: { 'endOtp.status': 'EXPIRED' } });
+            }
+            throw new ValidationError(validation.reason);
+        }
+
+        const otpOk = duty.endOtp.code === otp;
+
+        if (!otpOk) {
+            const attempts = duty.endOtp.attempts + 1;
+            const maxAttempts = parseInt(process.env.DUTY_OTP_MAX_ATTEMPTS) || 5;
+            const updateFields = { 'endOtp.attempts': attempts };
+            if (attempts >= maxAttempts) {
+                updateFields['endOtp.status'] = 'LOCKED';
+            }
+            await Duty.updateOne({ _id: dutyId }, { $set: updateFields });
+
+            if (attempts >= maxAttempts) {
+                throw new ForbiddenError('Incorrect OTP. End OTP is now locked — contact admin support.');
+            }
+            throw new ValidationError(`Incorrect OTP. ${maxAttempts - attempts} attempt(s) remaining.`);
+        }
+
+        const now = getCurrentIST();
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: { $in: ['in-progress', 'pending-confirmation'] } },
+            {
+                $set: {
+                    status: 'completed',
+                    completedAt: now,
+                    paymentMethod,
+                    isPaid,
+                    paymentAttestedAt: now,
+                    paymentAttestedBy: hospitalUserId,
+                    'endOtp.status': 'VERIFIED'
+                },
+                $push: {
+                    statusHistory: {
+                        status: 'completed',
+                        timestamp: now,
+                        changedBy: hospitalUserId,
+                        reason: 'End OTP verified by hospital — duty completed'
+                    }
+                }
+            },
+            { new: true }
+        )
+            .populate({
+                path: 'hospital',
+                populate: { path: 'user', select: 'name email' }
+            })
+            .populate({
+                path: 'assignedTo',
+                populate: { path: 'user', select: 'name email' }
+            });
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed before verification could complete — please retry');
+        }
+
+        return updated;
+    }
+
+
+
+    
+    async resendOtp(dutyId, userId, userRole, otpType) {
+        if (userRole !== 'staff') {
+            throw new ForbiddenError('Only the assigned staff member can resend duty OTPs');
+        }
+
+        if (otpType === 'start') {
+            // Reuses requestStartOtp's window/geofence checks, minting, and SMS dispatch verbatim
+            return this.requestStartOtp(dutyId, userId);
+        }
+        if (otpType === 'end') {
+            return this._resendEndOtp(dutyId, userId);
+        }
+        throw new ValidationError("otpType must be 'start' or 'end'");
+    }
+
+    async _resendEndOtp(dutyId, userId) {
+        const medicalStaff = await MedicalStaff.findOne({ user: userId });
+        if (!medicalStaff) {
+            throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
+        }
+
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (!duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
+            throw new ForbiddenError('You can only resend OTP for duties assigned to you');
+        }
+
+        if (!['in-progress', 'pending-confirmation'].includes(duty.status)) {
+            throw new ValidationError('End OTP can only be resent while the duty is in progress or pending confirmation');
+        }
+
+        if (duty.endOtp.status === 'LOCKED') {
+            throw new ForbiddenError('End OTP is locked — contact admin support');
+        }
+
+        const code = OTPService.generateOTP();
+        const expiryMinutes = parseInt(process.env.DUTY_END_OTP_EXPIRY_MINUTES) || 30;
+        const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+        const now = getCurrentIST();
+
+        const updated = await Duty.findOneAndUpdate(
+            { _id: dutyId, status: { $in: ['in-progress', 'pending-confirmation'] } },
+            {
+                $set: {
+                    'endOtp.code': code,
+                    'endOtp.expiresAt': expiresAt,
+                    'endOtp.attempts': 0,
+                    'endOtp.status': 'PENDING',
+                    'endOtp.sentAt': now
+                }
+            },
+            { new: true }
+        ).populate({
+            path: 'assignedTo',
+            populate: { path: 'user', select: 'name email' }
+        });
+
+        if (!updated) {
+            throw new ConflictError('Duty status changed — cannot resend end OTP');
+        }
+
+        // The new code is only ever sent via SMS to staff's own phone — they read it out to the hospital
+        await this._sendStaffOtpSms(updated.assignedTo, code, dutyId, 'end');
+
+        // Notify staff in-app that a fresh OTP was sent (without exposing the code)
+        if (updated.assignedTo?.user?._id) {
+            notificationEmitter.emitEndOtpRegenerated(
+                updated,
+                updated.assignedTo.user._id.toString(),
+                expiresAt
+            ).catch(err => console.error(`Error sending end OTP regenerated notification for duty ${dutyId}:`, err));
+        }
+
+        return { expiresAt: updated.endOtp.expiresAt };
+    }
+
+
+
 }
 
 module.exports = new DutyService();

@@ -32,7 +32,16 @@ const dutySchema = new mongoose.Schema({
             'receptionist', 'billing_executive', 'medical_records_staff', 'hr_accounts'
         ]
     },
+    dutySubType: {
+        type: String,
+        enum: {
+            values: ['ward', 'icu', 'casualty'],
+            message: 'dutySubType must be one of: ward, icu, casualty'
+        },
+        default: undefined
+    },
     date: {
+
         type: Date,
         required: [true, 'Start date is required']
     },
@@ -97,9 +106,29 @@ const dutySchema = new mongoose.Schema({
         default: 0
     },
 
+    // Payment attestation (metadata only — no gateway integration)
+    paymentMethod: {
+        type: String,
+        enum: ['cash', 'upi', 'bank', 'will_pay_later', null],
+        default: null
+    },
+    isPaid: {
+        type: Boolean,
+        default: null
+    },
+    paymentAttestedAt: {
+        type: Date,
+        default: null
+    },
+    paymentAttestedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+
     status: {
         type: String,
-        enum: ['available', 'assigned', 'enroute', 'in-progress', 'completed', 'cancelled', 'expired', 'incomplete'],
+        enum: ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'disputed', 'completed', 'cancelled', 'expired', 'incomplete'],
         default: 'available',
         required: true
     },
@@ -113,7 +142,7 @@ const dutySchema = new mongoose.Schema({
     statusHistory: [{
         status: {
             type: String,
-            enum: ['available', 'assigned', 'enroute', 'in-progress', 'completed', 'cancelled', 'expired', 'incomplete'],
+            enum: ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'disputed', 'completed', 'cancelled', 'expired', 'incomplete'],
             required: true
         },
         timestamp: {
@@ -125,7 +154,15 @@ const dutySchema = new mongoose.Schema({
             type: mongoose.Schema.Types.Mixed,  // Allow both ObjectId and string
             required: true
         },
-        reason: String  // For cancellations
+        reason: String,  // For cancellations or admin override reasons
+        manualOverride: {
+            type: Boolean,
+            default: false
+        },
+        overriddenFromStatus: {
+            type: String,
+            enum: ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'disputed', 'completed', 'cancelled', 'expired', 'incomplete']
+        }
     }],
 
     cancellation: {
@@ -168,6 +205,73 @@ const dutySchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+
+    // Start handshake: geofence-triggered OTP sent to hospital, entered by staff
+    startOtp: {
+        code: { type: String, default: null },
+        expiresAt: { type: Date, default: null },
+        attempts: { type: Number, default: 0 },
+        status: {
+            type: String,
+            enum: ['NONE', 'PENDING', 'VERIFIED', 'EXPIRED', 'LOCKED'],
+            default: 'NONE'
+        },
+        sentAt: { type: Date, default: null },
+        unlockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+        unlockReason: { type: String, default: null }
+    },
+
+    // End handshake: staff-requested OTP entered by hospital along with payment attestation
+    endOtp: {
+        code: { type: String, default: null },
+        expiresAt: { type: Date, default: null },
+        attempts: { type: Number, default: 0 },
+        status: {
+            type: String,
+            enum: ['NONE', 'PENDING', 'VERIFIED', 'EXPIRED', 'LOCKED'],
+            default: 'NONE'
+        },
+        sentAt: { type: Date, default: null },
+        unlockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+        unlockReason: { type: String, default: null }
+    },
+
+    // Fallback flow: hospital did not confirm end OTP within the grace period
+    pendingConfirmationAt: {
+        type: Date,
+        default: null
+    },
+
+    // Dispute flow
+    disputedAt: {
+        type: Date,
+        default: null
+    },
+    disputeRaisedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    disputeRaisedByRole: {
+        type: String,
+        enum: ['staff', 'hospital', null],
+        default: null
+    },
+    disputeReason: {
+        type: String,
+        default: null
+    },
+    disputeResolution: {
+        resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+        resolvedAt: { type: Date, default: null },
+        notes: { type: String, default: null },
+        finalStatus: {
+            type: String,
+            enum: ['completed', 'incomplete', 'cancelled', null],
+            default: null
+        }
+    },
+
     unassigned15MinNotified: {
         type: Boolean,
         default: false
@@ -220,12 +324,17 @@ dutySchema.methods.canChangeStatus = function (newStatus, userId) {
     }
 
     // Define valid status transitions
+    // Note: 'in-progress' (via Start OTP), 'completed' (via End OTP), 'pending-confirmation'
+    // and 'disputed' transitions are driven by verifyStartOtp/verifyEndOtp/cron/dispute flows
+    // using their own guarded findOneAndUpdate calls, not this staff-scoped method.
     const validTransitions = {
         'available': ['assigned', 'cancelled', 'expired'],
         'assigned': ['enroute', 'cancelled', 'incomplete'],
         'enroute': ['in-progress', 'cancelled', 'incomplete'],
-        'in-progress': ['completed', 'cancelled', 'incomplete'],
-        'completed': [], // No transitions from completed
+        'in-progress': ['cancelled', 'incomplete', 'pending-confirmation'],
+        'pending-confirmation': ['disputed'],
+        'completed': ['disputed'],
+        'disputed': ['completed', 'incomplete', 'cancelled'],
         'cancelled': [], // No transitions from cancelled
         'expired': [], // No transitions from expired
         'incomplete': [] // No transitions from incomplete
@@ -236,25 +345,6 @@ dutySchema.methods.canChangeStatus = function (newStatus, userId) {
     }
 
     return { allowed: true };
-};
-
-
-dutySchema.methods.isWithinStartBuffer = function () {
-    // Use getCurrentIST() for consistent time handling
-    const now = getCurrentIST();
-    const dutyDate = new Date(this.date);
-    const [hours, minutes] = this.startTime.split(':');
-
-    // Convert duty date to IST first, then set time
-    const istDutyDate = toIST(dutyDate);
-    const dutyStartTime = new Date(istDutyDate);
-    dutyStartTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-
-    // 15 minutes before and after start time
-    const bufferStart = new Date(dutyStartTime.getTime() - 15 * 60 * 1000);
-    const bufferEnd = new Date(dutyStartTime.getTime() + 15 * 60 * 1000);
-
-    return now >= bufferStart && now <= bufferEnd;
 };
 
 
@@ -275,42 +365,68 @@ dutySchema.methods.isAtEndTime = function () {
 };
 
 
-dutySchema.methods.canStartDuty = function () {
-    if (this.status !== 'enroute') {
-        return { allowed: false, reason: 'Duty must be enroute before starting' };
+// Staff can request an End OTP once the duty is in-progress and the scheduled end time has
+// arrived. No upper bound here — lateness is handled by the pending-confirmation cron, not by
+// rejecting the request.
+dutySchema.methods.canRequestEndOtp = function () {
+    if (this.status !== 'in-progress') {
+        return { allowed: false, reason: 'Duty must be in progress before requesting an end OTP' };
     }
 
-    if (!this.isWithinStartBuffer()) {
-        return { allowed: false, reason: 'Can only start duty within 15 minutes of start time' };
+    const now = getCurrentIST();
+    const dutyDate = new Date(this.date);
+    const [hours, minutes] = this.endTime.split(':');
+
+    const istDutyDate = toIST(dutyDate);
+    const istDutyEndTime = new Date(istDutyDate);
+    istDutyEndTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+
+    if (now < istDutyEndTime) {
+        return { allowed: false, reason: 'Can only request end OTP at or after scheduled end time' };
     }
 
     return { allowed: true };
 };
 
 
-dutySchema.methods.canCompleteDuty = function () {
-    if (this.status !== 'in-progress') {
-        return { allowed: false, reason: 'Duty must be in progress before completion' };
+// Staff can verify the Start OTP while enroute, provided one was sent and hasn't expired
+dutySchema.methods.canVerifyStartOtp = function () {
+    if (this.status !== 'enroute') {
+        return { allowed: false, reason: 'Duty must be enroute before verifying start OTP' };
     }
 
-    // Use getCurrentIST() for consistent time handling
-    const now = getCurrentIST();
-    const dutyDate = new Date(this.date);
-    const [hours, minutes] = this.endTime.split(':');
-
-    // Convert duty date to IST first, then set. time
-    const istDutyDate = toIST(dutyDate);
-    const istDutyEndTime = new Date(istDutyDate);
-    istDutyEndTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-
-    // Allow manual completion from end time until 15 minutes after
-    const bufferEndTime = new Date(istDutyEndTime.getTime() + 15 * 60 * 1000);
-
-    if (now < istDutyEndTime) {
-        return { allowed: false, reason: 'Can only complete duty at or after scheduled end time' };
+    if (this.startOtp.status === 'LOCKED') {
+        return { allowed: false, reason: 'Start OTP is locked — contact admin support' };
     }
-    if (now > bufferEndTime) {
-        return { allowed: false, reason: 'Duty was automatically completed (15 minute window expired)' };
+
+    if (this.startOtp.status !== 'PENDING') {
+        return { allowed: false, reason: 'No active start OTP — move within range of the hospital to trigger one' };
+    }
+
+    if (!this.startOtp.expiresAt || this.startOtp.expiresAt <= getCurrentIST()) {
+        return { allowed: false, reason: 'Start OTP has expired — move within range of the hospital to trigger a new one' };
+    }
+
+    return { allowed: true };
+};
+
+
+// Hospital can verify the End OTP while the duty is in-progress or awaiting confirmation
+dutySchema.methods.canVerifyEndOtp = function () {
+    if (!['in-progress', 'pending-confirmation'].includes(this.status)) {
+        return { allowed: false, reason: 'Duty must be in progress or pending confirmation to verify end OTP' };
+    }
+
+    if (this.endOtp.status === 'LOCKED') {
+        return { allowed: false, reason: 'End OTP is locked — contact admin support' };
+    }
+
+    if (this.endOtp.status !== 'PENDING') {
+        return { allowed: false, reason: 'No active end OTP — request a new one' };
+    }
+
+    if (!this.endOtp.expiresAt || this.endOtp.expiresAt <= getCurrentIST()) {
+        return { allowed: false, reason: 'End OTP has expired — request a new one' };
     }
 
     return { allowed: true };

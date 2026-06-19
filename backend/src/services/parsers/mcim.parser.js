@@ -47,9 +47,19 @@ module.exports = (text) => {
     }
 
     // --- QUALIFICATION ---
+    // 1. Try to find the explicit label first
     const qualMatch = normalized.match(/Qualification\s*[:\-]\s*([A-Za-z.\s]+)/i);
     if (qualMatch) {
         qualification = qualMatch[1].trim().split('\n')[0].trim();
+    }
+
+    // 2. NEW FALLBACK: Aggressively scan the entire text for known medical degrees
+    if (!qualification) {
+        const fallbackQual = normalized.match(/\b(B\.?A\.?M\.?S\.?|B\.?H\.?M\.?S\.?|B\.?U\.?M\.?S\.?|M\.?B\.?B\.?S\.?|B\.?D\.?S\.?|M\.?D\.?|M\.?S\.?|D\.?PHARM|B\.?PHARM)\b/i);
+
+        if (fallbackQual) {
+            qualification = fallbackQual[1].replace(/\./g, "").toUpperCase();
+        }
     }
 
     // --- DOB ---

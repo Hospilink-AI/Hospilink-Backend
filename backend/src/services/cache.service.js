@@ -396,6 +396,62 @@ class CacheService {
         const key = `otp:${email.toLowerCase()}`;
         return await this.get(key);
     }
+    
+
+    // ── Phone OTP (profile creation) ─────────────────────────────────────────
+    // Key: otp:phone:{normalizedPhone}   TTL: 600s (10 min)
+    async setPhoneOTP(phone, otpData, ttl = 600) {
+        const key = `otp:phone:${phone}`;
+        return await this.set(key, otpData, ttl);
+    }
+
+    // getStrict: Redis failure throws instead of returning null.
+    // Phone OTP is security-critical — a Redis error must not silently bypass the check.
+    async getPhoneOTP(phone) {
+        const key = `otp:phone:${phone}`;
+        return await this.getStrict(key);
+    }
+
+    async deletePhoneOTP(phone) {
+        const key = `otp:phone:${phone}`;
+        return await this.del(key);
+    }
+
+    // ── Phone verified flag (consumed once on profile save) ──────────────────
+    // Key: phone:verified:{userId}:{normalizedPhone}   TTL: 1800s (30 min)
+    // Includes userId so user A's verified phone cannot be reused by user B.
+    async setPhoneVerified(userId, phone, ttl = 1800) {
+        const key = `phone:verified:${userId}:${phone}`;
+        return await this.set(key, { verifiedAt: new Date().toISOString() }, ttl);
+    }
+
+    async getPhoneVerified(userId, phone) {
+        const key = `phone:verified:${userId}:${phone}`;
+        return await this.get(key);
+    }
+
+    async deletePhoneVerified(userId, phone) {
+        const key = `phone:verified:${userId}:${phone}`;
+        return await this.del(key);
+    }
+
+    // ─── Suspension status caching ────────────────────────────────────────────
+    // key pattern: suspension:{role}:{userId}  TTL: 300s (same as verification cache)
+
+    async getSuspensionStatus(userId, role) {
+        const key = `suspension:${role}:${userId}`;
+        return await this.get(key);
+    }
+
+    async setSuspensionStatus(userId, role, data, ttl = 300) {
+        const key = `suspension:${role}:${userId}`;
+        return await this.set(key, data, ttl);
+    }
+
+    async invalidateSuspensionStatus(userId, role) {
+        const key = `suspension:${role}:${userId}`;
+        return await this.del(key);
+    }
 
 }
 

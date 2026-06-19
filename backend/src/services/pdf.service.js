@@ -30,8 +30,6 @@ exports.extractTextFromPDF = async (
 
     try {
 
-        console.log("PDF OCR STARTED");
-
         // STEP 1
         // TRY NORMAL PDF TEXT
 
@@ -39,17 +37,11 @@ exports.extractTextFromPDF = async (
 
         const parsedText = parsed.text?.trim() || "";
 
-        console.log("PDF TEXT LENGTH:", parsedText.length);
-
         if (parsedText.length > 50) {
-
-            console.log("USING pdf-parse");
 
             return parsedText;
 
         }
-
-        console.log("SCANNED PDF DETECTED");
 
         // STEP 2
         // OCR SCANNED PDF
@@ -68,8 +60,6 @@ exports.extractTextFromPDF = async (
         const maxPages = Math.min(pdf.numPages, 3);
 
         for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-
-            console.log(`OCR PAGE ${pageNum}`);
 
             const page = await pdf.getPage(pageNum);
 
@@ -116,12 +106,10 @@ exports.extractTextFromPDF = async (
 
         }
 
-        console.log("FINAL OCR LENGTH:", fullText.length);
-
         return fullText;
 
     } catch (err) {
-        console.log("PDF OCR ERROR:", err.message);
+        logger.error(`PDF OCR error: ${err.message}`);
         return "";
     }
 

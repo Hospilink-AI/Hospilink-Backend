@@ -85,6 +85,19 @@ const hospitalSchema = new mongoose.Schema({
             message: 'Phone number must start with +91 followed by 10 digits'
         }
     },
+    // Spaces stripped from phoneNumber — used to enforce phone-number
+    // uniqueness across Hospital and MedicalStaff accounts.
+    normalizedPhone: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    // True once the send-phone-otp / verify-phone-otp flow succeeded for this
+    // number, mirroring User.isEmailVerified.
+    isPhoneVerified: {
+        type: Boolean,
+        default: false
+    },
     // Update coordinates to use named properties
     coordinates: {
         type: {
@@ -162,6 +175,29 @@ const hospitalSchema = new mongoose.Schema({
         trim: true,
         maxlength: [500, 'Rejection reason cannot exceed 500 characters']
     },
+    averageRating: {
+        type: Number,
+        default: 0
+    },
+    totalRatings: {
+        type: Number,
+        default: 0
+    },    
+    isSuspended: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
+    suspensionReason: {
+        type: String,
+        trim: true,
+        maxlength: [500, 'Suspension reason cannot exceed 500 characters'],
+        default: null
+    },
+    suspendedAt: {
+        type: Date,
+        default: null
+    },
     createdAt: {
         type: Date,
         default: Date.now
@@ -192,6 +228,10 @@ hospitalSchema.index({ verificationStatus: 1, rejectionReason: 1 });
 
 // Index for cache invalidation queries
 hospitalSchema.index({ user: 1, verificationStatus: 1, rejectionReason: 1 });
+
+// Indexes for suspension queries
+hospitalSchema.index({ isSuspended: 1, createdAt: -1 });
+hospitalSchema.index({ verificationStatus: 1, isSuspended: 1 });
 
 
 // For geospatial queries, we need to create a virtual field that returns array format

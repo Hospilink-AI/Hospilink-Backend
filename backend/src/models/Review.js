@@ -5,8 +5,13 @@ const reviewSchema = new mongoose.Schema(
         duty: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Duty",
-            required: true,
-            unique: true
+            required: true
+        },
+
+        reviewType: {
+            type: String,
+            enum: ["hospital_to_staff", "staff_to_hospital"],
+            required: true
         },
 
         hospital: {
@@ -39,5 +44,6 @@ const reviewSchema = new mongoose.Schema(
 );
 
 reviewSchema.index({ medicalStaff: 1 });
+reviewSchema.index({ duty: 1, reviewType: 1 }, { unique: true });
 
 module.exports = mongoose.model("Review", reviewSchema);

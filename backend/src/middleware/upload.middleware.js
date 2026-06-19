@@ -57,8 +57,8 @@ const validateMagicBytes = async (req, res, next) => {
                 ? req.files
                 : Object.values(req.files).flat()
             : req.file
-            ? [req.file]
-            : [];
+                ? [req.file]
+                : [];
 
         if (files.length === 0) return next();
 
@@ -89,8 +89,18 @@ const validateMagicBytes = async (req, res, next) => {
 
             // Extra check: claimed MIME must be consistent with detected MIME.
             // Prevents e.g. a PNG being uploaded with Content-Type: application/pdf.
-            const claimedBase = file.mimetype === "image/jpg" ? "image/jpeg" : file.mimetype;
-            if (claimedBase !== detected.mime) {
+            const claimedBase =
+                file.mimetype === "image/jpg"
+                    ? "image/jpeg"
+                    : file.mimetype;
+
+            const imageTypes = ["image/jpeg", "image/png"];
+
+            const bothImages =
+                imageTypes.includes(claimedBase) &&
+                imageTypes.includes(detected.mime);
+
+            if (!bothImages && claimedBase !== detected.mime) {
                 return res.status(400).json({
                     success: false,
                     message: `File "${file.originalname}" content does not match its declared type (claimed: ${file.mimetype}, detected: ${detected.mime}).`

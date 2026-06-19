@@ -40,8 +40,10 @@ exports.createDuty = asyncHandler(async (req, res) => {
         description,
         offered_rate,
         is_overnight_duty,
-        staff_count
+        staff_count,
+        duty_sub_type
     } = req.body;
+
 
     // Use hospital user ID from the authenticated user (JWT)
     const userId = req.user.id;
@@ -58,8 +60,10 @@ exports.createDuty = asyncHandler(async (req, res) => {
         urgency,
         description,
         offeredRate: offered_rate,
-        isOvernightDuty: is_overnight_duty || false
+        isOvernightDuty: is_overnight_duty || false,
+        ...(staff_role === 'rmo' && { dutySubType: duty_sub_type })
     };
+
 
     // Create multiple duties based on staff_count
     const createdDuties = [];
@@ -145,7 +149,7 @@ exports.createDuty = asyncHandler(async (req, res) => {
         success: true,
         duties: createdDuties,
         count: createdDuties.length,
-        message: `Successfully created ${createdDuties.length} duty`
+        message: `Successfully created ${createdDuties.length} ${createdDuties.length === 1 ? 'duty' : 'duties'}`
     });
 });
 
@@ -279,8 +283,16 @@ exports.acceptDuty = asyncHandler(async (req, res) => {
         }
 
         // Handle other specific errors
+        if (error.message.includes('already being processed')) {
+            return res.status(409).json({
+                success: false,
+                message: error.message,
+                code: 'DUPLICATE_REQUEST'
+            });
+        }
+
         if (error.message.includes('Duty is no longer available')) {
-            return res.status(400).json({
+            return res.status(409).json({
                 success: false,
                 message: error.message,
                 code: 'DUTY_UNAVAILABLE'
@@ -303,6 +315,14 @@ exports.acceptDuty = asyncHandler(async (req, res) => {
             });
         }
 
+        if (error.message.includes('Cannot accept duty after start time')) {
+            return res.status(422).json({
+                success: false,
+                message: error.message,
+                code: 'ACCEPT_AFTER_START'
+            });
+        }
+
         // Re-throw other errors to be handled by global error handler
         throw error;
     }
@@ -316,13 +336,13 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
     const userId = req.user.id;
 
     // Validate status value
-    const allowedStatuses = ['enroute', 'in-progress', 'completed'];
+    const allowedStatuses = ['enroute'];
     logger.debug('Validating status change request');
 
     if (!allowedStatuses.includes(status)) {
         return res.status(400).json({
             success: false,
-            message: 'Invalid status. Allowed values: enroute, in-progress, completed'
+            message: 'Invalid status. Allowed values: enroute'
         });
     }
 
@@ -360,76 +380,41 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
         ).catch(err => logger.error('Failed to send hospital status update email: ' + err.message));
     }
 
-    // Emit WebSocket notification to both parties
+    // Emit WebSocket notification to hospital (staff is en route)
     try {
         const hospitalUserId = duty.hospital.user._id.toString();
-        const staffUserId = userId;
 
-        // If duty is completed, send completion notification to hospital
-        if (status === 'completed') {
-            const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
-            
-            if (staff) {
-                await notificationEmitter.emitDutyCompleted(duty, staff, hospitalUserId);
-                
-                // Log duty completion activity
-                activityLogEmitter.logDutyStatusChange(duty, staff, status, req)
-                    .catch(err => logger.error('Error logging duty completion:', err));
-            }
-        } 
-        // If staff is en route, send en route notification to hospital
-        else if (status === 'enroute') {
-            const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
-            
-            if (staff) {
-                // Try to calculate ETA if coordinates are available
-                let eta = null;
-                try {
-                    const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
-                    
-                    const staffLat = staff.coordinates?.coordinates?.latitude;
-                    const staffLng = staff.coordinates?.coordinates?.longitude;
-                    const hospitalLat = hospital?.coordinates?.coordinates?.latitude;
-                    const hospitalLng = hospital?.coordinates?.coordinates?.longitude;
+        const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
 
-                    if (staffLat && staffLng && hospitalLat && hospitalLng) {
-                        const distanceInfo = await geocodingService.calculateDistanceAndETA(
-                            staffLat,
-                            staffLng,
-                            hospitalLat,
-                            hospitalLng
-                        );
-                        eta = distanceInfo.duration; // in minutes
-                    }
-                } catch (etaError) {
-                    console.error('Error calculating ETA for en route notification:', etaError);
-                }
-                
-                await notificationEmitter.emitStaffEnRoute(duty, staff, hospitalUserId, eta);
-                
-                // Log duty started activity
-                activityLogEmitter.logDutyStatusChange(duty, staff, status, req)
-                    .catch(err => logger.error('Error logging duty start:', err));
-            }
-        }
-        // If staff is on-site (in-progress), send on-site notification to hospital AND in-progress notification to staff
-        else if (status === 'in-progress') {
-            const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
-            
-            if (staff) {
-                // Send on-site notification to hospital
-                await notificationEmitter.emitStaffOnSite(duty, staff, hospitalUserId);
-                
-                // Send in-progress notification to staff
+        if (staff) {
+            // Try to calculate ETA if coordinates are available
+            let eta = null;
+            try {
                 const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
-                if (hospital) {
-                    await notificationEmitter.emitDutyInProgress(duty, hospital, staffUserId);
+
+                const staffLat = staff.coordinates?.coordinates?.latitude;
+                const staffLng = staff.coordinates?.coordinates?.longitude;
+                const hospitalLat = hospital?.coordinates?.coordinates?.latitude;
+                const hospitalLng = hospital?.coordinates?.coordinates?.longitude;
+
+                if (staffLat && staffLng && hospitalLat && hospitalLng) {
+                    const distanceInfo = await geocodingService.calculateDistanceAndETA(
+                        staffLat,
+                        staffLng,
+                        hospitalLat,
+                        hospitalLng
+                    );
+                    eta = distanceInfo.duration; // in minutes
                 }
-                
-                // Log duty in-progress activity
-                activityLogEmitter.logDutyStatusChange(duty, staff, status, req)
-                    .catch(err => logger.error('Error logging duty in-progress:', err));
+            } catch (etaError) {
+                console.error('Error calculating ETA for en route notification:', etaError);
             }
+
+            await notificationEmitter.emitStaffEnRoute(duty, staff, hospitalUserId, eta);
+
+            // Log duty started activity
+            activityLogEmitter.logDutyStatusChange(duty, staff, status, req)
+                .catch(err => logger.error('Error logging duty start:', err));
         }
     } catch (error) {
         logger.error('Error emitting duty status notification: ' + error.message);
@@ -442,6 +427,148 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
         duty
     });
 });
+
+
+
+
+
+exports.requestStartOtp = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const { alreadyInProgress, expiresAt } = await DutyService.requestStartOtp(id, userId);
+
+    res.status(200).json({
+        success: true,
+        message: alreadyInProgress
+            ? 'Duty is already in progress.'
+            : 'Start OTP sent to the hospital via SMS. Ask the hospital to share the code with you.',
+        data: { expiresAt }
+    });
+});
+
+
+
+
+exports.verifyStartOtp = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { otp } = req.body;
+    const userId = req.user.id;
+
+    const duty = await DutyService.verifyStartOtp(id, userId, otp);
+
+    // Emit on-site notification to hospital + in-progress notification to staff
+    try {
+        const hospitalUserId = duty.hospital.user._id.toString();
+        const staffUserId = userId;
+
+        const staff = await MedicalStaff.findOne({ user: userId }).populate('user', 'name');
+        if (staff) {
+            await notificationEmitter.emitStaffOnSite(duty, staff, hospitalUserId);
+
+            const hospital = await Hospital.findById(duty.hospital._id || duty.hospital);
+            if (hospital) {
+                await notificationEmitter.emitDutyInProgress(duty, hospital, staffUserId);
+            }
+
+            activityLogEmitter.logDutyStatusChange(duty, staff, 'in-progress', req)
+                .catch(err => logger.error('Error logging duty in-progress:', err));
+        }
+    } catch (error) {
+        logger.error('Error emitting duty in-progress notification: ' + error.message);
+        // Don't fail the request if notification fails
+    }
+
+    res.status(200).json({
+        success: true,
+        message: 'Start OTP verified. Duty is now in progress.',
+        duty
+    });
+});
+
+
+
+
+exports.requestEndOtp = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const { expiresAt } = await DutyService.requestEndOtp(id, userId);
+
+    res.status(200).json({
+        success: true,
+        message: 'End OTP sent to your registered mobile number via SMS. Share this code with the hospital to mark the duty complete.',
+        data: { expiresAt }
+    });
+});
+
+
+
+
+exports.verifyEndOtp = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { otp, paymentMethod, isPaid } = req.body;
+    const userId = req.user.id;
+
+    const duty = await DutyService.verifyEndOtp(id, userId, otp, paymentMethod, isPaid);
+
+    // Emit completion notifications: rate-your-doctor prompt to hospital,
+    // rate-this-hospital prompt to staff
+    try {
+        const hospitalUserId = duty.hospital.user._id.toString();
+        const staff = await MedicalStaff.findOne({ _id: duty.assignedTo }).populate('user', 'name');
+
+        if (staff) {
+            await notificationEmitter.emitDutyCompleted(duty, staff, hospitalUserId);
+
+            activityLogEmitter.logDutyStatusChange(duty, staff, 'completed', req)
+                .catch(err => logger.error('Error logging duty completion:', err));
+        }
+
+        const staffUserId = duty.assignedTo?.user?._id?.toString();
+        if (staffUserId) {
+            await notificationEmitter.emitRateHospitalPrompt(duty, duty.hospital, staffUserId);
+        }
+    } catch (error) {
+        logger.error('Error emitting duty completed notification: ' + error.message);
+        // Don't fail the request if notification fails
+    }
+
+    res.status(200).json({
+        success: true,
+        message: 'End OTP verified. Duty marked as completed.',
+        duty
+    });
+});
+
+
+
+
+exports.resendOtp = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { otpType } = req.body;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    const result = await DutyService.resendOtp(id, userId, userRole, otpType);
+
+    if (otpType === 'start' && result.alreadyInProgress) {
+        return res.status(200).json({
+            success: true,
+            message: 'Duty is already in progress.',
+            data: { expiresAt: null }
+        });
+    }
+
+    res.status(200).json({
+        success: true,
+        message: otpType === 'start'
+            ? 'A new start OTP has been sent to the hospital via SMS. Ask the hospital to share the code with you.'
+            : 'A new end OTP has been sent to the staff member\'s registered mobile number via SMS.',
+        data: { expiresAt: result.expiresAt }
+    });
+});
+
 
 
 
@@ -743,34 +870,10 @@ exports.cancelDuty = asyncHandler(async (req, res) => {
             data: { duty }
         });
     } catch (error) {
-        // Handle specific error cases
-        if (error.message.includes('Duty not found')) {
-            return res.status(404).json({
-                success: false,
-                message: error.message
-            });
-        }
-
-        if (error.message.includes('cannot cancel') ||
-            error.message.includes('Cannot cancel') ||
-            error.message.includes('required') ||
-            error.message.includes('Invalid cancellation reason')) {
-            return res.status(400).json({
-                success: false,
-                message: error.message
-            });
-        }
-
-        if (error.message.includes('can only cancel') ||
-            error.message.includes('cannot cancel unassigned')) {
-            return res.status(403).json({
-                success: false,
-                message: error.message
-            });
-        }
-
-        // Re-throw other errors to be handled by global error handler
-        throw error;
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
@@ -838,7 +941,7 @@ exports.getDutyRoute = asyncHandler(async (req, res) => {
         });
     } catch (error) {
         logger.error('Error getting duty route:', error);
-        res.status(500).json({
+        res.status(error.statusCode || 500).json({
             success: false,
             message: error.message
         });
@@ -868,11 +971,19 @@ exports.getAvailableJobsWithDistance = asyncHandler(async (req, res) => {
 exports.getCompletedDuties = asyncHandler(async (req, res) => {
     const userId = req.user.id;
 
-    // Extract pagination parameters from query
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
+    const { status } = req.query;
 
-    const result = await DutyService.getCompletedDutiesForStaff(userId, page, limit);
+    const ALLOWED_STATUSES = ['completed', 'cancelled', 'incomplete'];
+    if (status && !ALLOWED_STATUSES.includes(status)) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid status filter. Allowed values: ${ALLOWED_STATUSES.join(', ')}`
+        });
+    }
+
+    const result = await DutyService.getCompletedDutiesForStaff(userId, page, limit, status || null);
 
     res.status(200).json({
         success: true,
@@ -886,6 +997,8 @@ exports.getCompletedDuties = asyncHandler(async (req, res) => {
         pagination: result.pagination
     });
 });
+
+
 
 exports.getStatement = asyncHandler(async (req, res) => {
     const userId = req.user.id;
@@ -934,7 +1047,7 @@ exports.getHospitalActiveDuties = asyncHandler(async (req, res) => {
             summary: result.summary
         });
     } catch (error) {
-        res.status(400).json({
+        res.status(error.statusCode || 500).json({
             success: false,
             message: error.message
         });
@@ -978,7 +1091,7 @@ exports.getHospitalDutyRouteMap = asyncHandler(async (req, res) => {
         console.error(`Error in getHospitalDutyRouteMap for duty ${dutyId}:`, error);
         
         // Enhanced error response
-        res.status(error.message.includes('not found') ? 404 : 400).json({
+        res.status(error.statusCode || (error.message.toLowerCase().includes('not found') ? 404 : 500)).json({
             success: false,
             message: error.message,
             code: error.code || 'DUTY_ROUTE_MAP_ERROR',

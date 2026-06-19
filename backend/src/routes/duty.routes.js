@@ -1,24 +1,29 @@
 const express = require('express');
 const router = express.Router();
 const dutyController = require('../controllers/duty.controller');
-const { protect, authorize } = require('../middleware/auth.middleware');
+const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
 const { requireHospitalVerification, requireStaffVerificationandisAvailable} = require('../middleware/accountsVerification.middleware');
-const { 
-    validateDutyStatusHistory, 
+const {
+    validateDutyStatusHistory,
     validateDutyCreation,
     validateDutyAcceptance,
     validateDutyStatusChange,
+    validateRequestStartOtp,
+    validateVerifyStartOtp,
+    validateVerifyEndOtp,
+    validateResendOtp,
     validateDutyCancellation,
     validateDutyEdit,
     validatePagination,
     validateObjectId,
     validateStatementQuery,
-    validateHospitalActiveDutiesQuery,
-    validateHospitalDutyRouteMap
+    validateHospitalDutyRouteMap,
+    validateHospitalActiveDutiesQuery
 } = require('../middleware/validation.middleware');
 
 // Apply protection to all duty routes
 router.use(protect);
+router.use(checkSuspension);
 
 router.post(
     '/hospitals/:hospitalId/duties',
@@ -49,9 +54,52 @@ router.post(
 router.patch(
     '/duties/status',
     authorize('staff'),
-    requireStaffVerificationandisAvailable, 
+    requireStaffVerificationandisAvailable,
     validateDutyStatusChange,
     dutyController.changeDutyStatus
+);
+
+router.post(
+    '/duties/:id/request-start-otp',
+    authorize('staff'),
+    requireStaffVerificationandisAvailable,
+    validateObjectId('id'),
+    validateRequestStartOtp,
+    dutyController.requestStartOtp
+);
+
+router.post(
+    '/duties/:id/verify-start-otp',
+    authorize('staff'),
+    requireStaffVerificationandisAvailable,
+    validateObjectId('id'),
+    validateVerifyStartOtp,
+    dutyController.verifyStartOtp
+);
+
+router.post(
+    '/duties/:id/request-end-otp',
+    authorize('staff'),
+    requireStaffVerificationandisAvailable,
+    validateObjectId('id'),
+    dutyController.requestEndOtp
+);
+
+router.post(
+    '/duties/:id/verify-end-otp',
+    authorize('hospital'),
+    requireHospitalVerification,
+    validateObjectId('id'),
+    validateVerifyEndOtp,
+    dutyController.verifyEndOtp
+);
+
+router.post(
+    '/duties/:id/resend-otp',
+    authorize('staff'),
+    validateObjectId('id'),
+    validateResendOtp,
+    dutyController.resendOtp
 );
 
 router.post(

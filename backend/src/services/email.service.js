@@ -7,6 +7,9 @@ class EmailService {
             host: process.env.EMAIL_HOST,
             port: process.env.EMAIL_PORT,
             secure: false,
+            pool: true,          // reuse SMTP connections — avoids per-request TCP+TLS handshake
+            maxConnections: 5,
+            maxMessages: 100,
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_PASS
@@ -886,6 +889,74 @@ class EmailService {
             return true;
         } catch (error) {
             logger.error(`Error sending profile creation confirmation email to ${email}: ${error.message}`);
+            return false;
+        }
+    }
+
+    async sendAccountSuspendedEmail(email, name, reason) {
+        try {
+            const mailOptions = {
+                from: `HospiLink <${process.env.EMAIL_FROM}>`,
+                to: email,
+                subject: 'HospiLink - Account Suspended',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: #c0392b; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">Account Suspended</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p>Hello <strong>${name}</strong>,</p>
+                            <p>Your account on HospiLink has been <strong>suspended</strong> by our admin team.</p>
+                            <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;">
+                                <h4 style="margin-top: 0; color: #856404;">Reason for Suspension</h4>
+                                <p style="margin: 0; color: #856404;">${reason}</p>
+                            </div>
+                            <p>While suspended, you will not be able to access any features of the platform.</p>
+                            <p>If you believe this is an error or wish to appeal, please contact our support team immediately.</p>
+                            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                        </div>
+                    </div>
+                `
+            };
+            await this.transporter.sendMail(mailOptions);
+            logger.info(`Account suspended email sent to ${email}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending account suspended email to ${email}: ${error.message}`);
+            return false;
+        }
+    }
+
+    async sendAccountActivatedEmail(email, name) {
+        try {
+            const mailOptions = {
+                from: `HospiLink <${process.env.EMAIL_FROM}>`,
+                to: email,
+                subject: 'HospiLink - Account Restored',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: #27ae60; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">Account Restored ✓</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p>Hello <strong>${name}</strong>,</p>
+                            <p>Your account on HospiLink has been <strong style="color: #27ae60;">restored</strong>. You can now access all platform features again.</p>
+                            <div style="background-color: #f0fff4; border-left: 4px solid #27ae60; padding: 15px; margin: 20px 0;">
+                                <p style="margin: 0; color: #276749;">Please log in to continue using HospiLink.</p>
+                            </div>
+                            <p>If you have any questions, please contact our support team.</p>
+                            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                        </div>
+                    </div>
+                `
+            };
+            await this.transporter.sendMail(mailOptions);
+            logger.info(`Account activated email sent to ${email}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending account activated email to ${email}: ${error.message}`);
             return false;
         }
     }

@@ -3,21 +3,24 @@ const router = express.Router();
 const multer = require('multer');
 const profileController = require('../controllers/profile.controller');
 const dashboardController = require('../controllers/dashboard.controller');
-const { protect, authorize } = require('../middleware/auth.middleware');
+const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
 const {
     validateMedicalStaffProfile,
     validateHospitalProfile,
     validateProfileUpdate,
     validateStaffAvailability,
     validateNearbyStaff,
-    validateDashboardLocationPermission
+    validateDashboardLocationPermission,
+    validateSendPhoneOTP,
+    validateVerifyPhoneOTP
 } = require('../middleware/validation.middleware');
-const { staffAvailabilityRateLimit } = require('../middleware/rateLimit.middleware');
+const { staffAvailabilityRateLimit, phoneOtpRateLimit, verifyPhoneOtpRateLimit } = require('../middleware/rateLimit.middleware');
 const upload = require('../middleware/upload.middleware');
 const { requireHospitalVerification, requireStaffVerificationandisAvailable, requireVerifiedStaffOnly} = require('../middleware/accountsVerification.middleware');
 
 // Apply protection to all profile routes
 router.use(protect);
+router.use(checkSuspension);
 
 // Get current user profile
 router.get('/me', profileController.getMyProfile);
@@ -27,6 +30,20 @@ router.put('/me', validateProfileUpdate, profileController.updateMyProfile);
 
 // Check profile completion status
 router.get('/status', profileController.checkProfileStatus);
+
+// Send OTP to phone number — user clicks "Verify" button on the profile form
+router.post('/send-phone-otp',
+    phoneOtpRateLimit,
+    validateSendPhoneOTP,
+    profileController.sendPhoneOTP
+);
+
+// Verify the OTP — user clicks "Verify OTP" after entering the code
+router.post('/verify-phone-otp',
+    verifyPhoneOtpRateLimit,
+    validateVerifyPhoneOTP,
+    profileController.verifyPhoneOTP
+);
 
 // Create medical staff profile (only for staff role)
 router.post('/medical-staff',

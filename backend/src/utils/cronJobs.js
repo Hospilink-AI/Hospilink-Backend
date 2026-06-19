@@ -108,14 +108,14 @@ class CronJobs {
     }
 
     static startAllJobs() {
-        // Auto-complete duties job - run every 1 minute on the clock (:00, :01, :02, etc.)
+        // Pending-confirmation job - run every 1 minute on the clock (:00, :01, :02, etc.)
         this.scheduleJob(
             async () => {
                 // Distributed lock: 55s TTL — shorter than 60s interval so it always expires before next run
-                const hasLock = await acquireCronLock('auto-complete', 55);
+                const hasLock = await acquireCronLock('pending-confirmation', 55);
                 if (!hasLock) return;
 
-                const completed = await DutyService.autoCompleteDuties();
+                const movedToPending = await DutyService.moveDutiesToPendingConfirmation();
                 const expired = await DutyService.expireUnacceptedDuties();
                 const reminders = DutyService.sendNavigationReminders ? await DutyService.sendNavigationReminders() : 0;
                 const unassigned15 = DutyService.checkUnassigned15MinDuties ? await DutyService.checkUnassigned15MinDuties() : 0;
@@ -137,14 +137,14 @@ class CronJobs {
                     }
                 }
 
-                if (completed > 0) {
-                    console.log(`Auto-completed ${completed} duties at ${new Date().toLocaleString()}`);
+                if (movedToPending > 0) {
+                    console.log(`Moved ${movedToPending} duties to pending-confirmation at ${new Date().toLocaleString()}`);
 
-                    // Log auto-complete activity
+                    // Log pending-confirmation activity
                     activityLogEmitter.emitSystemActivity(
-                        ACTIVITY_ACTIONS.DUTY_AUTO_COMPLETED,
-                        { dutiesCompleted: completed, timestamp: new Date().toISOString() }
-                    ).catch(err => console.error('Error logging auto-complete:', err));
+                        ACTIVITY_ACTIONS.DUTY_PENDING_CONFIRMATION,
+                        { dutiesMoved: movedToPending, timestamp: new Date().toISOString() }
+                    ).catch(err => console.error('Error logging pending-confirmation:', err));
                 }
                 if (expired > 0) {
                     console.log(`Auto-expired ${expired} duties at ${new Date().toLocaleString()}`);
@@ -166,7 +166,7 @@ class CronJobs {
                 }
             },
             1,
-            'Auto-complete job'
+            'Pending-confirmation job'
         );
 
 

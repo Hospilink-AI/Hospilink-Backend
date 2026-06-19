@@ -6,11 +6,12 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const cacheService = require('./cache.service');
 const notificationDelivery = require('./notificationDelivery.service');
-const { 
-    ConflictError, 
-    NotFoundError, 
+const {
+    AppError,
+    ConflictError,
+    NotFoundError,
     ValidationError,
-    UnauthorizedError 
+    UnauthorizedError
 } = require('../middleware/error.middleware');
 
 
@@ -61,13 +62,11 @@ class AuthService {
         // Store OTP separately for faster verification
         await cacheService.setTempUserOTP(email, { code: otp, expiresAt: otpExpiry }, 600);
 
-        try {
-            await EmailService.sendOTPEmail(email, otp, userData.name);
-        } catch (emailError) {
-            await cacheService.deleteTempUser(email);
-            await cacheService.del(`otp:${email}`);
-            throw new Error('Failed to send OTP email. Please try again.');
-        }
+        // Fire-and-forget — temp user and OTP are already persisted in Redis.
+        // If delivery fails the user can hit "resend OTP"; no need to block the
+        // signup response on SMTP latency.
+        EmailService.sendOTPEmail(email, otp, userData.name)
+            .catch(err => logger.error(`Failed to send signup OTP email to ${email}: ${err.message}`));
 
         logger.info(`New user registered: ${email}`);
         
@@ -86,7 +85,7 @@ class AuthService {
         // Acquire distributed lock to prevent race conditions
         const lockAcquired = await cacheService.acquireLock(lockKey, 5);
         if (!lockAcquired) {
-            throw new ValidationError('Verification in progress. Please wait.');
+            throw new ValidationError('Verification already in progress. Try again in a few seconds.');
         }
         
         try {
@@ -150,7 +149,7 @@ class AuthService {
                 };
             } catch (error) {
                 logger.error(`Error moving user from temp to permanent: ${error.message}`);
-                throw new Error('Failed to verify email. Please try again.');
+                throw new AppError('Failed to verify email. Please try again.', 500);
             }
         } finally {
             // Always release the lock
@@ -186,8 +185,9 @@ class AuthService {
             }
         ]);
 
-        // Send new OTP email
-        await EmailService.sendOTPEmail(tempUser.email, otp, tempUser.name);
+        // Send new OTP email — fire-and-forget, OTP is already updated in Redis
+        EmailService.sendOTPEmail(tempUser.email, otp, tempUser.name)
+            .catch(err => logger.error(`Failed to resend OTP email to ${tempUser.email}: ${err.message}`));
 
         logger.info(`OTP resent to: ${tempUser.email}`);
         
@@ -210,7 +210,7 @@ class AuthService {
             // Single database query with password 
             user = await User.findOne({ email: emailLower }).select('+password');
             if (!user) {
-                throw new NotFoundError('User not found. Please sign up first.');
+                throw new UnauthorizedError('Invalid email or password.');
             }
             // Cache only non-sensitive data
             await cacheService.set(cacheKey, {
@@ -230,7 +230,27 @@ class AuthService {
         
         const isPasswordValid = await user.comparePassword(password);
         if (!isPasswordValid) {
-            throw new UnauthorizedError('Invalid password');
+            throw new UnauthorizedError('Invalid email or password.');
+        }
+
+        // Check suspension before issuing any token — fail-closed, no token for suspended accounts
+        if (user.role === 'hospital' || user.role === 'staff') {
+            const Model = user.role === 'hospital'
+                ? require('../models/Hospital')
+                : require('../models/MedicalStaff');
+
+            const profile = await Model.findOne({ user: user._id })
+                .select('isSuspended suspensionReason')
+                .lean();
+
+            if (profile && profile.isSuspended) {
+                const reason = profile.suspensionReason
+                    ? `Your account has been suspended. Reason: ${profile.suspensionReason}. Please contact support for assistance.`
+                    : 'Your account has been suspended. Please contact support for assistance.';
+
+                const { ForbiddenError } = require('../middleware/error.middleware');
+                throw new ForbiddenError(reason);
+            }
         }
 
         // Generate JWT token
@@ -258,13 +278,23 @@ class AuthService {
 
         logger.info(`User signed in: ${user.email}`);
 
-        // Fetch onboarding step for immediate redirect — non-blocking parallel query
+        // Fetch onboarding step and verificationStatus in parallel — non-blocking
         let onboardingStep = 'complete';
+        let verificationStatus = null;
         try {
             if (user.role === 'staff' || user.role === 'hospital') {
                 const ProfileService = require('./profile.service');
-                const status = await ProfileService.checkProfileCompletion(user._id.toString());
+                const ProfileModel = user.role === 'hospital'
+                    ? require('../models/Hospital')
+                    : require('../models/MedicalStaff');
+
+                const [status, profileDoc] = await Promise.all([
+                    ProfileService.checkProfileCompletion(user._id.toString()),
+                    ProfileModel.findOne({ user: user._id }).select('verificationStatus').lean()
+                ]);
+
                 onboardingStep = status.onboardingStep;
+                verificationStatus = profileDoc?.verificationStatus ?? null;
             }
         } catch (_) {}
 
@@ -278,7 +308,8 @@ class AuthService {
                 role: user.role,
                 isEmailVerified: user.isEmailVerified
             },
-            onboardingStep
+            onboardingStep,
+            verificationStatus
         };
     }
 

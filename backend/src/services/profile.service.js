@@ -13,31 +13,50 @@ const notificationEmitter = require('./notificationEmitter');
 const emailService = require('./email.service');
 const requiredDocsConfig = require('../config/requiredDocs');
 const { getBatchStaffDutyStatus } = require('../utils/dutyStatus.helper');
+const logger = require('../utils/logger');
 const { formatRoleForDisplay } = require('../utils/helpers');
 const DashboardService = require('./dashboard.service');
+const SMSService = require('./sms.service');
+const {
+    ValidationError,
+    NotFoundError,
+    ConflictError,
+    ForbiddenError
+} = require('../middleware/error.middleware');
 
 class ProfileService {
+    // Returns true if normalizedPhone already belongs to another Hospital or MedicalStaff profile.
+    async isPhoneNumberRegistered(normalizedPhone) {
+        const [staffMatch, hospitalMatch] = await Promise.all([
+            MedicalStaff.findOne({ normalizedPhone }).select('_id').lean(),
+            Hospital.findOne({ normalizedPhone }).select('_id').lean()
+        ]);
+        return !!(staffMatch || hospitalMatch);
+    }
+
+
+    
     // Create medical staff profile
     async createMedicalStaffProfile(userId, profileData) {
         try {
             // Check if user exists and has staff role
             const user = await User.findById(userId);
             if (!user) {
-                throw new Error('User not found');
+                throw new NotFoundError('User not found');
             }
 
             if (user.role !== 'staff') {
-                throw new Error('User must have staff role to create medical staff profile');
+                throw new ForbiddenError('User must have staff role to create medical staff profile');
             }
 
             // Email must match signup email
             if (profileData.email && profileData.email !== user.email) {
-                throw new Error('Email must match the email used during signup');
+                throw new ValidationError('Email must match the email used during signup');
             }
 
             // Full name must match signup name
             if (profileData.fullName && profileData.fullName.trim() !== user.name.trim()) {
-                throw new Error(`Full name "${profileData.fullName}" must match the name used during signup "${user.name}"`);
+                throw new ValidationError(`Full name "${profileData.fullName}" must match the name used during signup "${user.name}"`);
             }
 
             // Use signup email for profile
@@ -46,7 +65,19 @@ class ProfileService {
             // Check if profile already exists
             const existingProfile = await MedicalStaff.findOne({ user: userId });
             if (existingProfile) {
-                throw new Error('Medical staff profile already exists');
+                throw new ConflictError('Medical staff profile already exists');
+            }
+
+            // Phone must be OTP-verified before profile creation
+            const normalizedStaffPhone = SMSService.normalizePhone(profileData.phoneNumber);
+            const staffPhoneVerified = await cacheService.getPhoneVerified(userId, normalizedStaffPhone);
+            if (!staffPhoneVerified) {
+                throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
+            }
+
+            // Phone number must be unique across all hospital and staff accounts
+            if (await this.isPhoneNumberRegistered(normalizedStaffPhone)) {
+                throw new ConflictError('Phone number already registered with another account');
             }
 
             let coordinates = null;
@@ -65,7 +96,7 @@ class ProfileService {
                 console.log('Geocoded from address for staff profile:', coordinates);
             } catch (error) {
                 console.error('Geocoding failed for staff profile:', error.message);
-                throw new Error('Failed to geocode location. Please provide valid city and area.');
+                throw new ValidationError('Failed to geocode location. Please provide valid city and area.');
             }
 
             // Validate coordinates
@@ -81,6 +112,8 @@ class ProfileService {
                 state: profileData.state,
                 pincode: profileData.pincode,
                 phoneNumber: profileData.phoneNumber,
+                normalizedPhone: normalizedStaffPhone,
+                isPhoneVerified: true,
                 email: profileData.email,
                 coordinates: coordinates,
                 profileSummary: profileData.profileSummary || '',
@@ -91,6 +124,9 @@ class ProfileService {
             });
 
             await medicalStaffProfile.save();
+
+            // Consume the verified flag — single-use, clean up immediately after save
+            await cacheService.deletePhoneVerified(userId, normalizedStaffPhone);
 
             // Populate user data
             await medicalStaffProfile.populate('user', 'name email role isEmailVerified');
@@ -112,17 +148,13 @@ class ProfileService {
                 // Don't fail the registration if notification fails
             }
 
-            // Send profile creation confirmation email
-            try {
-                await emailService.sendProfileCreatedConfirmationEmail(
-                    user.email,
-                    medicalStaffProfile.fullName || user.name,
-                    'staff'
-                );
-            } catch (emailError) {
-                console.error('Error sending profile creation email:', emailError);
-                // Don't fail the registration if email fails
-            }
+            // Send profile creation confirmation email — fire-and-forget,
+            // profile is already saved so SMTP latency should not affect the response.
+            emailService.sendProfileCreatedConfirmationEmail(
+                user.email,
+                medicalStaffProfile.fullName || user.name,
+                'staff'
+            ).catch(err => logger.error(`Failed to send staff profile confirmation email to ${user.email}: ${err.message}`));
 
             return {
                 success: true,
@@ -131,7 +163,7 @@ class ProfileService {
                 message: 'Medical staff profile created successfully'
             };
         } catch (error) {
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -141,21 +173,21 @@ class ProfileService {
             // Check if user exists and has hospital role
             const user = await User.findById(userId);
             if (!user) {
-                throw new Error('User not found');
+                throw new NotFoundError('User not found');
             }
 
             if (user.role !== 'hospital') {
-                throw new Error('User must have hospital role to create hospital profile');
+                throw new ForbiddenError('User must have hospital role to create hospital profile');
             }
 
             // Email must match signup email
             if (profileData.email && profileData.email !== user.email) {
-                throw new Error('Email must match the email used during signup');
+                throw new ValidationError('Email must match the email used during signup');
             }
 
             // Hospital name must match signup name
             if (profileData.hospitalLegalName && profileData.hospitalLegalName.trim() !== user.name.trim()) {
-                throw new Error(`Hospital name "${profileData.hospitalLegalName}" must match the name used during signup "${user.name}"`);
+                throw new ValidationError(`Hospital name "${profileData.hospitalLegalName}" must match the name used during signup "${user.name}"`);
             }
 
             // Use signup email for profile
@@ -164,7 +196,19 @@ class ProfileService {
             // Check if profile already exists
             const existingProfile = await Hospital.findOne({ user: userId });
             if (existingProfile) {
-                throw new Error('Hospital profile already exists');
+                throw new ConflictError('Hospital profile already exists');
+            }
+
+            // Phone must be OTP-verified before profile creation
+            const normalizedHospitalPhone = SMSService.normalizePhone(profileData.phoneNumber);
+            const hospitalPhoneVerified = await cacheService.getPhoneVerified(userId, normalizedHospitalPhone);
+            if (!hospitalPhoneVerified) {
+                throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
+            }
+
+            // Phone number must be unique across all hospital and staff accounts
+            if (await this.isPhoneNumberRegistered(normalizedHospitalPhone)) {
+                throw new ConflictError('Phone number already registered with another account');
             }
 
             let coordinates;
@@ -232,7 +276,7 @@ class ProfileService {
                         geocodingAddress = fallbackAddress;
                     } catch (finalError) {
                         console.error('All geocoding attempts failed:', finalError.message);
-                        throw new Error(`Failed to geocode hospital location. Please check your address details. Error: ${finalError.message}`);
+                        throw new ValidationError("Couldn't verify that address. Check the city and area and try again.");
                     }
                 }
             }
@@ -247,6 +291,8 @@ class ProfileService {
                 state: profileData.state,
                 pincode: profileData.pincode,
                 phoneNumber: profileData.phoneNumber,
+                normalizedPhone: normalizedHospitalPhone,
+                isPhoneVerified: true,
                 servicesAvailable: profileData.servicesAvailable,
                 staffCount: profileData.staffCount,
                 description: profileData.description || '',
@@ -254,6 +300,9 @@ class ProfileService {
             });
 
             await hospitalProfile.save();
+
+            // Consume the verified flag — single-use, clean up immediately after save
+            await cacheService.deletePhoneVerified(userId, normalizedHospitalPhone);
 
             // Populate user data
             await hospitalProfile.populate('user', 'name email role isEmailVerified');
@@ -272,17 +321,13 @@ class ProfileService {
                 // Don't fail the registration if notification fails
             }
 
-            // Send profile creation confirmation email
-            try {
-                await emailService.sendProfileCreatedConfirmationEmail(
-                    user.email,
-                    hospitalProfile.hospitalLegalName || user.name,
-                    'hospital'
-                );
-            } catch (emailError) {
-                console.error('Error sending profile creation email:', emailError);
-                // Don't fail the registration if email fails
-            }
+            // Send profile creation confirmation email — fire-and-forget,
+            // profile is already saved so SMTP latency should not affect the response.
+            emailService.sendProfileCreatedConfirmationEmail(
+                user.email,
+                hospitalProfile.hospitalLegalName || user.name,
+                'hospital'
+            ).catch(err => logger.error(`Failed to send hospital profile confirmation email to ${user.email}: ${err.message}`));
 
             return {
                 success: true,
@@ -292,7 +337,7 @@ class ProfileService {
                 message: 'Hospital profile created successfully'
             };
         } catch (error) {
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -300,7 +345,7 @@ class ProfileService {
     async getUserProfile(userId) {
         try {
             const user = await User.findById(userId).select('name email role isEmailVerified').lean();
-            if (!user) throw new Error('User not found');
+            if (!user) throw new NotFoundError('User not found');
 
             // Check cache first
             const cachedProfile = await cacheService.getProfile(userId, user.role);
@@ -452,7 +497,7 @@ class ProfileService {
 
             return result;
         } catch (error) {
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -462,7 +507,7 @@ class ProfileService {
             // Get user with lean query
             const user = await User.findById(userId).select('name email role').lean();
             if (!user) {
-                throw new Error('User not found');
+                throw new NotFoundError('User not found');
             }
 
             let updatedProfile = null;
@@ -473,17 +518,17 @@ class ProfileService {
                 const currentProfile = await MedicalStaff.findOne({ user: userId }).lean();
 
                 if (!currentProfile) {
-                    throw new Error('Staff profile not found');
+                    throw new NotFoundError('Staff profile not found');
                 }
 
                 // Prevent email changes (read-only after creation)
                 if (updateData.email && updateData.email !== user.email) {
-                    throw new Error('Email cannot be changed after profile creation');
+                    throw new ValidationError('Email cannot be changed after profile creation');
                 }
 
                 // Prevent phone number changes (read-only after creation)
                 if (updateData.phoneNumber && updateData.phoneNumber !== currentProfile.phoneNumber) {
-                    throw new Error('Phone number cannot be changed after profile creation');
+                    throw new ValidationError('Phone number cannot be changed after profile creation');
                 }
 
                 // Remove read-only fields from update data
@@ -575,19 +620,19 @@ class ProfileService {
                 const currentProfile = await Hospital.findOne({ user: userId }).lean();
 
                 if (!currentProfile) {
-                    throw new Error('Hospital profile not found');
+                    throw new NotFoundError('Hospital profile not found');
                 }
 
                 let finalUpdateData = { ...updateData };
 
                 // Prevent email changes (read-only after creation)
                 if (updateData.email && updateData.email !== user.email) {
-                    throw new Error('Email cannot be changed after profile creation');
+                    throw new ValidationError('Email cannot be changed after profile creation');
                 }
 
                 // Prevent phone number changes (read-only after creation)
                 if (updateData.phoneNumber && updateData.phoneNumber !== currentProfile.phoneNumber) {
-                    throw new Error('Phone number cannot be changed after profile creation');
+                    throw new ValidationError('Phone number cannot be changed after profile creation');
                 }
 
                 // Remove read-only fields from update data
@@ -660,7 +705,7 @@ class ProfileService {
             }
 
             if (!updatedProfile) {
-                throw new Error('Profile not found');
+                throw new NotFoundError('Profile not found');
             }
 
             // Update user collection if needed
@@ -715,7 +760,7 @@ class ProfileService {
                 message: 'Profile updated successfully'
             };
         } catch (error) {
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -736,7 +781,7 @@ class ProfileService {
                 .select('role isEmailVerified _id')
                 .lean();
 
-            if (!user) throw new Error('User not found');
+            if (!user) throw new NotFoundError('User not found');
 
 
             // Run profile + document checks in parallel
@@ -807,7 +852,7 @@ class ProfileService {
             return result;
         } catch (error) {
             console.error(`Profile completion check failed for user ${userId}:`, error.message);
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -895,7 +940,7 @@ class ProfileService {
 
             return finalResults;
         } catch (error) {
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -905,7 +950,7 @@ class ProfileService {
         try {
             // Input validation
             if (typeof isAvailable !== 'boolean') {
-                throw new Error('isAvailable must be a boolean value');
+                throw new ValidationError('isAvailable must be a boolean value');
             }
 
             // Parallel database queries for better performance
@@ -915,15 +960,15 @@ class ProfileService {
             ]);
 
             if (!user) {
-                throw new Error('User not found');
+                throw new NotFoundError('User not found');
             }
 
             if (user.role !== 'staff') {
-                throw new Error('Only medical staff can toggle availability status');
+                throw new ForbiddenError('Only medical staff can toggle availability status');
             }
 
             if (!medicalStaff) {
-                throw new Error('Medical staff profile not found');
+                throw new NotFoundError('Medical staff profile not found');
             }
 
             // Check verification status for availability toggle
@@ -973,7 +1018,7 @@ class ProfileService {
                 }
 
                 if (upcomingDuties.length > 0) {
-                    throw new Error('Cannot set unavailable while you have upcoming duties');
+                    throw new ConflictError('Cannot set unavailable while you have upcoming duties');
                 }
             }
 
@@ -992,7 +1037,7 @@ class ProfileService {
             );
 
             if (!updatedStaff) {
-                throw new Error('Medical staff profile not found');
+                throw new NotFoundError('Medical staff profile not found');
             }
 
             // Selective cache invalidation
@@ -1021,7 +1066,7 @@ class ProfileService {
                 canToggleAvailability: medicalStaff.verificationStatus === 'verified'
             };
         } catch (error) {
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -1032,7 +1077,7 @@ class ProfileService {
         try {
             // Input validation
             if (radiusKm < 1 || radiusKm > 100) {
-                throw new Error('Radius must be between 1km and 100km');
+                throw new ValidationError('Radius must be between 1km and 100km');
             }
 
             // Check cache first (2 minutes for location-based queries)
@@ -1052,11 +1097,11 @@ class ProfileService {
                 .lean();
 
             if (!hospital) {
-                throw new Error('Hospital profile not found');
+                throw new NotFoundError('Hospital profile not found');
             }
 
             if (!hospital.coordinates || !hospital.coordinates.coordinates) {
-                throw new Error('Hospital location coordinates not found');
+                throw new NotFoundError('Hospital location coordinates not found');
             }
 
             const hospitalLat = hospital.coordinates.coordinates.latitude;
@@ -1289,7 +1334,7 @@ class ProfileService {
             return result;
         } catch (error) {
             console.error('Error in getNearbyAvailableStaff:', error);
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -1300,22 +1345,22 @@ class ProfileService {
         try {
             // Validate file exists
             if (!file) {
-                throw new Error("No file uploaded");
+                throw new ValidationError("No file uploaded");
             }
 
             // Validate file type
             const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png'];
             if (!allowedMimeTypes.includes(file.mimetype)) {
-                throw new Error('Invalid file type. Only JPG, JPEG, and PNG are allowed');
+                throw new ValidationError('Invalid file type. Only JPG, JPEG, and PNG are allowed');
             }
 
             // Validate file size (5MB)
             if (file.size > 5 * 1024 * 1024) {
-                throw new Error('File too large. Maximum size is 5MB');
+                throw new ValidationError('File too large. Maximum size is 5MB');
             }
 
             const user = await User.findById(userId).lean();
-            if (!user) throw new Error("User not found");
+            if (!user) throw new NotFoundError("User not found");
 
             let model;
 
@@ -1325,11 +1370,11 @@ class ProfileService {
             } else if (user.role === 'hospital') {
                 model = Hospital;
             } else {
-                throw new Error("Invalid user role");
+                throw new ForbiddenError("Invalid user role");
             }
 
             const profile = await model.findOne({ user: userId });
-            if (!profile) throw new Error("Profile not found");
+            if (!profile) throw new NotFoundError("Profile not found");
 
             // Delete old image if exists
             if (profile.profilePicture?.s3Key) {
@@ -1413,7 +1458,7 @@ class ProfileService {
             }
 
         } catch (error) {
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -1422,7 +1467,7 @@ class ProfileService {
     async deleteProfilePicture(userId) {
         try {
             const user = await User.findById(userId).lean();
-            if (!user) throw new Error("User not found");
+            if (!user) throw new NotFoundError("User not found");
 
             let model;
 
@@ -1432,14 +1477,14 @@ class ProfileService {
             } else if (user.role === 'hospital') {
                 model = Hospital;
             } else {
-                throw new Error("Invalid user role");
+                throw new ForbiddenError("Invalid user role");
             }
 
             const profile = await model.findOne({ user: userId });
-            if (!profile) throw new Error("Profile not found");
+            if (!profile) throw new NotFoundError("Profile not found");
 
             if (!profile.profilePicture?.s3Key) {
-                throw new Error("No profile picture found");
+                throw new NotFoundError("No profile picture found");
             }
 
             // Delete from S3
@@ -1466,7 +1511,7 @@ class ProfileService {
             };
 
         } catch (error) {
-            throw new Error(error.message);
+            throw error;
         }
     }
 
@@ -1475,7 +1520,7 @@ class ProfileService {
     // Add skills (append unique)
     async addSkills(userId, skills = []) {
         if (!Array.isArray(skills) || skills.length === 0) {
-            throw new Error('Skills must be a non-empty array');
+            throw new ValidationError('Skills must be a non-empty array');
         }
 
         const cleanedSkills = skills.map(s => s.trim()).filter(Boolean);
@@ -1491,7 +1536,7 @@ class ProfileService {
             }
         );
 
-        if (!updated) throw new Error('Medical staff profile not found');
+        if (!updated) throw new NotFoundError('Medical staff profile not found');
 
         await cacheService.invalidateProfile(userId, 'staff');
 
@@ -1509,7 +1554,7 @@ class ProfileService {
             .select('skills')
             .lean();
 
-        if (!staff) throw new Error('Medical staff profile not found');
+        if (!staff) throw new NotFoundError('Medical staff profile not found');
 
         return {
             success: true,
@@ -1521,7 +1566,7 @@ class ProfileService {
     // Update skills
     async updateSkills(userId, skills = []) {
         if (!Array.isArray(skills)) {
-            throw new Error('Skills must be an array');
+            throw new ValidationError('Skills must be an array');
         }
 
         const cleanedSkills = skills.map(s => s.trim()).filter(Boolean);
@@ -1537,7 +1582,7 @@ class ProfileService {
             { new: true }
         );
 
-        if (!updated) throw new Error('Medical staff profile not found');
+        if (!updated) throw new NotFoundError('Medical staff profile not found');
 
         await cacheService.invalidateProfile(userId, 'staff');
 

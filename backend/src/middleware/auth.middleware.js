@@ -1,7 +1,10 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Hospital = require('../models/Hospital');
+const MedicalStaff = require('../models/MedicalStaff');
 const { UnauthorizedError, ForbiddenError, asyncHandler } = require('./error.middleware');
 const cacheService = require('../services/cache.service');
+const logger = require('../utils/logger');
  
  
 exports.protect = asyncHandler(async (req, res, next) => {
@@ -64,9 +67,60 @@ exports.protect = asyncHandler(async (req, res, next) => {
 exports.authorize = (...roles) => {
     return (req, res, next) => {
         if (!roles.includes(req.user.role)) {
-            return next(new ForbiddenError(`User role ${req.user.role} is not authorized to access this route`));
+            return next(new ForbiddenError("You don't have permission to do that."));
         }
         next();
     };
 };
+
+/**
+ * checkSuspension — runs after protect(), before any feature-level middleware.
+ * Blocks suspended hospital and staff accounts with a clear 403 message.
+ * Admin and candidate roles are never blocked by this check.
+ */
+exports.checkSuspension = asyncHandler(async (req, res, next) => {
+    const role = req.user.role;
+
+    // Only applies to hospital and staff
+    if (role !== 'hospital' && role !== 'staff') {
+        return next();
+    }
+
+    const userId = req.user._id || req.user.id;
+    const cacheKey = `suspension:${role}:${userId}`;
+
+    let suspensionData = await cacheService.get(cacheKey);
+
+    if (!suspensionData) {
+        // Cache miss — query the profile model directly
+        const Model = role === 'hospital' ? Hospital : MedicalStaff;
+        const profile = await Model.findOne({ user: userId })
+            .select('isSuspended suspensionReason')
+            .lean();
+
+        if (!profile) {
+            // Profile not yet created — let downstream middleware handle it
+            return next();
+        }
+
+        suspensionData = {
+            isSuspended: profile.isSuspended || false,
+            suspensionReason: profile.suspensionReason || null
+        };
+
+        // Cache for 5 minutes (same TTL as verification cache)
+        await cacheService.set(cacheKey, suspensionData, 300);
+        logger.debug(`Suspension cache set for ${role} user ${userId}: isSuspended=${suspensionData.isSuspended}`);
+    }
+
+    if (suspensionData.isSuspended) {
+        const message = suspensionData.suspensionReason
+            ? `Your account has been suspended. Reason: ${suspensionData.suspensionReason}. Please contact support for assistance.`
+            : 'Your account has been suspended. Please contact support for assistance.';
+
+        throw new ForbiddenError(message);
+    }
+
+    next();
+});
  
