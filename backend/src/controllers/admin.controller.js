@@ -703,29 +703,6 @@ exports.adminOverrideDutyStatus = asyncHandler(async (req, res) => {
 
 
 
-// Admin resolves a dispute - PATCH /api/admin/duties/:id/resolve-dispute
-exports.resolveDispute = asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const { finalStatus, notes, paymentMethod, isPaid, completedAt } = req.body;
-    const adminId = req.user.id;
-
-    const duty = await adminService.resolveDispute(id, adminId, { finalStatus, notes, paymentMethod, isPaid, completedAt });
-
-    activityLogEmitter.emitSystemActivity(
-        ACTIVITY_ACTIONS.DUTY_DISPUTE_RESOLVED,
-        { dutyId: duty._id.toString(), finalStatus, timestamp: new Date().toISOString() }
-    ).catch(err => logger.error('Error logging dispute resolution:', err));
-
-    res.status(200).json({
-        success: true,
-        message: `Dispute resolved — duty marked as ${finalStatus}.`,
-        duty
-    });
-});
-
-
-
-
 // Admin unlocks a locked OTP - PATCH /api/admin/duties/:id/unlock-otp
 exports.unlockDutyOtp = asyncHandler(async (req, res) => {
     const { id } = req.params;

@@ -965,12 +965,13 @@ const validateVerifyEndOtp = (req, res, next) => {
 
 
 
-// Validation for raising a dispute (staff or hospital)
-const validateRaiseDispute = (req, res, next) => {
-    const { reason } = req.body;
+// Validation for resending an OTP — 'start' (staff-only, sent to hospital's phone) or
+// 'end' (staff sent to staff's phone)
+const validateResendOtp = (req, res, next) => {
+    const { otpType } = req.body;
     const errors = [];
 
-    const allowedFields = ['reason'];
+    const allowedFields = ['otpType'];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
 
@@ -978,10 +979,9 @@ const validateRaiseDispute = (req, res, next) => {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
     }
 
-    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
-        errors.push('reason is required');
-    } else if (reason.length > 1000) {
-        errors.push('reason cannot exceed 1000 characters');
+    const validOtpTypes = ['start', 'end'];
+    if (!otpType || !validOtpTypes.includes(otpType)) {
+        errors.push(`otpType is required. Allowed: ${validOtpTypes.join(', ')}`);
     }
 
     if (errors.length > 0) {
@@ -994,7 +994,6 @@ const validateRaiseDispute = (req, res, next) => {
 
     next();
 };
-
 
 
 
@@ -1811,7 +1810,7 @@ module.exports = {
     validateRequestStartOtp,
     validateVerifyStartOtp,
     validateVerifyEndOtp,
-    validateRaiseDispute,
+    validateResendOtp,
     validateDutyCancellation,
     validateDutyEdit,
     validatePagination,

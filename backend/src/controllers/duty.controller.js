@@ -544,40 +544,28 @@ exports.verifyEndOtp = asyncHandler(async (req, res) => {
 
 
 
-exports.regenerateEndOtp = asyncHandler(async (req, res) => {
+exports.resendOtp = asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const { otpType } = req.body;
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    const { expiresAt } = await DutyService.regenerateEndOtp(id, userId, userRole);
+    const result = await DutyService.resendOtp(id, userId, userRole, otpType);
+
+    if (otpType === 'start' && result.alreadyInProgress) {
+        return res.status(200).json({
+            success: true,
+            message: 'Duty is already in progress.',
+            data: { expiresAt: null }
+        });
+    }
 
     res.status(200).json({
         success: true,
-        message: 'A new end OTP has been sent to the staff member\'s registered mobile number via SMS.',
-        data: { expiresAt }
-    });
-});
-
-
-
-
-exports.raiseDispute = asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const { reason } = req.body;
-    const userId = req.user.id;
-    const userRole = req.user.role;
-
-    const duty = await DutyService.raiseDispute(id, userId, userRole, reason);
-
-    activityLogEmitter.emitSystemActivity(
-        ACTIVITY_ACTIONS.DUTY_DISPUTED,
-        { dutyId: duty._id.toString(), raisedBy: userRole, reason, timestamp: new Date().toISOString() }
-    ).catch(err => logger.error('Error logging dispute raised:', err));
-
-    res.status(200).json({
-        success: true,
-        message: 'Dispute raised. An admin will review this duty.',
-        duty
+        message: otpType === 'start'
+            ? 'A new start OTP has been sent to the hospital via SMS. Ask the hospital to share the code with you.'
+            : 'A new end OTP has been sent to the staff member\'s registered mobile number via SMS.',
+        data: { expiresAt: result.expiresAt }
     });
 });
 

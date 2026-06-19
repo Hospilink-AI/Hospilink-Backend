@@ -108,14 +108,14 @@ class CronJobs {
     }
 
     static startAllJobs() {
-        // Auto-complete duties job - run every 1 minute on the clock (:00, :01, :02, etc.)
+        // Pending-confirmation job - run every 1 minute on the clock (:00, :01, :02, etc.)
         this.scheduleJob(
             async () => {
                 // Distributed lock: 55s TTL — shorter than 60s interval so it always expires before next run
-                const hasLock = await acquireCronLock('auto-complete', 55);
+                const hasLock = await acquireCronLock('pending-confirmation', 55);
                 if (!hasLock) return;
 
-                const movedToPending = await DutyService.autoCompleteDuties();
+                const movedToPending = await DutyService.moveDutiesToPendingConfirmation();
                 const expired = await DutyService.expireUnacceptedDuties();
                 const reminders = DutyService.sendNavigationReminders ? await DutyService.sendNavigationReminders() : 0;
                 const unassigned15 = DutyService.checkUnassigned15MinDuties ? await DutyService.checkUnassigned15MinDuties() : 0;
@@ -166,7 +166,7 @@ class CronJobs {
                 }
             },
             1,
-            'Auto-complete job'
+            'Pending-confirmation job'
         );
 
 

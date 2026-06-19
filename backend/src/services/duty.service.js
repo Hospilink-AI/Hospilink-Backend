@@ -739,7 +739,7 @@ class DutyService {
 
 
 
-    async autoCompleteDuties() {
+    async moveDutiesToPendingConfirmation() {
         // Use getCurrentIST() for consistent time handling
         const istNow = getCurrentIST();
 
@@ -2905,38 +2905,43 @@ class DutyService {
 
 
 
-    // Re-mints the End OTP — used when the original expired, or staff never tapped "End Duty"
-    // and the duty fell into 'pending-confirmation'. Either staff (who reads the code) or
-    // hospital (who enters it) may trigger this; the new code is sent via SMS to the staff's
-    // own registered phone (never returned in the response or an in-app notification).
-    async regenerateEndOtp(dutyId, userId, userRole) {
+    
+    async resendOtp(dutyId, userId, userRole, otpType) {
+        if (userRole !== 'staff') {
+            throw new ForbiddenError('Only the assigned staff member can resend duty OTPs');
+        }
+
+        if (otpType === 'start') {
+            // Reuses requestStartOtp's window/geofence checks, minting, and SMS dispatch verbatim
+            return this.requestStartOtp(dutyId, userId);
+        }
+        if (otpType === 'end') {
+            return this._resendEndOtp(dutyId, userId);
+        }
+        throw new ValidationError("otpType must be 'start' or 'end'");
+    }
+
+    async _resendEndOtp(dutyId, userId) {
+        const medicalStaff = await MedicalStaff.findOne({ user: userId });
+        if (!medicalStaff) {
+            throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
+        }
+
         const duty = await Duty.findById(dutyId);
         if (!duty) {
             throw new NotFoundError('Duty not found');
         }
 
-        if (userRole === 'staff') {
-            const medicalStaff = await MedicalStaff.findOne({ user: userId });
-            if (!medicalStaff || !duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
-                throw new ForbiddenError('You can only regenerate OTP for duties assigned to you');
-            }
-        } else if (userRole === 'hospital') {
-            const hospital = await Hospital.findOne({ user: userId });
-            if (!hospital || duty.hospital.toString() !== hospital._id.toString()) {
-                throw new ForbiddenError('You can only regenerate OTP for your own duties');
-            }
+        if (!duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
+            throw new ForbiddenError('You can only resend OTP for duties assigned to you');
         }
 
         if (!['in-progress', 'pending-confirmation'].includes(duty.status)) {
-            throw new ValidationError('End OTP can only be regenerated while the duty is in progress or pending confirmation');
+            throw new ValidationError('End OTP can only be resent while the duty is in progress or pending confirmation');
         }
 
         if (duty.endOtp.status === 'LOCKED') {
             throw new ForbiddenError('End OTP is locked — contact admin support');
-        }
-
-        if (duty.endOtp.status === 'PENDING' && duty.endOtp.expiresAt && duty.endOtp.expiresAt > getCurrentIST()) {
-            throw new ValidationError('An end OTP is still active — wait for it to expire before requesting a new one');
         }
 
         const code = OTPService.generateOTP();
@@ -2962,7 +2967,7 @@ class DutyService {
         });
 
         if (!updated) {
-            throw new ConflictError('Duty status changed — cannot regenerate end OTP');
+            throw new ConflictError('Duty status changed — cannot resend end OTP');
         }
 
         // The new code is only ever sent via SMS to staff's own phone — they read it out to the hospital
@@ -2982,71 +2987,6 @@ class DutyService {
 
 
 
-    // Either party (staff or hospital) raises a dispute on a duty that's awaiting hospital
-    // confirmation, or was recently completed (within DUTY_DISPUTE_WINDOW_HOURS).
-    async raiseDispute(dutyId, userId, userRole, reason) {
-        const duty = await Duty.findById(dutyId);
-        if (!duty) {
-            throw new NotFoundError('Duty not found');
-        }
-
-        if (userRole === 'staff') {
-            const medicalStaff = await MedicalStaff.findOne({ user: userId });
-            if (!medicalStaff || !duty.assignedTo || duty.assignedTo.toString() !== medicalStaff._id.toString()) {
-                throw new ForbiddenError('You can only raise a dispute for duties assigned to you');
-            }
-        } else if (userRole === 'hospital') {
-            const hospital = await Hospital.findOne({ user: userId });
-            if (!hospital || duty.hospital.toString() !== hospital._id.toString()) {
-                throw new ForbiddenError('You can only raise a dispute for your own duties');
-            }
-        } else {
-            throw new ForbiddenError('Only staff or hospital can raise a dispute');
-        }
-
-        if (!['pending-confirmation', 'completed'].includes(duty.status)) {
-            throw new ValidationError('A dispute can only be raised while a duty is pending confirmation or recently completed');
-        }
-
-        if (duty.status === 'completed') {
-            const windowHours = parseInt(process.env.DUTY_DISPUTE_WINDOW_HOURS) || 48;
-            const windowEnd = new Date((duty.completedAt || duty.updatedAt).getTime() + windowHours * 60 * 60 * 1000);
-            if (getCurrentIST() > windowEnd) {
-                throw new ValidationError(`Completed duties can only be disputed within ${windowHours} hours of completion`);
-            }
-        }
-
-        const now = getCurrentIST();
-        const updated = await Duty.findOneAndUpdate(
-            { _id: dutyId, status: duty.status },
-            {
-                $set: {
-                    status: 'disputed',
-                    disputedAt: now,
-                    disputeRaisedBy: userId,
-                    disputeRaisedByRole: userRole,
-                    disputeReason: reason
-                },
-                $push: {
-                    statusHistory: {
-                        status: 'disputed',
-                        timestamp: now,
-                        changedBy: userId,
-                        reason: `Dispute raised by ${userRole}: ${reason}`
-                    }
-                }
-            },
-            { new: true }
-        )
-            .populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } })
-            .populate({ path: 'assignedTo', populate: { path: 'user', select: 'name email' } });
-
-        if (!updated) {
-            throw new ConflictError('Duty status changed — cannot raise dispute');
-        }
-
-        return updated;
-    }
 }
 
 module.exports = new DutyService();
