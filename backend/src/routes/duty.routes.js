@@ -11,7 +11,6 @@ const {
     validateRequestStartOtp,
     validateVerifyStartOtp,
     validateVerifyEndOtp,
-    validateRaiseDispute,
     validateDutyCancellation,
     validateDutyEdit,
     validatePagination,
@@ -100,15 +99,6 @@ router.post(
     validateObjectId('id'),
     dutyController.regenerateEndOtp
 );
-
-router.post(
-    '/duties/:id/dispute',
-    authorize('staff', 'hospital'),
-    validateObjectId('id'),
-    validateRaiseDispute,
-    dutyController.raiseDispute
-);
-
 
 router.post(
     '/duty/status-history',

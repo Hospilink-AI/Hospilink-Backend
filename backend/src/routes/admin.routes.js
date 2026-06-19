@@ -21,7 +21,6 @@ const {
     validateRejectionReason,
     validateSuspensionReason,
     validateAssignDuty,
-    validateResolveDispute,
     validateUnlockOtp,
     validateAdminOverrideStatus,
 } = require('../middleware/admin.middleware');
@@ -102,13 +101,6 @@ router.post('/assign-duty', validateAssignDuty, adminController.assignDutyToStaf
 
 
 // Duty Management endpoints for admin
-router.patch(
-    '/duties/:id/resolve-dispute',
-    validateObjectId('id'),
-    validateResolveDispute,
-    adminController.resolveDispute
-);
-
 router.patch(
     '/duties/:id/unlock-otp',
     validateObjectId('id'),

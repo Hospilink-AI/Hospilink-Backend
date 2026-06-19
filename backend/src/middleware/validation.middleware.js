@@ -965,39 +965,6 @@ const validateVerifyEndOtp = (req, res, next) => {
 
 
 
-// Validation for raising a dispute (staff or hospital)
-const validateRaiseDispute = (req, res, next) => {
-    const { reason } = req.body;
-    const errors = [];
-
-    const allowedFields = ['reason'];
-    const receivedFields = Object.keys(req.body);
-    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
-
-    if (unexpectedFields.length > 0) {
-        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
-    }
-
-    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
-        errors.push('reason is required');
-    } else if (reason.length > 1000) {
-        errors.push('reason cannot exceed 1000 characters');
-    }
-
-    if (errors.length > 0) {
-        return res.status(400).json({
-            success: false,
-            message: 'Validation failed',
-            errors: errors
-        });
-    }
-
-    next();
-};
-
-
-
-
 
 // Validation for duty cancellation
 const validateDutyCancellation = (req, res, next) => {
@@ -1811,7 +1778,6 @@ module.exports = {
     validateRequestStartOtp,
     validateVerifyStartOtp,
     validateVerifyEndOtp,
-    validateRaiseDispute,
     validateDutyCancellation,
     validateDutyEdit,
     validatePagination,
