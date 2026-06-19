@@ -10,14 +10,14 @@ module.exports = async (req, res) => {
     try {
         await connectDB();
 
-        const completed = await DutyService.autoCompleteDuties();
+        const movedToPending = await DutyService.moveDutiesToPendingConfirmation();
         const expired = await DutyService.expireUnacceptedDuties();
 
-        console.log(`Cron: completed=${completed}, expired=${expired}`);
+        console.log(`Cron: movedToPending=${movedToPending}, expired=${expired}`);
 
-        res.status(200).json({ success: true, completed, expired });
+        res.status(200).json({ success: true, movedToPending, expired });
     } catch (error) {
-        console.error('Cron auto-complete error:', error);
+        console.error('Cron pending-confirmation error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };

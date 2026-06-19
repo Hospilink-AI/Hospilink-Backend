@@ -739,7 +739,7 @@ class DutyService {
 
 
 
-    async autoCompleteDuties() {
+    async moveDutiesToPendingConfirmation() {
         // Use getCurrentIST() for consistent time handling
         const istNow = getCurrentIST();
 
