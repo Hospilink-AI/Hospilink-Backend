@@ -4,6 +4,7 @@ const axios = require("axios");
 const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 const { getDocument } = pdfjsLib;
 const { createCanvas } = require("canvas");
+const logger = require("../utils/logger");
 
 exports.extractQRFromBuffer = async (buffer) => {
     // PDF DETECTION
