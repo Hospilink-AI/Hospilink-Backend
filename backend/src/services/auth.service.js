@@ -233,6 +233,11 @@ class AuthService {
             throw new UnauthorizedError('Invalid email or password.');
         }
 
+        // Admins must use the dedicated admin signin endpoint, not this one
+        if (user.role === 'admin') {
+            throw new UnauthorizedError('Invalid email or password.');
+        }
+
         // Check suspension before issuing any token — fail-closed, no token for suspended accounts
         if (user.role === 'hospital' || user.role === 'staff') {
             const Model = user.role === 'hospital'
