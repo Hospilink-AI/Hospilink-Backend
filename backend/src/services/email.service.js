@@ -1,20 +1,60 @@
 const nodemailer = require('nodemailer');
 const logger = require('../utils/logger');
 
+// Hard cap on a single sendMail call — prevents a stalled SMTP connection from
+// leaking indefinitely. Should be well under Railway's/ECS's idle connection
+// kill time but large enough to allow for a slow-start SMTP handshake.
+const SEND_TIMEOUT_MS = 15000; // 15 seconds
+
 class EmailService {
     constructor() {
         this.transporter = nodemailer.createTransport({
             host: process.env.EMAIL_HOST,
-            port: process.env.EMAIL_PORT,
-            secure: false,
+            port: parseInt(process.env.EMAIL_PORT) || 587,
+            secure: (parseInt(process.env.EMAIL_PORT) || 587) === 465, // true for port 465 (SMTPS), false for 587 (STARTTLS)
             pool: true,          // reuse SMTP connections — avoids per-request TCP+TLS handshake
             maxConnections: 5,
             maxMessages: 100,
+            // Explicit timeouts — nodemailer defaults are 2 min (connection) and
+            // 10 min (socket), which are way too long for a cloud environment like
+            // Railway or ECS where stalled connections are silently killed.
+            connectionTimeout: 10000,  // 10s to establish TCP+TLS to SMTP server
+            greetingTimeout: 8000,     // 8s to receive the SMTP greeting banner
+            socketTimeout: 12000,      // 12s idle socket timeout between SMTP commands
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_PASS
+            },
+            tls: {
+                rejectUnauthorized: true
             }
         });
+
+        // Verify connection at startup so misconfiguration shows up in logs immediately
+        // rather than silently failing on the first real email send.
+        this.transporter.verify((error) => {
+            if (error) {
+                logger.error(`Email transporter connection failed: ${error.message}`);
+            } else {
+                logger.info('Email transporter ready');
+            }
+        });
+    }
+
+    /**
+     * Wraps a sendMail call with a hard timeout so a stalled SMTP connection
+     * never hangs indefinitely in the background.
+     */
+    async _sendWithTimeout(mailOptions) {
+        return Promise.race([
+            this.transporter.sendMail(mailOptions),
+            new Promise((_, reject) =>
+                setTimeout(
+                    () => reject(new Error(`Email send timed out after ${SEND_TIMEOUT_MS}ms`)),
+                    SEND_TIMEOUT_MS
+                )
+            )
+        ]);
     }
 
     async sendOTPEmail(email, otp, userName) {
@@ -39,7 +79,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`OTP email sent to ${email}`);
             return true;
         } catch (error) {
@@ -85,7 +125,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Password reset email sent to ${email}`);
             return true;
         } catch (error) {
@@ -127,7 +167,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Admin OTP email sent to ${email}`);
             return true;
         } catch (error) {
@@ -188,7 +228,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Admin login alert email sent to ${alertEmail} for admin ${adminEmail}`);
             return true;
         } catch (error) {
@@ -251,7 +291,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Duty acceptance email sent to ${email}`);
             return true;
         } catch (error) {
@@ -317,7 +357,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Hospital notification email sent to ${hospitalEmail}`);
             return true;
         } catch (error) {
@@ -389,7 +429,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Duty status update email sent to ${email}`);
             return true;
         } catch (error) {
@@ -470,7 +510,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Hospital status update email sent to ${hospitalEmail}`);
             return true;
         } catch (error) {
@@ -534,7 +574,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Duty cancellation email sent to staff ${email}`);
             return true;
         } catch (error) {
@@ -612,7 +652,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Duty cancellation email sent to hospital ${hospitalEmail}`);
             return true;
         } catch (error) {
@@ -651,7 +691,7 @@ class EmailService {
                     </div>
                 `
             };
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Hospital verified email sent to ${email}`);
             return true;
         } catch (error) {
@@ -691,7 +731,7 @@ class EmailService {
                     </div>
                 `
             };
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Hospital rejected email sent to ${email}`);
             return true;
         } catch (error) {
@@ -730,7 +770,7 @@ class EmailService {
                     </div>
                 `
             };
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Medical staff verified email sent to ${email}`);
             return true;
         } catch (error) {
@@ -771,7 +811,7 @@ class EmailService {
                     </div>
                 `
             };
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Medical staff rejected email sent to ${email}`);
             return true;
         } catch (error) {
@@ -825,7 +865,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Emergency admin alert email sent to ${adminEmail}`);
             return true;
         } catch (error) {
@@ -884,7 +924,7 @@ class EmailService {
                 `
             };
 
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Profile creation confirmation email sent to ${email}`);
             return true;
         } catch (error) {
@@ -919,7 +959,7 @@ class EmailService {
                     </div>
                 `
             };
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Account suspended email sent to ${email}`);
             return true;
         } catch (error) {
@@ -952,7 +992,7 @@ class EmailService {
                     </div>
                 `
             };
-            await this.transporter.sendMail(mailOptions);
+            await this._sendWithTimeout(mailOptions);
             logger.info(`Account activated email sent to ${email}`);
             return true;
         } catch (error) {
