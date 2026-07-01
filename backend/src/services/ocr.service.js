@@ -1,4 +1,5 @@
 const vision = require("@google-cloud/vision");
+const logger = require("../utils/logger");
 
 // Initialize Google Vision client
 const client = new vision.ImageAnnotatorClient({

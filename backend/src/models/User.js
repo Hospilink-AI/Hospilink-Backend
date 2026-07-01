@@ -13,7 +13,7 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: [true, 'Role is required'],
         enum: {
-            values: ['admin', 'candidate', 'hospital', 'staff'],
+            values: ['admin', 'hospital', 'staff'],
             message: 'Please select a valid role'
         }
     },
