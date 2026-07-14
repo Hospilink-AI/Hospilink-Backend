@@ -128,7 +128,7 @@ const dutySchema = new mongoose.Schema({
 
     status: {
         type: String,
-        enum: ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'disputed', 'completed', 'cancelled', 'expired', 'incomplete'],
+        enum: ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'completed', 'cancelled', 'expired', 'incomplete'],
         default: 'available',
         required: true
     },
@@ -142,7 +142,7 @@ const dutySchema = new mongoose.Schema({
     statusHistory: [{
         status: {
             type: String,
-            enum: ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'disputed', 'completed', 'cancelled', 'expired', 'incomplete'],
+            enum: ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'completed', 'cancelled', 'expired', 'incomplete'],
             required: true
         },
         timestamp: {
@@ -161,7 +161,7 @@ const dutySchema = new mongoose.Schema({
         },
         overriddenFromStatus: {
             type: String,
-            enum: ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'disputed', 'completed', 'cancelled', 'expired', 'incomplete']
+            enum: ['available', 'assigned', 'enroute', 'in-progress', 'pending-confirmation', 'completed', 'cancelled', 'expired', 'incomplete']
         }
     }],
 
@@ -242,36 +242,6 @@ const dutySchema = new mongoose.Schema({
         default: null
     },
 
-    // Dispute flow
-    disputedAt: {
-        type: Date,
-        default: null
-    },
-    disputeRaisedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        default: null
-    },
-    disputeRaisedByRole: {
-        type: String,
-        enum: ['staff', 'hospital', null],
-        default: null
-    },
-    disputeReason: {
-        type: String,
-        default: null
-    },
-    disputeResolution: {
-        resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-        resolvedAt: { type: Date, default: null },
-        notes: { type: String, default: null },
-        finalStatus: {
-            type: String,
-            enum: ['completed', 'incomplete', 'cancelled', null],
-            default: null
-        }
-    },
-
     unassigned15MinNotified: {
         type: Boolean,
         default: false
@@ -324,17 +294,16 @@ dutySchema.methods.canChangeStatus = function (newStatus, userId) {
     }
 
     // Define valid status transitions
-    // Note: 'in-progress' (via Start OTP), 'completed' (via End OTP), 'pending-confirmation'
-    // and 'disputed' transitions are driven by verifyStartOtp/verifyEndOtp/cron/dispute flows
-    // using their own guarded findOneAndUpdate calls, not this staff-scoped method.
+    // Note: 'in-progress' (via Start OTP), 'completed' (via End OTP) and 'pending-confirmation'
+    // transitions are driven by verifyStartOtp/verifyEndOtp/cron flows using their own guarded
+    // findOneAndUpdate calls, not this staff-scoped method.
     const validTransitions = {
         'available': ['assigned', 'cancelled', 'expired'],
         'assigned': ['enroute', 'cancelled', 'incomplete'],
         'enroute': ['in-progress', 'cancelled', 'incomplete'],
         'in-progress': ['cancelled', 'incomplete', 'pending-confirmation'],
-        'pending-confirmation': ['disputed'],
-        'completed': ['disputed'],
-        'disputed': ['completed', 'incomplete', 'cancelled'],
+        'pending-confirmation': [],
+        'completed': [],
         'cancelled': [], // No transitions from cancelled
         'expired': [], // No transitions from expired
         'incomplete': [] // No transitions from incomplete
