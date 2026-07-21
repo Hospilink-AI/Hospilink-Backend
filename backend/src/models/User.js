@@ -18,6 +18,20 @@ const userSchema = new mongoose.Schema({
         }
     },
 
+    // Sub-role for admin accounts only — determines permission tier within the admin panel
+    adminSubRole: {
+        type: String,
+        enum: {
+            values: ['super_admin', 'operations_manager', 'tech_support'],
+            message: 'Please select a valid admin sub-role'
+        },
+        required: [
+            function () { return this.role === 'admin'; },
+            'Admin sub-role is required for admin accounts'
+        ],
+        default: undefined
+    },
+
     // add password
     password: {
         type: String,
@@ -37,6 +51,13 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+
+    // Soft-delete flag for admin accounts — deactivated admins are never hard-deleted
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    
     otp: {
         code: String,
         expiresAt: Date

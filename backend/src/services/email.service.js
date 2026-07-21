@@ -238,8 +238,141 @@ class EmailService {
         }
     }
 
-    
-    
+
+
+
+    // new admin account is created
+    async sendAdminAccountCreatedAlertEmail(newAdminName, newAdminEmail, newAdminSubRole, createdByName, createdByEmail) {
+        try {
+            const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+
+            if (!alertEmail) {
+                logger.warn('ADMIN_LOGIN_ALERT_EMAIL not configured, skipping alert email');
+                return false;
+            }
+
+            const mailOptions = {
+                from: `HospiLink Security <${process.env.EMAIL_FROM}>`,
+                to: alertEmail,
+                subject: `🆕 Admin Account Created - ${newAdminName}`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: #27ae60; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">🆕 New Admin Account Created</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p><strong>New Admin:</strong> ${newAdminName} (${newAdminEmail})</p>
+                            <p><strong>Sub-Role:</strong> ${newAdminSubRole}</p>
+                            <p><strong>Created By:</strong> ${createdByName} (${createdByEmail})</p>
+                            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">
+                                © ${new Date().getFullYear()} HospiLink. All rights reserved.<br>
+                                This is an automated security notification. Please do not reply.
+                            </p>
+                        </div>
+                    </div>
+                `
+            };
+
+            await this._sendWithTimeout(mailOptions);
+            logger.info(`Admin account created alert sent to ${alertEmail} for new admin ${newAdminEmail}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending admin account created alert email: ${error.message}`);
+            return false;
+        }
+    }
+
+
+
+
+    // admin account is deactivated
+    async sendAdminAccountDeactivatedAlertEmail(deactivatedAdminName, deactivatedAdminEmail, deactivatedByName, deactivatedByEmail) {
+        try {
+            const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+
+            if (!alertEmail) {
+                logger.warn('ADMIN_LOGIN_ALERT_EMAIL not configured, skipping alert email');
+                return false;
+            }
+
+            const mailOptions = {
+                from: `HospiLink Security <${process.env.EMAIL_FROM}>`,
+                to: alertEmail,
+                subject: `⚠️ Admin Account Deactivated - ${deactivatedAdminName}`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: #e74c3c; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">⚠️ Admin Account Deactivated</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p><strong>Deactivated Admin:</strong> ${deactivatedAdminName} (${deactivatedAdminEmail})</p>
+                            <p><strong>Deactivated By:</strong> ${deactivatedByName} (${deactivatedByEmail})</p>
+                            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">
+                                © ${new Date().getFullYear()} HospiLink. All rights reserved.<br>
+                                This is an automated security notification. Please do not reply.
+                            </p>
+                        </div>
+                    </div>
+                `
+            };
+
+            await this._sendWithTimeout(mailOptions);
+            logger.info(`Admin account deactivated alert sent to ${alertEmail} for admin ${deactivatedAdminEmail}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending admin account deactivated alert email: ${error.message}`);
+            return false;
+        }
+    }
+
+
+
+
+    // admin account is re-activated
+    async sendAdminAccountActivatedAlertEmail(activatedAdminName, activatedAdminEmail, activatedByName, activatedByEmail) {
+        try {
+            const alertEmail = process.env.ADMIN_LOGIN_ALERT_EMAIL;
+
+            if (!alertEmail) {
+                logger.warn('ADMIN_LOGIN_ALERT_EMAIL not configured, skipping alert email');
+                return false;
+            }
+
+            const mailOptions = {
+                from: `HospiLink Security <${process.env.EMAIL_FROM}>`,
+                to: alertEmail,
+                subject: `✅ Admin Account Activated - ${activatedAdminName}`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: #27ae60; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">✅ Admin Account Activated</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p><strong>Activated Admin:</strong> ${activatedAdminName} (${activatedAdminEmail})</p>
+                            <p><strong>Activated By:</strong> ${activatedByName} (${activatedByEmail})</p>
+                            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">
+                                © ${new Date().getFullYear()} HospiLink. All rights reserved.<br>
+                                This is an automated security notification. Please do not reply.
+                            </p>
+                        </div>
+                    </div>
+                `
+            };
+
+            await this._sendWithTimeout(mailOptions);
+            logger.info(`Admin account activated alert sent to ${alertEmail} for admin ${activatedAdminEmail}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending admin account activated alert email: ${error.message}`);
+            return false;
+        }
+    }
+
+
+
     async sendDutyAcceptanceEmail(email, userName, dutyDetails) {
         try {
             const mailOptions = {

@@ -5,6 +5,7 @@ const MedicalStaff = require('../models/MedicalStaff');
 const { UnauthorizedError, ForbiddenError, asyncHandler } = require('./error.middleware');
 const cacheService = require('../services/cache.service');
 const logger = require('../utils/logger');
+const { hasCapability } = require('../config/adminPermissions.config');
  
  
 exports.protect = asyncHandler(async (req, res, next) => {
@@ -37,29 +38,42 @@ exports.protect = asyncHandler(async (req, res, next) => {
         const cachedSession = await cacheService.get(sessionKey);
         
         if (cachedSession) {
+            // Deactivated admins are rejected immediately, even mid-session — the
+            // deactivate-admin flow deletes this cache key, so a hit here means either
+            // the account was always active or the cache hasn't been cleared yet.
+            if (cachedSession.role === 'admin' && cachedSession.isActive === false) {
+                throw new ForbiddenError('This admin account has been deactivated. Please contact your super admin.');
+            }
             // Normalize: ensure both _id and id are available
             req.user = { ...cachedSession, _id: cachedSession._id || cachedSession.id };
             return next();
         }
-        
+
         // Fallback to database
         const user = await User.findById(decoded.id);
         if (!user) {
             throw new UnauthorizedError('User not found');
         }
-        
+
+        if (user.role === 'admin' && user.isActive === false) {
+            throw new ForbiddenError('This admin account has been deactivated. Please contact your super admin.');
+        }
+
         // Cache session for future requests
         await cacheService.set(sessionKey, {
             _id: user._id,
             id: user._id,
             email: user.email,
             role: user.role,
+            adminSubRole: user.adminSubRole,
+            isActive: user.isActive,
             name: user.name
         }, 86400);
-        
+
         req.user = user;
         next();
     } catch (error) {
+        if (error instanceof UnauthorizedError || error instanceof ForbiddenError) throw error;
         throw new UnauthorizedError('Invalid token');
     }
 });
@@ -72,6 +86,26 @@ exports.authorize = (...roles) => {
         next();
     };
 };
+
+
+
+/**
+ * requireCapability — fine-grained gate for admin sub-roles, applied per-route
+ * underneath the coarse authorize('admin') gate. `super_admin` bypasses this
+ * check entirely; other sub-roles must have the named capability in
+ * config/adminPermissions.config.js.
+ */
+exports.requireCapability = (capability) => {
+    return (req, res, next) => {
+        if (!hasCapability(req.user.adminSubRole, capability)) {
+            return next(new ForbiddenError("You don't have permission to do that."));
+        }
+        next();
+    };
+};
+
+
+
 
 /**
  * checkSuspension — runs after protect(), before any feature-level middleware.

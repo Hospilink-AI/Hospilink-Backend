@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 const { body, validationResult } = require('express-validator');
 const { ALLOWED_ROLES } = require('../utils/constants');
 
+const ADMIN_SUB_ROLES = ['super_admin', 'operations_manager', 'tech_support'];
+
 
 
 // Validate admin signin request
@@ -1119,6 +1121,171 @@ const validateUnlockOtp = (req, res, next) => {
 
 
 
+// Validate admin account creation request
+const validateAdminCreation = (req, res, next) => {
+    if (!req.body || Object.keys(req.body).length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Request body is required'
+        });
+    }
+
+    const { name, email, password, adminSubRole } = req.body;
+
+    const allowedFields = ['name', 'email', 'password', 'adminSubRole'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid fields: ${unexpectedFields.join(', ')}. Only allowed: ${allowedFields.join(', ')}`
+        });
+    }
+
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Name is required'
+        });
+    }
+
+    if (name.trim().length > 100) {
+        return res.status(400).json({
+            success: false,
+            message: 'Name cannot exceed 100 characters'
+        });
+    }
+
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
+        return res.status(400).json({
+            success: false,
+            message: 'Valid email is required'
+        });
+    }
+
+    if (!password || typeof password !== 'string' || password.length < 6) {
+        return res.status(400).json({
+            success: false,
+            message: 'Password must be at least 6 characters long'
+        });
+    }
+
+    if (!adminSubRole || !ADMIN_SUB_ROLES.includes(adminSubRole)) {
+        return res.status(400).json({
+            success: false,
+            message: `adminSubRole is required and must be one of: ${ADMIN_SUB_ROLES.join(', ')}`
+        });
+    }
+
+    req.validatedBody = {
+        name: name.trim(),
+        email: email.toLowerCase().trim(),
+        password,
+        adminSubRole
+    };
+
+    next();
+};
+
+
+
+
+// Validate admin sub-role change request
+const validateAdminRoleChange = (req, res, next) => {
+    if (!req.body || Object.keys(req.body).length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Request body is required'
+        });
+    }
+
+    const { adminSubRole } = req.body;
+
+    const allowedFields = ['adminSubRole'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid fields: ${unexpectedFields.join(', ')}. Only allowed: adminSubRole`
+        });
+    }
+
+    if (!adminSubRole || !ADMIN_SUB_ROLES.includes(adminSubRole)) {
+        return res.status(400).json({
+            success: false,
+            message: `adminSubRole is required and must be one of: ${ADMIN_SUB_ROLES.join(', ')}`
+        });
+    }
+
+    req.validatedBody = { adminSubRole };
+
+    next();
+};
+
+
+
+
+// Validate admin list query parameters
+const validateAdminListQuery = (req, res, next) => {
+    if (req.body && Object.keys(req.body).length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'GET request should not contain request body. Use query parameters only.'
+        });
+    }
+
+    const allowedParams = ['adminSubRole', 'includeInactive', 'page', 'limit'];
+    const receivedParams = Object.keys(req.query);
+    const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
+    if (unexpectedParams.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`
+        });
+    }
+
+    const { adminSubRole, includeInactive, page = 1, limit = 10 } = req.query;
+
+    if (adminSubRole && !ADMIN_SUB_ROLES.includes(adminSubRole)) {
+        return res.status(400).json({
+            success: false,
+            message: `adminSubRole parameter must be one of: ${ADMIN_SUB_ROLES.join(', ')}`
+        });
+    }
+
+    if (includeInactive !== undefined && !['true', 'false'].includes(includeInactive)) {
+        return res.status(400).json({
+            success: false,
+            message: 'includeInactive parameter must be true or false'
+        });
+    }
+
+    const pageNum = parseInt(page);
+    if (isNaN(pageNum) || pageNum < 1) {
+        return res.status(400).json({
+            success: false,
+            message: 'Page parameter must be a positive integer'
+        });
+    }
+
+    const limitNum = parseInt(limit);
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+        return res.status(400).json({
+            success: false,
+            message: 'Limit parameter must be a positive integer between 1 and 100'
+        });
+    }
+
+    req.validatedQuery = {
+        adminSubRole: adminSubRole || null,
+        includeInactive: includeInactive === 'true',
+        page: pageNum,
+        limit: limitNum
+    };
+
+    next();
+};
+
+
 module.exports = {
     validateAdminSignin,
     validateAdminOTP,
@@ -1140,4 +1307,7 @@ module.exports = {
     validateAssignDuty,
     validateAdminOverrideStatus,
     validateUnlockOtp,
+    validateAdminCreation,
+    validateAdminRoleChange,
+    validateAdminListQuery,
 };
