@@ -14,6 +14,7 @@ const logger = require('../utils/logger');
 const cacheService = require('../services/cache.service');
 const { generateActiveDutiesPDF } = require('../utils/pdf.puppeteer');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
+const { redactBulkDutyFinancials } = require('../utils/adminResponseFilters');
 
 
 
@@ -253,7 +254,8 @@ exports.getAdminProfile = asyncHandler(async (req, res) => {
             id: user._id,
             name: user.name,
             email: user.email,
-            role: user.role
+            role: user.role,
+            adminSubRole: user.adminSubRole
         }
     });
 });
@@ -330,7 +332,7 @@ exports.getActiveDuties = asyncHandler(async (req, res) => {
 
     res.status(200).json({
         success: true,
-        data: result.duties,
+        data: redactBulkDutyFinancials(result.duties, req.user.adminSubRole),
         pagination: result.pagination,
         filters: result.filters,
         summary: result.summary
@@ -360,7 +362,7 @@ exports.exportActiveDuties = asyncHandler(async (req, res) => {
         limit: 10000
     });
 
-    const duties = result.duties || [];
+    const duties = redactBulkDutyFinancials(result.duties || [], req.user.adminSubRole);
 
     if (duties.length === 0) {
         return res.status(404).json({
@@ -552,7 +554,7 @@ exports.getDutyHistory = asyncHandler(async (req, res) => {
 
     res.status(200).json({
         success: true,
-        data: result.duties,
+        data: redactBulkDutyFinancials(result.duties, req.user.adminSubRole),
         pagination: result.pagination,
         filters: result.filters
     });
@@ -568,7 +570,7 @@ exports.getEmergencyDashboard = asyncHandler(async (req, res) => {
 
     res.status(200).json({
         success: true,
-        data: result.duties,
+        data: redactBulkDutyFinancials(result.duties, req.user.adminSubRole),
         pagination: result.pagination
     });
 });

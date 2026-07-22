@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth.middleware');
+const { protect, authorize, requireCapability } = require('../middleware/auth.middleware');
 const adminController = require('../controllers/admin.controller');
+const adminManagementController = require('../controllers/adminManagement.controller');
 const {
     validateStaffDutyReportQuery,
     validateNearbyStaffQuery,
@@ -23,6 +24,9 @@ const {
     validateAssignDuty,
     validateUnlockOtp,
     validateAdminOverrideStatus,
+    validateAdminCreation,
+    validateAdminRoleChange,
+    validateAdminListQuery,
 } = require('../middleware/admin.middleware');
 
 const { validateDutyCreation } = require('../middleware/validation.middleware');
@@ -49,60 +53,61 @@ router.use(authorize('admin'));
 router.get('/profile', adminController.getAdminProfile);
 
 //Hospital Management endpoints
-router.get('/hospitals-list', validateHospitalSimpleListQuery, adminController.getHospitalSimpleList);
-router.get('/hospitals', validateHospitalListQuery, adminController.listHospitals);
-router.get('/hospitals/stats', adminController.getHospitalStats);
-router.get('/hospitals/:hospitalId', validateObjectId('hospitalId'), adminController.getHospitalDetail);
-router.patch('/hospitals/:hospitalId/verify', validateObjectId('hospitalId'), adminController.verifyHospital);
-router.patch('/hospitals/:hospitalId/reject', validateObjectId('hospitalId'), validateRejectionReason, adminController.rejectHospital);
-router.patch('/hospitals/:hospitalId/suspend', validateObjectId('hospitalId'), validateSuspensionReason, adminController.suspendHospital);
-router.patch('/hospitals/:hospitalId/unsuspend', validateObjectId('hospitalId'), adminController.unsuspendHospital);
+router.get('/hospitals-list', requireCapability('hospital.view'), validateHospitalSimpleListQuery, adminController.getHospitalSimpleList);
+router.get('/hospitals', requireCapability('hospital.view'), validateHospitalListQuery, adminController.listHospitals);
+router.get('/hospitals/stats', requireCapability('hospital.view'), adminController.getHospitalStats);
+router.get('/hospitals/:hospitalId', requireCapability('hospital.view'), validateObjectId('hospitalId'), adminController.getHospitalDetail);
+router.patch('/hospitals/:hospitalId/verify', requireCapability('hospital.manage'), validateObjectId('hospitalId'), adminController.verifyHospital);
+router.patch('/hospitals/:hospitalId/reject', requireCapability('hospital.manage'), validateObjectId('hospitalId'), validateRejectionReason, adminController.rejectHospital);
+router.patch('/hospitals/:hospitalId/suspend', requireCapability('hospital.manage'), validateObjectId('hospitalId'), validateSuspensionReason, adminController.suspendHospital);
+router.patch('/hospitals/:hospitalId/unsuspend', requireCapability('hospital.manage'), validateObjectId('hospitalId'), adminController.unsuspendHospital);
 
 //dashboard api's
-router.post('/create-duty', validateDutyCreation, adminController.createDutyForHospital);
-router.get('/dashboard-stats', adminController.getDashboardStats);
-router.get('/staff-stats', adminController.getStaffStatistics);
+router.post('/create-duty', requireCapability('duty.manage'), validateDutyCreation, adminController.createDutyForHospital);
+router.get('/dashboard-stats', requireCapability('dashboard.view'), adminController.getDashboardStats);
+router.get('/staff-stats', requireCapability('dashboard.view'), adminController.getStaffStatistics);
 
 
 //Medical Staff Management endpoints
-router.get('/medical-staff/stats', adminController.getMedicalStaffStats);
-router.get('/medical-staff/:staffId', validateObjectId('staffId'), adminController.getMedicalStaffDetail);
-router.get('/medical-staff', validateMedicalStaffListQuery, adminController.getMedicalStaffList);
-router.get('/medical-staff-list', validateMedicalStaffListVerified, adminController.getVerifiedMedicalStaffList);
-router.patch('/medical-staff/:staffId/verify', validateObjectId('staffId'), adminController.verifyMedicalStaff);
-router.patch('/medical-staff/:staffId/reject', validateObjectId('staffId'), validateRejectionReason, adminController.rejectMedicalStaff);
-router.patch('/medical-staff/:staffId/suspend', validateObjectId('staffId'), validateSuspensionReason, adminController.suspendMedicalStaff);
-router.patch('/medical-staff/:staffId/unsuspend', validateObjectId('staffId'), adminController.unsuspendMedicalStaff);
+router.get('/medical-staff/stats', requireCapability('staff.view'), adminController.getMedicalStaffStats);
+router.get('/medical-staff/:staffId', requireCapability('staff.view'), validateObjectId('staffId'), adminController.getMedicalStaffDetail);
+router.get('/medical-staff', requireCapability('staff.view'), validateMedicalStaffListQuery, adminController.getMedicalStaffList);
+router.get('/medical-staff-list', requireCapability('staff.view'), validateMedicalStaffListVerified, adminController.getVerifiedMedicalStaffList);
+router.patch('/medical-staff/:staffId/verify', requireCapability('staff.manage'), validateObjectId('staffId'), adminController.verifyMedicalStaff);
+router.patch('/medical-staff/:staffId/reject', requireCapability('staff.manage'), validateObjectId('staffId'), validateRejectionReason, adminController.rejectMedicalStaff);
+router.patch('/medical-staff/:staffId/suspend', requireCapability('staff.manage'), validateObjectId('staffId'), validateSuspensionReason, adminController.suspendMedicalStaff);
+router.patch('/medical-staff/:staffId/unsuspend', requireCapability('staff.manage'), validateObjectId('staffId'), adminController.unsuspendMedicalStaff);
 
-router.get('/nearby-staff', validateNearbyStaffQuery, adminController.getNearbyAvailableStaff);
+router.get('/nearby-staff', requireCapability('staff.view'), validateNearbyStaffQuery, adminController.getNearbyAvailableStaff);
 
-router.get('/active-duties/export', adminController.exportActiveDuties);
-router.get('/active-duties', validateActiveDutiesQuery, adminController.getActiveDuties);
+router.get('/active-duties/export', requireCapability('duty.export'), adminController.exportActiveDuties);
+router.get('/active-duties', requireCapability('duty.view'), validateActiveDutiesQuery, adminController.getActiveDuties);
 
-router.get('/emergency-dashboard', adminController.getEmergencyDashboard);
+router.get('/emergency-dashboard', requireCapability('duty.view'), adminController.getEmergencyDashboard);
 
-router.get('/duty-route-map/:dutyId', validateDutyRouteMap, adminController.getDutyRouteMap);
+router.get('/duty-route-map/:dutyId', requireCapability('duty.view'), validateDutyRouteMap, adminController.getDutyRouteMap);
 
 // Overnight duties and duty history
-router.get('/overnight-duties', validateOvernightDutiesQuery, adminController.getOvernightDuties);
-router.get('/duty-history', validateDutyHistoryQuery, adminController.getDutyHistory);
+router.get('/overnight-duties', requireCapability('duty.view'), validateOvernightDutiesQuery, adminController.getOvernightDuties);
+router.get('/duty-history', requireCapability('duty.view'), validateDutyHistoryQuery, adminController.getDutyHistory);
 
 //get profile of admin
 router.get('/profile', adminController.getAdminProfile);
-router.post('/flush-sessions', adminController.flushUserSessions);
+router.post('/flush-sessions', requireCapability('admin.sessions'), adminController.flushUserSessions);
 
 // Document verification routes
-router.get('/documents/stats', adminController.getDocumentStats);
-router.get('/documents', validateDocumentsListQuery, adminController.getAllDocuments);
-router.put('/documents/:documentId/verify', validateObjectId('documentId'), adminController.verifyDocument);
-router.put('/documents/:documentId/reject', validateObjectId('documentId'), validateRejectionReason, adminController.rejectDocument);
+router.get('/documents/stats', requireCapability('document.view'), adminController.getDocumentStats);
+router.get('/documents', requireCapability('document.view'), validateDocumentsListQuery, adminController.getAllDocuments);
+router.put('/documents/:documentId/verify', requireCapability('document.manage'), validateObjectId('documentId'), adminController.verifyDocument);
+router.put('/documents/:documentId/reject', requireCapability('document.manage'), validateObjectId('documentId'), validateRejectionReason, adminController.rejectDocument);
 
-router.post('/assign-duty', validateAssignDuty, adminController.assignDutyToStaff);
+router.post('/assign-duty', requireCapability('duty.manage'), validateAssignDuty, adminController.assignDutyToStaff);
 
 
 // Duty Management endpoints for admin
 router.patch(
     '/duties/:id/unlock-otp',
+    requireCapability('duty.manage'),
     validateObjectId('id'),
     validateUnlockOtp,
     adminController.unlockDutyOtp
@@ -110,10 +115,20 @@ router.patch(
 
 router.patch(
     '/duties/:id/admin-override',
+    requireCapability('duty.manage'),
     validateObjectId('id'),
     validateAdminOverrideStatus,
     adminController.adminOverrideDutyStatus
 );
+
+
+// Admin Management endpoints (super_admin only, except listing/detail which operations_manager can also view)
+router.post('/create-admin', requireCapability('admin.manage'), validateAdminCreation, adminManagementController.createAdmin);
+router.get('/admin-list', requireCapability('admin.view'), validateAdminListQuery, adminManagementController.listAdmins);
+router.get('/admin-detail/:adminId', requireCapability('admin.view'), validateObjectId('adminId'), adminManagementController.getAdminDetail);
+router.patch('/update-admin-role/:adminId', requireCapability('admin.manage'), validateObjectId('adminId'), validateAdminRoleChange, adminManagementController.changeAdminRole);
+router.delete('/deactivate-admin/:adminId', requireCapability('admin.manage'), validateObjectId('adminId'), adminManagementController.deactivateAdmin);
+router.patch('/activate-admin/:adminId', requireCapability('admin.manage'), validateObjectId('adminId'), adminManagementController.activateAdmin);
 
 
 module.exports = router;
