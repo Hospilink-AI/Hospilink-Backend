@@ -19,6 +19,7 @@ const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
 const notificationEmitter = require('./notificationEmitter');
 const DashboardService = require('./dashboard.service');
+const JobVacancyService = require('./jobVacancy.service');
 const {
     ValidationError,
     NotFoundError,
@@ -2342,6 +2343,21 @@ class AdminService {
             count: createdDuties.length,
             message: `Successfully created ${createdDuties.length} ${createdDuties.length === 1 ? 'duty' : 'duties'}`
         };
+    }
+
+    // ─── Job Vacancy management ────────────────────────────────────────────────
+
+    // POST /api/admin/vacancy — admin posts a vacancy on behalf of a named hospital.
+    // Hospital existence + verification checks live in JobVacancyService itself so
+    // they aren't duplicated between the hospital-flow and admin-flow entry points.
+    async createVacancyForHospital(hospitalId, adminUserId, vacancyPayload) {
+        return JobVacancyService.createForHospitalId(hospitalId, adminUserId, vacancyPayload);
+    }
+
+    // GET /api/admin/vacancies — every vacancy across every hospital, including
+    // soft-deleted ones unless filters.activeOnly is set.
+    async listAllVacancies(filters, pagination) {
+        return JobVacancyService.listAll(filters, pagination);
     }
 
     // ─── Account suspension ────────────────────────────────────────────────────

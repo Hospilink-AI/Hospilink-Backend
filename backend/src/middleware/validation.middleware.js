@@ -1107,7 +1107,108 @@ const validateDutyEdit = (req, res, next) => {
             errors: errors
         });
     }
-    
+
+    next();
+};
+
+
+
+// Validation for job vacancy creation (shared by hospital and admin-on-behalf-of-hospital flows)
+const validateJobVacancyCreation = (req, res, next) => {
+    const { title, specialty, experience, education, skills, location, salary, description } = req.body;
+    const errors = [];
+
+    if (!title || typeof title !== 'string' || !title.trim()) {
+        errors.push('title is required');
+    } else if (title.trim().length > 200) {
+        errors.push('title cannot exceed 200 characters');
+    }
+
+    if (!specialty || typeof specialty !== 'string' || !specialty.trim()) {
+        errors.push('specialty is required');
+    } else if (specialty.trim().length > 100) {
+        errors.push('specialty cannot exceed 100 characters');
+    }
+
+    if (!description || typeof description !== 'string' || !description.trim()) {
+        errors.push('description is required');
+    } else if (description.trim().length > 3000) {
+        errors.push('description cannot exceed 3000 characters');
+    }
+
+    if (experience !== undefined && typeof experience !== 'string') {
+        errors.push('experience must be a string');
+    }
+
+    if (education !== undefined && typeof education !== 'string') {
+        errors.push('education must be a string');
+    }
+
+    if (skills !== undefined && (!Array.isArray(skills) || !skills.every(s => typeof s === 'string'))) {
+        errors.push('skills must be an array of strings');
+    }
+
+    if (location !== undefined && typeof location !== 'string') {
+        errors.push('location must be a string');
+    }
+
+    if (salary !== undefined && typeof salary !== 'string') {
+        errors.push('salary must be a string');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for job vacancy edits — partial patch over an allowed field whitelist
+const validateJobVacancyEdit = (req, res, next) => {
+    const errors = [];
+    const allowedFields = ['title', 'specialty', 'experience', 'education', 'skills', 'location', 'salary', 'description'];
+
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Allowed: ${allowedFields.join(', ')}`);
+    }
+
+    if (receivedFields.length === 0) {
+        errors.push('At least one field must be provided to update');
+    }
+
+    if (req.body.title !== undefined && (typeof req.body.title !== 'string' || !req.body.title.trim())) {
+        errors.push('title must be a non-empty string');
+    }
+
+    if (req.body.specialty !== undefined && (typeof req.body.specialty !== 'string' || !req.body.specialty.trim())) {
+        errors.push('specialty must be a non-empty string');
+    }
+
+    if (req.body.description !== undefined && (typeof req.body.description !== 'string' || !req.body.description.trim())) {
+        errors.push('description must be a non-empty string');
+    }
+
+    if (req.body.skills !== undefined && (!Array.isArray(req.body.skills) || !req.body.skills.every(s => typeof s === 'string'))) {
+        errors.push('skills must be an array of strings');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
     next();
 };
 
@@ -1813,6 +1914,8 @@ module.exports = {
     validateResendOtp,
     validateDutyCancellation,
     validateDutyEdit,
+    validateJobVacancyCreation,
+    validateJobVacancyEdit,
     validatePagination,
     validateReviewSubmission,
     validateStaffIdParam,

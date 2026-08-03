@@ -13,7 +13,9 @@ const ADMIN_CAPABILITIES = {
         'document.manage',
         'activityLog.view',
         'dashboard.view',
-        'admin.view'
+        'admin.view',
+        'vacancy.view',
+        'vacancy.manage'
     ],
     tech_support: [
         'hospital.view',
