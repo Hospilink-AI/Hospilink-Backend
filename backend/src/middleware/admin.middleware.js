@@ -1233,7 +1233,7 @@ const validateAdminListQuery = (req, res, next) => {
         });
     }
 
-    const allowedParams = ['adminSubRole', 'includeInactive', 'page', 'limit'];
+    const allowedParams = ['adminSubRole', 'page', 'limit'];
     const receivedParams = Object.keys(req.query);
     const unexpectedParams = receivedParams.filter(param => !allowedParams.includes(param));
     if (unexpectedParams.length > 0) {
@@ -1243,19 +1243,12 @@ const validateAdminListQuery = (req, res, next) => {
         });
     }
 
-    const { adminSubRole, includeInactive, page = 1, limit = 10 } = req.query;
+    const { adminSubRole, page = 1, limit = 10 } = req.query;
 
     if (adminSubRole && !ADMIN_SUB_ROLES.includes(adminSubRole)) {
         return res.status(400).json({
             success: false,
             message: `adminSubRole parameter must be one of: ${ADMIN_SUB_ROLES.join(', ')}`
-        });
-    }
-
-    if (includeInactive !== undefined && !['true', 'false'].includes(includeInactive)) {
-        return res.status(400).json({
-            success: false,
-            message: 'includeInactive parameter must be true or false'
         });
     }
 
@@ -1277,7 +1270,6 @@ const validateAdminListQuery = (req, res, next) => {
 
     req.validatedQuery = {
         adminSubRole: adminSubRole || null,
-        includeInactive: includeInactive === 'true',
         page: pageNum,
         limit: limitNum
     };

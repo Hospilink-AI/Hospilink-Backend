@@ -40,9 +40,9 @@ exports.createAdmin = asyncHandler(async (req, res) => {
 
 // GET /api/admin/admin-list
 exports.listAdmins = asyncHandler(async (req, res) => {
-    const { adminSubRole, includeInactive, page, limit } = req.validatedQuery;
+    const { adminSubRole, page, limit } = req.validatedQuery;
 
-    const result = await adminManagementService.listAdmins({ adminSubRole, includeInactive, page, limit });
+    const result = await adminManagementService.listAdmins({ adminSubRole, page, limit });
 
     res.status(200).json({
         success: true,
