@@ -32,11 +32,23 @@ function buildHospitalLocation(hospital) {
     return location || undefined;
 }
 
+// After a `.populate('hospitalId', 'hospitalLegalName')` lookup, flatten the populated
+// sub-document back down to a plain `hospitalId` + a sibling `hospitalName` string, so
+// existing consumers that expect `hospitalId` to be a bare id aren't broken by adding this.
+function flattenHospitalName(vacancy) {
+    if (vacancy && vacancy.hospitalId && typeof vacancy.hospitalId === 'object') {
+        const hospitalName = vacancy.hospitalId.hospitalLegalName;
+        vacancy.hospitalId = vacancy.hospitalId._id;
+        vacancy.hospitalName = hospitalName;
+    }
+    return vacancy;
+}
+
 class JobVacancyService {
     // Hospital posts its own vacancy — hospitalId resolved from the caller's own token,
     // never accepted from the request body.
     async createForHospitalUser(userId, payload) {
-        const hospital = await Hospital.findOne({ user: userId }).select('currentAddress city state pincode').lean();
+        const hospital = await Hospital.findOne({ user: userId }).select('hospitalLegalName currentAddress city state pincode').lean();
         if (!hospital) {
             throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
         }
@@ -47,7 +59,7 @@ class JobVacancyService {
     // body and is validated here (existence + verification), same checks
     // createDutyForHospital already performs for duties.
     async createForHospitalId(hospitalId, createdByUserId, payload) {
-        const hospital = await Hospital.findById(hospitalId).select('currentAddress city state pincode verificationStatus').lean();
+        const hospital = await Hospital.findById(hospitalId).select('hospitalLegalName currentAddress city state pincode verificationStatus').lean();
         if (!hospital) {
             throw new NotFoundError('Hospital not found');
         }
@@ -72,11 +84,15 @@ class JobVacancyService {
             if (fallbackLocation) data.location = fallbackLocation;
         }
 
-        return JobVacancy.create({
+        const vacancy = await JobVacancy.create({
             ...data,
             hospitalId: hospital._id,
             createdBy: createdByUserId
         });
+
+        const result = vacancy.toObject();
+        result.hospitalName = hospital.hospitalLegalName;
+        return result;
     }
 
     // Public/staff browse list — always excludes soft-deleted vacancies.
@@ -113,20 +129,27 @@ class JobVacancyService {
         const { page, limit, skip } = getPaginationParams(pagination.page, pagination.limit);
 
         const [vacancies, totalItems] = await Promise.all([
-            JobVacancy.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+            JobVacancy.find(query)
+                .populate('hospitalId', 'hospitalLegalName')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
             JobVacancy.countDocuments(query)
         ]);
 
-        return { vacancies, pagination: getPaginationMeta(totalItems, page, limit) };
+        return { vacancies: vacancies.map(flattenHospitalName), pagination: getPaginationMeta(totalItems, page, limit) };
     }
 
     // Single posting detail — visible to anyone if live; visible to the owning hospital
     // or a capable admin even once soft-deleted.
     async getById(vacancyId, requester) {
-        const vacancy = await JobVacancy.findById(vacancyId).lean();
+        const vacancy = await JobVacancy.findById(vacancyId).populate('hospitalId', 'hospitalLegalName').lean();
         if (!vacancy) {
             throw new NotFoundError('Vacancy not found');
         }
+
+        flattenHospitalName(vacancy);
 
         if (vacancy.deletedAt) {
             const canView = await this._canViewDeleted(vacancy, requester);
@@ -148,8 +171,9 @@ class JobVacancyService {
 
         Object.assign(vacancy, pickVacancyFields(payload));
         await vacancy.save();
+        await vacancy.populate('hospitalId', 'hospitalLegalName');
 
-        return vacancy;
+        return flattenHospitalName(vacancy.toObject());
     }
 
     async closeVacancy(vacancyId, requester) {
@@ -164,8 +188,9 @@ class JobVacancyService {
             vacancy.deletedAt = new Date();
             await vacancy.save();
         }
+        await vacancy.populate('hospitalId', 'hospitalLegalName');
 
-        return vacancy;
+        return flattenHospitalName(vacancy.toObject());
     }
 
     async _assertCanManage(vacancy, requester) {
