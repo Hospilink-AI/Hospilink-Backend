@@ -14,6 +14,7 @@ const dashboardRoutes = require("./routes/dashboard.routes");
 const documentRoutes = require("./routes/document.routes");
 const dutyRoutes = require("./routes/duty.routes");
 const jobVacancyRoutes = require("./routes/jobVacancy.routes");
+const jobVacancyPublicRoutes = require("./routes/jobVacancyPublic.routes");
 const hospitalDashboardRoutes = require("./routes/hospitalDashboard.routes");
 const notificationRoutes = require("./routes/notification.routes");
 const profileRoutes = require("./routes/profile.routes");
@@ -121,6 +122,9 @@ app.use("/api/hospital-dashboard", hospitalDashboardRoutes);
 
 // Activity Log routes (admin only)
 app.use("/api/admin/activity-logs", require("./routes/activityLog.routes"));
+
+// Public job vacancy routes
+app.use("/api", jobVacancyPublicRoutes);
 
 // General API routes (should be last to avoid matching Agent routes)
 app.use("/api", dutyRoutes);

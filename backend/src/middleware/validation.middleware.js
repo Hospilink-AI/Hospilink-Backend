@@ -2,7 +2,7 @@ const validator = require('validator');
 const { body, validationResult } = require('express-validator');
 const { ValidationError } = require('./error.middleware');
 const { getCurrentIST, toIST } = require('../utils/helpers');
-const { INDIAN_STATES } = require('../utils/constants');
+const { INDIAN_STATES, ALLOWED_ROLES } = require('../utils/constants');
 
 
 const validateSignup = (req, res, next) => {
@@ -41,9 +41,9 @@ const validateSignup = (req, res, next) => {
 
     // Role validation — 'admin' is intentionally excluded; admin accounts are created
     // directly in the database and cannot be self-registered via this endpoint.
-    const validRoles = ['hospital', 'candidate', 'staff'];
+    const validRoles = ['hospital', 'staff'];
     if (!role || !validRoles.includes(role)) {
-        errors.push('Valid role is required. Allowed: hospital, candidate, staff');
+        errors.push('Valid role is required. Allowed: hospital, staff');
     }
 
     if (errors.length > 0) {
@@ -543,6 +543,31 @@ const validateDocumentUpload = (req, res, next) => {
             success: false,
             message: 'Document upload validation failed',
             errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Single-file resume upload for the resume-first "apply for a job" staging
+// flow (profile.routes.js's POST /resume-stage) — separate from
+// validateDocumentUpload above since this endpoint takes exactly one file
+// with a fixed field name, not an arbitrary set of documentType-keyed files.
+// Mirrors validateDocumentUpload's fileTypeRules['resume-experience'] rule.
+const validateResumeStageUpload = (req, res, next) => {
+    if (!req.file) {
+        return res.status(400).json({
+            success: false,
+            message: 'Resume file is required'
+        });
+    }
+
+    if (req.file.mimetype !== 'application/pdf') {
+        return res.status(400).json({
+            success: false,
+            message: 'Resume must be PDF format'
         });
     }
 
@@ -1126,8 +1151,8 @@ const validateJobVacancyCreation = (req, res, next) => {
 
     if (!specialty || typeof specialty !== 'string' || !specialty.trim()) {
         errors.push('specialty is required');
-    } else if (specialty.trim().length > 100) {
-        errors.push('specialty cannot exceed 100 characters');
+    } else if (!ALLOWED_ROLES.includes(specialty.trim())) {
+        errors.push(`specialty must be one of: ${ALLOWED_ROLES.join(', ')}`);
     }
 
     if (!description || typeof description !== 'string' || !description.trim()) {
@@ -1189,8 +1214,8 @@ const validateJobVacancyEdit = (req, res, next) => {
         errors.push('title must be a non-empty string');
     }
 
-    if (req.body.specialty !== undefined && (typeof req.body.specialty !== 'string' || !req.body.specialty.trim())) {
-        errors.push('specialty must be a non-empty string');
+    if (req.body.specialty !== undefined && (typeof req.body.specialty !== 'string' || !ALLOWED_ROLES.includes(req.body.specialty.trim()))) {
+        errors.push(`specialty must be one of: ${ALLOWED_ROLES.join(', ')}`);
     }
 
     if (req.body.description !== undefined && (typeof req.body.description !== 'string' || !req.body.description.trim())) {
@@ -1902,6 +1927,7 @@ module.exports = {
     validateHospitalProfile,
     validateDutyStatusHistory,
     validateDocumentUpload,
+    validateResumeStageUpload,
     validateProfileUpdate,
     validateStaffAvailability,
     validateDutyCreation,

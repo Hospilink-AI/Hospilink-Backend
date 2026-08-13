@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { ALLOWED_ROLES } = require('../utils/constants');
 
 const jobVacancySchema = new mongoose.Schema({
     hospitalId: {
@@ -21,7 +22,10 @@ const jobVacancySchema = new mongoose.Schema({
         type: String,
         required: [true, 'Specialty is required'],
         trim: true,
-        maxlength: [100, 'Specialty cannot exceed 100 characters']
+        enum: {
+            values: ALLOWED_ROLES,
+            message: 'specialty must be one of the allowed roles: ' + ALLOWED_ROLES.join(', ')
+        }
     },
     experience: {
         type: String,

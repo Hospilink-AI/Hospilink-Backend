@@ -1416,7 +1416,7 @@ class AdminService {
         const previousStatus = staff.verificationStatus;
         staff.verificationStatus = 'verified';
         staff.rejectionReason = null; // clear reason if coming from rejected
-        staff.isAvailable = true; // Auto-enable availability when verified
+        staff.isAvailable = staff.isProfileComplete === true;
         await staff.save();
 
         // Invalidate availability cache after enabling

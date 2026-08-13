@@ -128,6 +128,22 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
     validateDocumentType(user.role, documentType);
 
+    // A resume uploaded through the generic Documents screen only ever
+    // attaches analysis to an EXISTING profile — it never silently creates
+    // one. A brand-new candidate with no profile yet uses the dedicated
+    // resume-first flow instead (profileService.stageResumeForProfile,
+    // POST /api/profile/resume-stage, which passes skipAutoFill:true) — that
+    // flow stages the parse for review and phone-OTP confirmation before
+    // anything is written to MedicalStaff, so it's exempt from this check.
+    if (documentType === "resume-experience" && user.role === "staff" && !options.skipAutoFill) {
+        const hasProfile = await MedicalStaff.findOne({ user: user._id }).select('_id').lean();
+        if (!hasProfile) {
+            throw new ValidationError(
+                'Create your profile first, or use the Apply for a Job page to upload a resume before you have a profile.'
+            );
+        }
+    }
+
     let userDocs = await Document.findOne({ userId: user._id });
     //create document if not exists
     if (!userDocs) {
@@ -813,11 +829,44 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         verificationStatus,
         verificationMeta
     });
+    const newDocumentId = userDocs.documents[userDocs.documents.length - 1]._id;
     await userDocs.save();
 
     // Sync the isDocumentsUploaded flag — awaited so cache is invalidated
     // before the response is returned to the client
     await syncDocumentsUploadedFlag(user._id, user.role);
+
+
+    if (documentType === "resume-experience" && user.role === "staff" && !options.skipAutoFill) {
+        try {
+            const profileService = require("./profile.service");
+            const resumeParsingService = require("./resumeParsing.service");
+
+            const resumeText = await extractTextFromPDF(file.buffer);
+
+            const extracted = await resumeParsingService.parseResumeText(resumeText);
+
+            const result = await profileService.applyResumeToProfile(user._id, extracted, newDocumentId);
+
+    
+            if (!result.analysisSkipped) {
+                try {
+                    await notificationEmitter.emitResumeAnalyzed(
+                        user._id,
+                        result.score,
+                        extracted.suggestions,
+                        result.isReanalysis
+                    );
+                } catch (notifErr) {
+                    logger.error(`Failed to send resume analyzed notification: ${notifErr.message}`);
+                }
+            } else {
+                logger.warn(`Resume analysis skipped for user ${user._id} — parsing failed, previous analysis preserved`);
+            }
+        } catch (err) {
+            logger.error(`Resume parsing/analysis failed for user ${user._id}: ${err.message}`);
+        }
+    }
 
     let redirectUrl = null;
 
@@ -836,6 +885,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
     return {
         documentType,
+        documentId: newDocumentId,
         verificationStatus,
         uploadedAt: new Date(),
         s3Key: key,
@@ -1198,6 +1248,9 @@ exports.deleteDocument = async (user, documentId) => {
     if (document.isDeleted) {
         throw new ConflictError("Document already deleted");
     }
+
+    const wasResume = document.documentType === "resume-experience";
+
     await deleteFromS3(document.s3Key);
 
     // Soft delete
@@ -1209,6 +1262,22 @@ exports.deleteDocument = async (user, documentId) => {
     // Sync the isDocumentsUploaded flag — awaited so cache is invalidated
     // before the response is returned to the client
     await syncDocumentsUploadedFlag(user._id, user.role);
+
+    if (wasResume && user.role === "staff") {
+        try {
+            const staffProfile = await MedicalStaff.findOne({ user: user._id });
+            if (staffProfile?.resumeAnalysis) {
+                staffProfile.resumeAnalysis = undefined;
+                await staffProfile.save();
+
+                const cacheService = require('./cache.service');
+                await cacheService.invalidateProfile(user._id, 'staff');
+                await cacheService.invalidateProfileStatus(user._id);
+            }
+        } catch (err) {
+            logger.error(`Failed to clear resumeAnalysis after resume deletion for user ${user._id}: ${err.message}`);
+        }
+    }
 
     return true;
 };

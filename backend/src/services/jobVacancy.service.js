@@ -98,7 +98,7 @@ class JobVacancyService {
     // Public/staff browse list — always excludes soft-deleted vacancies.
     async listPublic(filters, pagination) {
         const query = { deletedAt: null };
-        if (filters.specialty) query.specialty = new RegExp(escapeRegex(filters.specialty), 'i');
+        if (filters.specialty) query.specialty = filters.specialty;
         if (filters.location) query.location = new RegExp(escapeRegex(filters.location), 'i');
 
         return this._paginatedFind(query, pagination);
@@ -118,7 +118,7 @@ class JobVacancyService {
     async listAll(filters, pagination) {
         const query = {};
         if (filters.hospitalId) query.hospitalId = filters.hospitalId;
-        if (filters.specialty) query.specialty = new RegExp(escapeRegex(filters.specialty), 'i');
+        if (filters.specialty) query.specialty = filters.specialty;
         if (filters.location) query.location = new RegExp(escapeRegex(filters.location), 'i');
         if (filters.activeOnly) query.deletedAt = null;
 

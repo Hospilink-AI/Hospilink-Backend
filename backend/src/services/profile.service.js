@@ -17,7 +17,10 @@ const logger = require('../utils/logger');
 const { formatRoleForDisplay } = require('../utils/helpers');
 const DashboardService = require('./dashboard.service');
 const SMSService = require('./sms.service');
+const { extractTextFromPDF } = require('./pdf.service');
+const resumeParsingService = require('./resumeParsing.service');
 const {
+    AppError,
     ValidationError,
     NotFoundError,
     ConflictError,
@@ -102,6 +105,8 @@ class ProfileService {
             // Validate coordinates
             geocodingService.validateCoordinates(coordinates.coordinates.latitude, coordinates.coordinates.longitude);
 
+            const staged = await cacheService.getParsedResumeStage(userId);
+
             // Create medical staff profile with all required fields
             const medicalStaffProfile = new MedicalStaff({
                 user: userId,
@@ -120,7 +125,9 @@ class ProfileService {
                 education: profileData.education || [],
                 skills: profileData.skills || [],
                 experience: profileData.experience,
-                isAvailable: false
+                isAvailable: false,
+                profileSource: staged ? 'resume_reviewed' : 'manual',
+                ...(staged && { resumeAnalysis: this._buildResumeAnalysisBlock(staged.extracted, staged.resumeDocumentId) })
             });
 
             await medicalStaffProfile.save();
@@ -128,10 +135,16 @@ class ProfileService {
             // Consume the verified flag — single-use, clean up immediately after save
             await cacheService.deletePhoneVerified(userId, normalizedStaffPhone);
 
+            // Consume the staged resume — single-use, same as the phone-verified flag above
+            if (staged) {
+                await cacheService.deleteParsedResumeStage(userId);
+            }
+
             // Populate user data
             await medicalStaffProfile.populate('user', 'name email role isEmailVerified');
 
-            await cacheService.setProfile(userId, 'staff', medicalStaffProfile.toObject());
+            
+            await cacheService.invalidateProfile(userId, 'staff');
 
             // Invalidate profile status cache
             await cacheService.invalidateProfileStatus(userId);
@@ -166,6 +179,105 @@ class ProfileService {
             throw error;
         }
     }
+
+    
+    _buildResumeAnalysisBlock(extracted, resumeDocumentId) {
+        return {
+            extractedData: {
+                name: extracted.fullName || null,
+                jobTitleText: extracted.jobTitleText || null,
+                location: extracted.location || null,
+                email: extracted.resumeEmail || null,
+                phone: extracted.resumePhone || null,
+                summary: extracted.profileSummary || null,
+                experience: extracted.experience || null,
+                skills: extracted.skills || [],
+                education: extracted.education || [],
+                achievements: extracted.achievements || [],
+                certifications: extracted.certifications || []
+            },
+            score: extracted.score || { total: 0, breakdown: {} },
+            suggestions: extracted.suggestions || [],
+            resumeDocumentId: resumeDocumentId || null,
+            analyzedAt: new Date()
+        };
+    }
+
+    
+    async stageResumeForProfile(user, file) {
+        const existingProfile = await MedicalStaff.findOne({ user: user._id }).select('_id').lean();
+        if (existingProfile) {
+            throw new ConflictError('Profile already exists. Upload your resume from the Documents screen instead.');
+        }
+
+        const uploadResult = await documentService.uploadDocument(user, file, 'resume-experience', {
+            skipAutoFill: true,
+            replace: true
+        });
+
+        const resumeText = await extractTextFromPDF(file.buffer);
+        const extracted = await resumeParsingService.parseResumeText(resumeText);
+
+        const staged = {
+            extracted,
+            resumeDocumentId: uploadResult.documentId,
+            resumeS3Key: uploadResult.s3Key
+        };
+
+        const stored = await cacheService.setParsedResumeStage(user._id, staged, 900);
+        if (!stored) {
+            throw new AppError('Unable to process your resume right now. Please try again.', 503);
+        }
+
+        return {
+            extracted,
+            filledFields: extracted.filledFields || [],
+            score: extracted.score,
+            suggestions: extracted.suggestions,
+            expiresInSeconds: 900
+        };
+    }
+
+    
+    async applyResumeToProfile(userId, extracted, resumeDocumentId) {
+        const existing = await MedicalStaff.findOne({ user: userId });
+
+        if (!existing) {
+            throw new NotFoundError('Medical staff profile not found. Create a profile before uploading a resume.');
+        }
+
+        const isReanalysis = !!existing.resumeAnalysis?.analyzedAt;
+
+        if (extracted.parsedSuccessfully === false && isReanalysis) {
+            return {
+                profile: existing,
+                created: false,
+                filledFields: [],
+                isReanalysis: true,
+                analysisSkipped: true,
+                score: existing.resumeAnalysis.score
+            };
+        }
+
+        existing.resumeAnalysis = undefined;
+        existing.resumeAnalysis = this._buildResumeAnalysisBlock(extracted, resumeDocumentId);
+        await existing.save();
+
+        // Invalidate, don't pre-populate with the raw document — see the
+        // matching comment in createMedicalStaffProfile above for why.
+        await cacheService.invalidateProfile(userId, 'staff');
+        await cacheService.invalidateProfileStatus(userId);
+
+        return {
+            profile: existing,
+            created: false,
+            filledFields: [],
+            isReanalysis,
+            score: existing.resumeAnalysis.score
+        };
+    }
+
+
 
     // Create hospital profile
     async createHospitalProfile(userId, profileData) {
@@ -413,6 +525,7 @@ class ProfileService {
                         isProfileComplete: raw.isProfileComplete,
                         isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
                         verificationStatus: raw.verificationStatus,
+                        resumeAnalysis: raw.resumeAnalysis?.analyzedAt ? raw.resumeAnalysis : null,
                         profileCompletion,
                         activeApplications,
                         verifiedDocs,
@@ -788,7 +901,7 @@ class ProfileService {
             let profileDoc = null;
             const [profileResult, docRecord] = await Promise.all([
                 user.role === 'staff'
-                    ? MedicalStaff.findOne({ user: userId }).select('_id isDocumentsUploaded').lean()
+                    ? MedicalStaff.findOne({ user: userId }).select('_id isDocumentsUploaded profileSource isProfileComplete').lean()
                     : user.role === 'hospital'
                         ? Hospital.findOne({ user: userId }).select('_id isDocumentsUploaded').lean()
                         : Promise.resolve(null),
@@ -824,17 +937,14 @@ class ProfileService {
                 };
             }
 
-            // Derive onboarding step for frontend routing:
-            // 'verify_email'  → email not verified
-            // 'create_profile' → email verified but no profile
-            // 'upload_documents' → profile exists but required docs missing
-            // 'complete' → everything done
+           
+            const isDutyTrackProfile = !['resume_autofill', 'resume_reviewed'].includes(profileResult?.profileSource);
             let onboardingStep = 'complete';
             if (!user.isEmailVerified) {
                 onboardingStep = 'verify_email';
             } else if (!hasProfile) {
                 onboardingStep = 'create_profile';
-            } else if (!documentsStatus.hasAllRequired) {
+            } else if (isDutyTrackProfile && !documentsStatus.hasAllRequired) {
                 onboardingStep = 'upload_documents';
             }
 
@@ -845,6 +955,8 @@ class ProfileService {
                 hasProfile,
                 documents: documentsStatus,
                 userRole: user.role,
+                profileSource: profileResult?.profileSource ?? null,
+                isProfileComplete: user.role === 'staff' ? (profileResult?.isProfileComplete ?? null) : null,
                 fromCache: false
             };
 
@@ -956,7 +1068,7 @@ class ProfileService {
             // Parallel database queries for better performance
             const [user, medicalStaff] = await Promise.all([
                 User.findById(userId).select('role _id').lean(),
-                MedicalStaff.findOne({ user: userId }).select('verificationStatus isAvailable _id').lean()
+                MedicalStaff.findOne({ user: userId }).select('verificationStatus isAvailable isProfileComplete _id').lean()
             ]);
 
             if (!user) {
@@ -989,6 +1101,16 @@ class ProfileService {
                 return {
                     success: false,
                     message: `Your profile has been rejected. Reason: ${medicalStaff.rejectionReason || 'Not specified'}. Please contact support for assistance.`,
+                    verificationStatus: medicalStaff.verificationStatus,
+                    canToggleAvailability: false
+                };
+            }
+
+        
+            if (isAvailable && medicalStaff.isProfileComplete !== true) {
+                return {
+                    success: false,
+                    message: 'Complete your profile (address, phone number, experience) before turning availability on for duty shifts.',
                     verificationStatus: medicalStaff.verificationStatus,
                     canToggleAvailability: false
                 };

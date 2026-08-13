@@ -36,6 +36,35 @@ exports.listVacancies = asyncHandler(async (req, res) => {
 
 
 
+exports.listVacanciesPublic = asyncHandler(async (req, res) => {
+    const { specialty, location, page = 1, limit = 10 } = req.query;
+
+    const result = await jobVacancyService.listPublic(
+        { specialty, location },
+        { page: parseInt(page), limit: parseInt(limit) }
+    );
+
+    res.status(200).json({
+        success: true,
+        count: result.vacancies.length,
+        data: result.vacancies,
+        pagination: result.pagination
+    });
+});
+
+
+
+exports.getVacancyPublic = asyncHandler(async (req, res) => {
+    const vacancy = await jobVacancyService.getById(req.params.id, { role: null });
+
+    res.status(200).json({
+        success: true,
+        vacancy
+    });
+});
+
+
+
 // GET /api/vacancies/posted — a hospital's own postings, including closed ones.
 exports.listMyVacancies = asyncHandler(async (req, res) => {
     const { page = 1, limit = 10 } = req.query;

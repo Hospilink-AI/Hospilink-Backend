@@ -385,6 +385,30 @@ class CacheService {
         return await this.del(key);
     }
 
+    // ── Staged resume parse ───────────
+    // A brand-new candidate with no MedicalStaff profile yet uploads a resume
+    // before filling any form; the parse result is staged here (not written to
+    // Mongo) so the profile-creation form can be pre-filled, reviewed, and
+    // edited before anything is persisted. Same shape as setTempUser/
+    // getTempUser/deleteTempUser above, just keyed by userId instead of email.
+    // Key: resume:stage:{userId}   TTL: 900s (15 min)
+    async setParsedResumeStage(userId, stagedData, ttl = 900) {
+        const key = `resume:stage:${userId}`;
+        return await this.set(key, stagedData, ttl);
+    }
+
+    async getParsedResumeStage(userId) {
+        const key = `resume:stage:${userId}`;
+        return await this.get(key);
+    }
+
+    async deleteParsedResumeStage(userId) {
+        const key = `resume:stage:${userId}`;
+        return await this.del(key);
+    }
+
+
+
     // Store OTP separately for faster verification
     async setTempUserOTP(email, otpData, ttl = 600) {
         const key = `otp:${email.toLowerCase()}`;
