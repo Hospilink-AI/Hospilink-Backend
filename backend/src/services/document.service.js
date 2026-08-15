@@ -841,8 +841,12 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         try {
             const profileService = require("./profile.service");
             const resumeParsingService = require("./resumeParsing.service");
+            const resumeExtractionService = require("./resumeExtraction.service");
 
-            const resumeText = await extractTextFromPDF(file.buffer);
+            // Resumes now accept PDF, DOCX, JPEG, or PNG (validateDocumentUpload's
+            // fileTypeRules) — extractTextFromPDF alone no longer covers every
+            // case, so this dispatches on file.mimetype to the right extractor.
+            const resumeText = await resumeExtractionService.extractResumeText(file.buffer, file.mimetype);
 
             const extracted = await resumeParsingService.parseResumeText(resumeText);
 

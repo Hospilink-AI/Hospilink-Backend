@@ -17,7 +17,7 @@ const logger = require('../utils/logger');
 const { formatRoleForDisplay } = require('../utils/helpers');
 const DashboardService = require('./dashboard.service');
 const SMSService = require('./sms.service');
-const { extractTextFromPDF } = require('./pdf.service');
+const resumeExtractionService = require('./resumeExtraction.service');
 const resumeParsingService = require('./resumeParsing.service');
 const {
     AppError,
@@ -194,10 +194,23 @@ class ProfileService {
                 skills: extracted.skills || [],
                 education: extracted.education || [],
                 achievements: extracted.achievements || [],
-                certifications: extracted.certifications || []
+                certifications: extracted.certifications || [],
+                age: extracted.age ?? null,
+                gender: extracted.gender || null,
+                city: extracted.city || null,
+                district: extracted.district || null,
+                jobRole: extracted.jobRole || null,
+                specialtyFamily: extracted.specialtyFamily || null,
+                totalExperienceYears: extracted.totalExperienceYears ?? null,
+                experienceEntries: extracted.experienceEntries || [],
+                currentEmployer: extracted.currentEmployer || null,
+                expectedSalary: extracted.expectedSalary || null,
+                registrationNumber: extracted.registrationNumber || null,
+                hasRegistration: !!extracted.registrationNumber
             },
             score: extracted.score || { total: 0, breakdown: {} },
             suggestions: extracted.suggestions || [],
+            resumeScoreSummary: extracted.resumeScoreSummary || null,
             resumeDocumentId: resumeDocumentId || null,
             analyzedAt: new Date()
         };
@@ -215,7 +228,9 @@ class ProfileService {
             replace: true
         });
 
-        const resumeText = await extractTextFromPDF(file.buffer);
+        // Resumes accept PDF, DOCX, JPEG, or PNG (validateResumeStageUpload) —
+        // dispatches to the right extractor based on file.mimetype.
+        const resumeText = await resumeExtractionService.extractResumeText(file.buffer, file.mimetype);
         const extracted = await resumeParsingService.parseResumeText(resumeText);
 
         const staged = {

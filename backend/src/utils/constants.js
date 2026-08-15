@@ -56,7 +56,29 @@ const ALLOWED_ROLES = [
 
 
 
+const SPECIALTY_FAMILIES = {
+    rmo: 'Doctor', dmo: 'Doctor', general_physician: 'Doctor', intensivist: 'Doctor',
+    emergency_doctor: 'Doctor', anesthetist: 'Doctor', pediatrician: 'Doctor', gynecologist: 'Doctor',
+    orthopedic_surgeon: 'Surgeon', general_surgeon: 'Surgeon',
+    radiologist: 'Diagnostics', pathologist: 'Diagnostics',
+    staff_nurse: 'Nursing', icu_nurse: 'Nursing', emergency_nurse: 'Nursing',
+    ot_nurse: 'Nursing', dialysis_nurse: 'Nursing', nicu_nurse: 'Nursing',
+    lab_technician: 'Technician', radiology_technician: 'Technician', ot_technician: 'Technician',
+    dialysis_technician: 'Technician', cath_lab_technician: 'Technician', icu_technician: 'Technician',
+    biomedical_engineer: 'Technician',
+    ward_boy: 'Patient Support', ayah: 'Patient Support', opd_attendant: 'Patient Support',
+    emergency_attendant: 'Patient Support', patient_care_taker: 'Patient Support',
+    pharmacist: 'Pharmacy', pharmacy_assistant: 'Pharmacy',
+    housekeeping_staff: 'Administrative & Support', security_guard: 'Administrative & Support',
+    ambulance_driver: 'Administrative & Support', receptionist: 'Administrative & Support',
+    billing_executive: 'Administrative & Support', medical_records_staff: 'Administrative & Support',
+    hr_accounts: 'Administrative & Support'
+};
+
+
+
 module.exports = {
     INDIAN_STATES,
-    ALLOWED_ROLES
+    ALLOWED_ROLES,
+    SPECIALTY_FAMILIES
 };

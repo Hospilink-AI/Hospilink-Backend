@@ -3,6 +3,17 @@ const { body, validationResult } = require('express-validator');
 const { ValidationError } = require('./error.middleware');
 const { getCurrentIST, toIST } = require('../utils/helpers');
 const { INDIAN_STATES, ALLOWED_ROLES } = require('../utils/constants');
+const { DOCX_MIME_TYPE } = require('./upload.middleware');
+
+
+const RESUME_ALLOWED_MIME_TYPES = [
+    'application/pdf',
+    DOCX_MIME_TYPE,
+    'image/jpeg',
+    'image/jpg',
+    'image/png'
+];
+const RESUME_FORMAT_ERROR_MESSAGE = 'Resume must be PDF, DOCX, JPG, JPEG, or PNG format';
 
 
 const validateSignup = (req, res, next) => {
@@ -506,8 +517,8 @@ const validateDocumentUpload = (req, res, next) => {
             message: "Live picture must be JPG or PNG image"
         },
         "resume-experience": {
-            allowed: ["application/pdf"],
-            message: "Resume must be PDF format"
+            allowed: RESUME_ALLOWED_MIME_TYPES,
+            message: RESUME_FORMAT_ERROR_MESSAGE
         },
         // Default rule for certificates and ID documents
         "default": {
@@ -564,10 +575,10 @@ const validateResumeStageUpload = (req, res, next) => {
         });
     }
 
-    if (req.file.mimetype !== 'application/pdf') {
+    if (!RESUME_ALLOWED_MIME_TYPES.includes(req.file.mimetype)) {
         return res.status(400).json({
             success: false,
-            message: 'Resume must be PDF format'
+            message: RESUME_FORMAT_ERROR_MESSAGE
         });
     }
 

@@ -239,7 +239,27 @@ const medicalStaffSchema = new mongoose.Schema({
                 endYear: Number
             }],
             achievements: [{ type: String, trim: true }],
-            certifications: [{ type: String, trim: true }]
+            certifications: [{ type: String, trim: true }],
+            age: { type: Number, default: null },
+            gender: { type: String, default: null },
+            city: { type: String, default: null },
+            district: { type: String, default: null },
+            jobRole: { type: String, default: null },
+            specialtyFamily: { type: String, default: null },
+            totalExperienceYears: { type: Number, default: null },
+            experienceEntries: [{
+                employer: { type: String, default: null },
+                role: { type: String, default: null },
+                startDate: { type: String, default: null },
+                endDate: { type: String, default: null },
+                isCurrent: { type: Boolean, default: false }
+            }],
+            // Derived from experienceEntries — the entry with isCurrent:true.
+            currentEmployer: { type: String, default: null },
+            expectedSalary: { type: String, default: null },
+            registrationNumber: { type: String, default: null },
+            // Derived — true only when registrationNumber is non-empty.
+            hasRegistration: { type: Boolean, default: false }
         },
         score: {
             total: { type: Number, min: 0, max: 100 },
@@ -252,6 +272,8 @@ const medicalStaffSchema = new mongoose.Schema({
             }
         },
         suggestions: [{ type: String, trim: true }],
+        
+        resumeScoreSummary: { type: String, default: null },
         resumeDocumentId: { type: mongoose.Schema.Types.ObjectId, default: null },
         analyzedAt: { type: Date, default: null }
     }
