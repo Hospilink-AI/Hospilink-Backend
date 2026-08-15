@@ -1385,7 +1385,86 @@ class NotificationEmitter {
         }
     }
 
-   
+    // Resume-driven onboarding — tells a staff member which profile fields were
+    // auto-filled from their uploaded resume, so they know to review it.
+    async emitProfileAutoFilledFromResume(userId, filledFields = []) {
+        try {
+            if (!userId) {
+                console.error('Missing required parameters for emitProfileAutoFilledFromResume');
+                return;
+            }
+
+            const fieldList = filledFields.length ? filledFields.join(', ') : 'basic info';
+
+            const payload = {
+                type: 'PROFILE_AUTO_FILLED_FROM_RESUME',
+                filledFields,
+                message: `We filled in your profile from your resume (${fieldList}). Review it any time.`,
+                timestamp: new Date().toISOString()
+            };
+
+            try {
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    userId,
+                    'PROFILE_AUTO_FILLED_FROM_RESUME',
+                    payload
+                );
+
+                await notificationDelivery.deliverToUser(userId, 'PROFILE_AUTO_FILLED_FROM_RESUME', payload, unreadCount);
+
+                console.log(`Profile auto-fill notification sent to staff ${userId}`);
+            } catch (error) {
+                console.error(`Error sending profile auto-fill notification to staff ${userId}:`, error);
+            }
+        } catch (error) {
+            console.error('Error emitting profile auto-fill notification:', error);
+        }
+    }
+
+    // Resume analysis (score + suggestions) — fired every time a resume is
+    // parsed, on both onboarding paths, whether this is the first resume ever
+    // uploaded or a replacement for a previous one. Independent of
+    // emitProfileAutoFilledFromResume, which only fires when a brand-new
+    // profile was created.
+    async emitResumeAnalyzed(userId, { total } = {}, suggestions = [], isReanalysis = false) {
+        try {
+            if (!userId) {
+                console.error('Missing required parameters for emitResumeAnalyzed');
+                return;
+            }
+
+            const message = isReanalysis
+                ? `Your resume has been re-analyzed — new score: ${total}/100.`
+                : `Your resume scored ${total}/100.`;
+
+            const payload = {
+                type: 'RESUME_ANALYZED',
+                score: total,
+                suggestions,
+                isReanalysis,
+                message,
+                timestamp: new Date().toISOString()
+            };
+
+            try {
+                const { unreadCount } = await notificationService.createNotificationWithCount(
+                    userId,
+                    'RESUME_ANALYZED',
+                    payload
+                );
+
+                await notificationDelivery.deliverToUser(userId, 'RESUME_ANALYZED', payload, unreadCount);
+
+                console.log(`Resume analyzed notification sent to staff ${userId}`);
+            } catch (error) {
+                console.error(`Error sending resume analyzed notification to staff ${userId}:`, error);
+            }
+        } catch (error) {
+            console.error('Error emitting resume analyzed notification:', error);
+        }
+    }
+
+
 
     // Document rejection notifications
     async emitDocumentRejected(document, userRole) {

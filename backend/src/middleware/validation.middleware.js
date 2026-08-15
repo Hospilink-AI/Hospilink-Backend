@@ -2,7 +2,18 @@ const validator = require('validator');
 const { body, validationResult } = require('express-validator');
 const { ValidationError } = require('./error.middleware');
 const { getCurrentIST, toIST } = require('../utils/helpers');
-const { INDIAN_STATES } = require('../utils/constants');
+const { INDIAN_STATES, ALLOWED_ROLES } = require('../utils/constants');
+const { DOCX_MIME_TYPE } = require('./upload.middleware');
+
+
+const RESUME_ALLOWED_MIME_TYPES = [
+    'application/pdf',
+    DOCX_MIME_TYPE,
+    'image/jpeg',
+    'image/jpg',
+    'image/png'
+];
+const RESUME_FORMAT_ERROR_MESSAGE = 'Resume must be PDF, DOCX, JPG, JPEG, or PNG format';
 
 
 const validateSignup = (req, res, next) => {
@@ -41,9 +52,9 @@ const validateSignup = (req, res, next) => {
 
     // Role validation — 'admin' is intentionally excluded; admin accounts are created
     // directly in the database and cannot be self-registered via this endpoint.
-    const validRoles = ['hospital', 'candidate', 'staff'];
+    const validRoles = ['hospital', 'staff'];
     if (!role || !validRoles.includes(role)) {
-        errors.push('Valid role is required. Allowed: hospital, candidate, staff');
+        errors.push('Valid role is required. Allowed: hospital, staff');
     }
 
     if (errors.length > 0) {
@@ -506,8 +517,8 @@ const validateDocumentUpload = (req, res, next) => {
             message: "Live picture must be JPG or PNG image"
         },
         "resume-experience": {
-            allowed: ["application/pdf"],
-            message: "Resume must be PDF format"
+            allowed: RESUME_ALLOWED_MIME_TYPES,
+            message: RESUME_FORMAT_ERROR_MESSAGE
         },
         // Default rule for certificates and ID documents
         "default": {
@@ -543,6 +554,31 @@ const validateDocumentUpload = (req, res, next) => {
             success: false,
             message: 'Document upload validation failed',
             errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Single-file resume upload for the resume-first "apply for a job" staging
+// flow (profile.routes.js's POST /resume-stage) — separate from
+// validateDocumentUpload above since this endpoint takes exactly one file
+// with a fixed field name, not an arbitrary set of documentType-keyed files.
+// Mirrors validateDocumentUpload's fileTypeRules['resume-experience'] rule.
+const validateResumeStageUpload = (req, res, next) => {
+    if (!req.file) {
+        return res.status(400).json({
+            success: false,
+            message: 'Resume file is required'
+        });
+    }
+
+    if (!RESUME_ALLOWED_MIME_TYPES.includes(req.file.mimetype)) {
+        return res.status(400).json({
+            success: false,
+            message: RESUME_FORMAT_ERROR_MESSAGE
         });
     }
 
@@ -1107,7 +1143,108 @@ const validateDutyEdit = (req, res, next) => {
             errors: errors
         });
     }
-    
+
+    next();
+};
+
+
+
+// Validation for job vacancy creation (shared by hospital and admin-on-behalf-of-hospital flows)
+const validateJobVacancyCreation = (req, res, next) => {
+    const { title, specialty, experience, education, skills, location, salary, description } = req.body;
+    const errors = [];
+
+    if (!title || typeof title !== 'string' || !title.trim()) {
+        errors.push('title is required');
+    } else if (title.trim().length > 200) {
+        errors.push('title cannot exceed 200 characters');
+    }
+
+    if (!specialty || typeof specialty !== 'string' || !specialty.trim()) {
+        errors.push('specialty is required');
+    } else if (!ALLOWED_ROLES.includes(specialty.trim())) {
+        errors.push(`specialty must be one of: ${ALLOWED_ROLES.join(', ')}`);
+    }
+
+    if (!description || typeof description !== 'string' || !description.trim()) {
+        errors.push('description is required');
+    } else if (description.trim().length > 3000) {
+        errors.push('description cannot exceed 3000 characters');
+    }
+
+    if (experience !== undefined && typeof experience !== 'string') {
+        errors.push('experience must be a string');
+    }
+
+    if (education !== undefined && typeof education !== 'string') {
+        errors.push('education must be a string');
+    }
+
+    if (skills !== undefined && (!Array.isArray(skills) || !skills.every(s => typeof s === 'string'))) {
+        errors.push('skills must be an array of strings');
+    }
+
+    if (location !== undefined && typeof location !== 'string') {
+        errors.push('location must be a string');
+    }
+
+    if (salary !== undefined && typeof salary !== 'string') {
+        errors.push('salary must be a string');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for job vacancy edits — partial patch over an allowed field whitelist
+const validateJobVacancyEdit = (req, res, next) => {
+    const errors = [];
+    const allowedFields = ['title', 'specialty', 'experience', 'education', 'skills', 'location', 'salary', 'description'];
+
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Allowed: ${allowedFields.join(', ')}`);
+    }
+
+    if (receivedFields.length === 0) {
+        errors.push('At least one field must be provided to update');
+    }
+
+    if (req.body.title !== undefined && (typeof req.body.title !== 'string' || !req.body.title.trim())) {
+        errors.push('title must be a non-empty string');
+    }
+
+    if (req.body.specialty !== undefined && (typeof req.body.specialty !== 'string' || !ALLOWED_ROLES.includes(req.body.specialty.trim()))) {
+        errors.push(`specialty must be one of: ${ALLOWED_ROLES.join(', ')}`);
+    }
+
+    if (req.body.description !== undefined && (typeof req.body.description !== 'string' || !req.body.description.trim())) {
+        errors.push('description must be a non-empty string');
+    }
+
+    if (req.body.skills !== undefined && (!Array.isArray(req.body.skills) || !req.body.skills.every(s => typeof s === 'string'))) {
+        errors.push('skills must be an array of strings');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
     next();
 };
 
@@ -1801,6 +1938,7 @@ module.exports = {
     validateHospitalProfile,
     validateDutyStatusHistory,
     validateDocumentUpload,
+    validateResumeStageUpload,
     validateProfileUpdate,
     validateStaffAvailability,
     validateDutyCreation,
@@ -1813,6 +1951,8 @@ module.exports = {
     validateResendOtp,
     validateDutyCancellation,
     validateDutyEdit,
+    validateJobVacancyCreation,
+    validateJobVacancyEdit,
     validatePagination,
     validateReviewSubmission,
     validateStaffIdParam,

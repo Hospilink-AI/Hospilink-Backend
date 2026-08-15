@@ -29,7 +29,11 @@ const {
     validateAdminListQuery,
 } = require('../middleware/admin.middleware');
 
-const { validateDutyCreation } = require('../middleware/validation.middleware');
+const {
+    validateDutyCreation,
+    validateJobVacancyCreation,
+    validatePagination
+} = require('../middleware/validation.middleware');
 
 const {
     authRateLimit,
@@ -66,6 +70,10 @@ router.patch('/hospitals/:hospitalId/unsuspend', requireCapability('hospital.man
 router.post('/create-duty', requireCapability('duty.manage'), validateDutyCreation, adminController.createDutyForHospital);
 router.get('/dashboard-stats', requireCapability('dashboard.view'), adminController.getDashboardStats);
 router.get('/staff-stats', requireCapability('dashboard.view'), adminController.getStaffStatistics);
+
+//Job Vacancy Management endpoints (admin posts on behalf of a hospital)
+router.post('/vacancy', requireCapability('vacancy.manage'), validateJobVacancyCreation, adminController.createVacancyForHospital);
+router.get('/vacancies', requireCapability('vacancy.view'), validatePagination, adminController.listAllVacancies);
 
 
 //Medical Staff Management endpoints

@@ -16,25 +16,21 @@ const medicalStaffSchema = new mongoose.Schema({
     },
     jobRole: {
         type: String,
-        required: [true, 'Job role is required'],
         trim: true,
         maxlength: [50, 'Job role cannot exceed 50 characters']
     },
     city: {
         type: String,
-        required: [true, 'City is required'],
         trim: true,
         maxlength: [100, 'City cannot exceed 100 characters']
     },
     currentAddress: {
         type: String,
-        required: [true, 'Current address is required'],
         trim: true,
         maxlength: [300, 'Current address cannot exceed 300 characters']
     },
     state: {
         type: String,
-        required: [true, 'State is required'],
         trim: true,
         enum: {
             values: INDIAN_STATES,
@@ -43,11 +39,10 @@ const medicalStaffSchema = new mongoose.Schema({
     },
     pincode: {
         type: String,
-        required: [true, 'Pincode is required'],
         trim: true,
         validate: {
             validator: function(v) {
-                return /^[1-9][0-9]{5}$/.test(v);
+                return !v || /^[1-9][0-9]{5}$/.test(v);
             },
             message: 'Pincode must be a valid 6-digit Indian postal code'
         }
@@ -121,40 +116,32 @@ const medicalStaffSchema = new mongoose.Schema({
     coordinates: {
         type: {
             type: String,
-            enum: ['Point'],
-            default: 'Point'
+            enum: ['Point']
         },
         coordinates: {
             latitude: {
-                type: Number,
-                required: true
+                type: Number
             },
             longitude: {
-                type: Number,
-                required: true
+                type: Number
             }
         }
     },
     phoneNumber: {
         type: String,
-        required: [true, 'Phone number is required'],
         trim: true,
         validate: {
             validator: function (v) {
-                return /^\+?[\d\s\-\(\)]{10,15}$/.test(v);
+                return !v || /^\+?[\d\s\-\(\)]{10,15}$/.test(v);
             },
             message: 'Please provide a valid phone number'
         }
     },
-    // Spaces stripped from phoneNumber — used to enforce phone-number
-    // uniqueness across Hospital and MedicalStaff accounts.
     normalizedPhone: {
         type: String,
         unique: true,
         sparse: true
     },
-    // True once the send-phone-otp / verify-phone-otp flow succeeded for this
-    // number, mirroring User.isEmailVerified.
     isPhoneVerified: {
         type: Boolean,
         default: false
@@ -162,6 +149,24 @@ const medicalStaffSchema = new mongoose.Schema({
     isProfileComplete: {
         type: Boolean,
         default: true
+    },
+    // Which onboarding path created this record — set once at creation, never
+    // changed afterward. Purely a routing signal for checkProfileCompletion
+    // (profile.service.js): 'resume_autofill' and 'resume_reviewed' profiles
+    // both skip the KYC-document onboarding step entirely, since no
+    // verification is required to apply for a permanent job. Unset on every
+    // profile created before this field existed — treated the same as
+    // 'manual' by that routing logic, so no backfill is needed.
+    //
+    // 'manual'          — full form, filled by hand (existing flow)
+    // 'resume_reviewed' — resume-first "apply for a job" flow
+    //                     parse result staged in Redis, shown in an editable
+    //                     form, confirmed with phone-OTP like the manual path,
+    //                     then written to MedicalStaff (profile.service.js's
+    //                     stageResumeForProfile + createMedicalStaffProfile)
+    profileSource: {
+        type: String,
+        enum: ['manual', 'resume_autofill', 'resume_reviewed']
     },
     isDocumentsUploaded: {
         type: Boolean,
@@ -207,16 +212,84 @@ const medicalStaffSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    // Not required — populated from a resume when the parser can confidently
+    // bucket it; required for the manual flow via validateMedicalStaffProfile.
     experience: {
         type: String,
         enum: {
             values: ['0-1 year', '1-3 years', '3-5 years', '5-10 years', '10-15 years', '15-20 years', '20+ years'],
             message: 'Invalid experience value. Must be one of: 0-1 year, 1-3 years, 3-5 years, 5-10 years, 10-15 years, 15-20 years, 20+ years'
+        }
+    },
+    
+    resumeAnalysis: {
+        extractedData: {
+            name: { type: String, default: null },
+            jobTitleText: { type: String, default: null },
+            location: { type: String, default: null },
+            email: { type: String, default: null },
+            phone: { type: String, default: null },
+            summary: { type: String, default: null },
+            experience: { type: String, default: null },
+            skills: [{ type: String, trim: true }],
+            education: [{
+                universityName: String,
+                speciality: String,
+                startYear: Number,
+                endYear: Number
+            }],
+            achievements: [{ type: String, trim: true }],
+            certifications: [{ type: String, trim: true }],
+            age: { type: Number, default: null },
+            gender: { type: String, default: null },
+            city: { type: String, default: null },
+            district: { type: String, default: null },
+            jobRole: { type: String, default: null },
+            specialtyFamily: { type: String, default: null },
+            totalExperienceYears: { type: Number, default: null },
+            experienceEntries: [{
+                employer: { type: String, default: null },
+                role: { type: String, default: null },
+                startDate: { type: String, default: null },
+                endDate: { type: String, default: null },
+                isCurrent: { type: Boolean, default: false }
+            }],
+            // Derived from experienceEntries — the entry with isCurrent:true.
+            currentEmployer: { type: String, default: null },
+            expectedSalary: { type: String, default: null },
+            registrationNumber: { type: String, default: null },
+            // Derived — true only when registrationNumber is non-empty.
+            hasRegistration: { type: Boolean, default: false }
         },
-        required: [true, 'Experience is required']
+        score: {
+            total: { type: Number, min: 0, max: 100 },
+            breakdown: {
+                education: { type: Number, min: 0, max: 20 },
+                experience: { type: Number, min: 0, max: 20 },
+                skills: { type: Number, min: 0, max: 20 },
+                achievements: { type: Number, min: 0, max: 20 },
+                certifications: { type: Number, min: 0, max: 20 }
+            }
+        },
+        suggestions: [{ type: String, trim: true }],
+        
+        resumeScoreSummary: { type: String, default: null },
+        resumeDocumentId: { type: mongoose.Schema.Types.ObjectId, default: null },
+        analyzedAt: { type: Date, default: null }
     }
 }, {
     timestamps: true
+});
+
+
+medicalStaffSchema.pre('save', function (next) {
+    this.isProfileComplete = !!(
+        this.jobRole && this.city && this.currentAddress && this.state &&
+        this.pincode && this.phoneNumber && this.experience &&
+        this.coordinates?.coordinates?.latitude != null &&
+        this.coordinates?.coordinates?.longitude != null
+    );
+    next();
 });
 
 
@@ -255,9 +328,12 @@ medicalStaffSchema.index({
 
 medicalStaffSchema.index({ user: 1, updatedAt: -1 }); // For recent updates
 
-// Virtual field for geospatial queries (returns [longitude, latitude])
+// Virtual field for geospatial queries (returns [longitude, latitude]).
+// Null-safe: a resume-driven profile may have no coordinates at all.
 medicalStaffSchema.virtual('coordinatesArray').get(function () {
-    return [this.coordinates.coordinates.longitude, this.coordinates.coordinates.latitude];
+    const coords = this.coordinates?.coordinates;
+    if (coords?.longitude == null || coords?.latitude == null) return undefined;
+    return [coords.longitude, coords.latitude];
 });
 
 // 2dsphere index for MongoDB geospatial queries

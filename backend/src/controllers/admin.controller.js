@@ -94,8 +94,46 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
     }
 
     const result = await adminService.createDutyForHospital(hospital_id, req.body);
-    
+
     res.status(201).json(result);
+});
+
+
+// Create a job vacancy on behalf of a hospital
+// POST /api/admin/vacancy
+exports.createVacancyForHospital = asyncHandler(async (req, res) => {
+    const { hospital_id } = req.body;
+
+    if (!hospital_id) {
+        return res.status(400).json({ success: false, message: 'hospital_id is required' });
+    }
+
+    const vacancy = await adminService.createVacancyForHospital(hospital_id, req.user.id, req.body);
+
+    res.status(201).json({
+        success: true,
+        vacancy,
+        message: 'Vacancy posted successfully'
+    });
+});
+
+
+// List every vacancy across every hospital (oversight/audit view)
+// GET /api/admin/vacancies
+exports.listAllVacancies = asyncHandler(async (req, res) => {
+    const { hospitalId, specialty, location, activeOnly, page = 1, limit = 10 } = req.query;
+
+    const result = await adminService.listAllVacancies(
+        { hospitalId, specialty, location, activeOnly: activeOnly === 'true' },
+        { page: parseInt(page), limit: parseInt(limit) }
+    );
+
+    res.status(200).json({
+        success: true,
+        count: result.vacancies.length,
+        data: result.vacancies,
+        pagination: result.pagination
+    });
 });
 
 

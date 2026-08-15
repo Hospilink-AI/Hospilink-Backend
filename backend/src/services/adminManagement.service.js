@@ -44,12 +44,13 @@ class AdminManagementService {
 
 
 
-    async listAdmins({ adminSubRole, includeInactive, page, limit }) {
+    async listAdmins({ adminSubRole, page, limit }) {
         const { skip } = getPaginationParams(page, limit);
 
+        // Always returns both active and inactive admins — isActive is intentionally
+        // not filtered here, unlike most other list endpoints in this codebase.
         const query = { role: 'admin' };
         if (adminSubRole) query.adminSubRole = adminSubRole;
-        if (!includeInactive) query.isActive = { $ne: false };
 
         const [admins, total] = await Promise.all([
             User.find(query)
