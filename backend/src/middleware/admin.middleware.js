@@ -1223,6 +1223,47 @@ const validateAdminRoleChange = (req, res, next) => {
 
 
 
+// Validate OTP submitted to confirm a staged role change
+const validateRoleChangeOtp = (req, res, next) => {
+    if (!req.body || Object.keys(req.body).length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Request body is required'
+        });
+    }
+
+    const { otp } = req.body;
+
+    const allowedFields = ['otp'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid fields: ${unexpectedFields.join(', ')}. Only allowed: otp`
+        });
+    }
+
+    if (!otp) {
+        return res.status(400).json({
+            success: false,
+            message: 'OTP is required'
+        });
+    }
+
+    if (typeof otp !== 'string' || !/^\d{6}$/.test(otp)) {
+        return res.status(400).json({
+            success: false,
+            message: 'OTP must be a 6-digit number'
+        });
+    }
+
+    req.validatedBody = { otp };
+
+    next();
+};
+
+
+
 
 // Validate admin list query parameters
 const validateAdminListQuery = (req, res, next) => {
@@ -1301,5 +1342,6 @@ module.exports = {
     validateUnlockOtp,
     validateAdminCreation,
     validateAdminRoleChange,
+    validateRoleChangeOtp,
     validateAdminListQuery,
 };

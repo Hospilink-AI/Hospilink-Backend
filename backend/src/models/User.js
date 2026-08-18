@@ -63,6 +63,15 @@ const userSchema = new mongoose.Schema({
         expiresAt: Date
     },
 
+    // for admin
+    pendingRoleChange: {
+        otp: String,
+        targetAdminId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        newSubRole: String,
+        previousSubRole: String,
+        expiresAt: Date
+    },
+
     // Track admin login devices for security alerts
     loginDevices: [{
         deviceId: {

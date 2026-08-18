@@ -63,12 +63,28 @@ exports.getAdminDetail = asyncHandler(async (req, res) => {
 
 
 
-// PATCH /api/admin/update-admin-role/:adminId
-exports.changeAdminRole = asyncHandler(async (req, res) => {
+// PATCH /api/admin/update-admin-role/:adminId — step 1: stage the change, OTP sent to the
+// requesting super admin's own email. Nothing changes on the target yet.
+exports.initiateRoleChange = asyncHandler(async (req, res) => {
     const { adminSubRole } = req.validatedBody;
     const requestingAdminId = req.user._id || req.user.id;
 
-    const result = await adminManagementService.changeAdminRole(req.params.adminId, adminSubRole, requestingAdminId);
+    const result = await adminManagementService.initiateRoleChange(req.params.adminId, adminSubRole, requestingAdminId);
+
+    res.status(200).json({
+        success: true,
+        message: 'OTP sent to your email to confirm this role change',
+        data: result
+    });
+});
+
+
+// POST /api/admin/update-admin-role/verify-otp — step 2: OTP confirmed, role change applied here
+exports.verifyRoleChangeOtp = asyncHandler(async (req, res) => {
+    const { otp } = req.validatedBody;
+    const requestingAdminId = req.user._id || req.user.id;
+
+    const result = await adminManagementService.verifyRoleChangeOTP(otp, requestingAdminId);
 
     activityLogEmitter.emitAdminActivity(
         ACTIVITY_ACTIONS.ADMIN_ROLE_CHANGED,
@@ -79,6 +95,16 @@ exports.changeAdminRole = asyncHandler(async (req, res) => {
     ).catch(() => {});
 
     res.status(200).json({ success: true, message: 'Admin sub-role updated successfully', data: result });
+});
+
+
+// POST /api/admin/update-admin-role/resend-otp
+exports.resendRoleChangeOtp = asyncHandler(async (req, res) => {
+    const requestingAdminId = req.user._id || req.user.id;
+
+    const result = await adminManagementService.resendRoleChangeOTP(requestingAdminId);
+
+    res.status(200).json({ success: true, message: result.message });
 });
 
 

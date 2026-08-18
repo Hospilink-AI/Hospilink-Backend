@@ -1,9 +1,7 @@
 const nodemailer = require('nodemailer');
 const logger = require('../utils/logger');
 
-// Hard cap on a single sendMail call — prevents a stalled SMTP connection from
-// leaking indefinitely. Should be well under Railway's/ECS's idle connection
-// kill time but large enough to allow for a slow-start SMTP handshake.
+
 const SEND_TIMEOUT_MS = 15000; // 15 seconds
 
 class EmailService {
@@ -15,9 +13,6 @@ class EmailService {
             pool: true,          // reuse SMTP connections — avoids per-request TCP+TLS handshake
             maxConnections: 5,
             maxMessages: 100,
-            // Explicit timeouts — nodemailer defaults are 2 min (connection) and
-            // 10 min (socket), which are way too long for a cloud environment like
-            // Railway or ECS where stalled connections are silently killed.
             connectionTimeout: 10000,  // 10s to establish TCP+TLS to SMTP server
             greetingTimeout: 8000,     // 8s to receive the SMTP greeting banner
             socketTimeout: 12000,      // 12s idle socket timeout between SMTP commands
@@ -41,10 +36,8 @@ class EmailService {
         });
     }
 
-    /**
-     * Wraps a sendMail call with a hard timeout so a stalled SMTP connection
-     * never hangs indefinitely in the background.
-     */
+    
+
     async _sendWithTimeout(mailOptions) {
         return Promise.race([
             this.transporter.sendMail(mailOptions),
@@ -57,6 +50,7 @@ class EmailService {
         ]);
     }
 
+    
     async sendOTPEmail(email, otp, userName) {
         try {
             const mailOptions = {
@@ -173,6 +167,55 @@ class EmailService {
         } catch (error) {
             logger.error(`Error sending admin email to ${email}: ${error.message}`);
             throw new Error('Failed to send admin OTP email');
+        }
+    }
+
+
+
+    async sendAdminRoleChangeOTPEmail(requesterName, requesterEmail, otp, targetName, targetEmail, newSubRole) {
+        try {
+            const mailOptions = {
+                from: `HospiLink Admin <${process.env.EMAIL_FROM}>`,
+                to: requesterEmail,
+                subject: 'HospiLink Admin - Confirm Role Change',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: #2c3e50; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">Confirm Admin Role Change</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p>Hello <strong>${requesterName}</strong>,</p>
+                            <p>You requested to change the following admin's role. Please use the OTP below to confirm this change:</p>
+
+                            <div style="background-color: #f8f9fa; border-left: 4px solid #3498db; padding: 15px; margin: 20px 0;">
+                                <p style="margin: 0;"><strong>Admin:</strong> ${targetName} (${targetEmail})</p>
+                                <p style="margin: 8px 0 0;"><strong>New role:</strong> ${newSubRole}</p>
+                            </div>
+
+                            <div style="background-color: #f8f9fa; border: 2px solid #3498db; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
+                                <h1 style="color: #2c3e50; letter-spacing: 8px; margin: 0; font-size: 32px;">${otp}</h1>
+                            </div>
+
+                            <p><strong>This OTP is valid for ${process.env.OTP_EXPIRY_MINUTES || 10} minutes only.</strong></p>
+
+                            <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;">
+                                <h4 style="margin-top: 0; color: #856404;">🔒 Security Notice</h4>
+                                <p style="margin: 0; color: #856404;">If you didn't request this role change, do not enter this code — contact another super admin immediately.</p>
+                            </div>
+
+                            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                        </div>
+                    </div>
+                `
+            };
+
+            await this._sendWithTimeout(mailOptions);
+            logger.info(`Admin role-change OTP email sent to ${requesterEmail}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending admin role-change OTP email to ${requesterEmail}: ${error.message}`);
+            throw new Error('Failed to send admin role-change OTP email');
         }
     }
 

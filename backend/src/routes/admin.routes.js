@@ -26,6 +26,7 @@ const {
     validateAdminOverrideStatus,
     validateAdminCreation,
     validateAdminRoleChange,
+    validateRoleChangeOtp,
     validateAdminListQuery,
 } = require('../middleware/admin.middleware');
 
@@ -134,7 +135,9 @@ router.patch(
 router.post('/create-admin', requireCapability('admin.manage'), validateAdminCreation, adminManagementController.createAdmin);
 router.get('/admin-list', requireCapability('admin.view'), validateAdminListQuery, adminManagementController.listAdmins);
 router.get('/admin-detail/:adminId', requireCapability('admin.view'), validateObjectId('adminId'), adminManagementController.getAdminDetail);
-router.patch('/update-admin-role/:adminId', requireCapability('admin.manage'), validateObjectId('adminId'), validateAdminRoleChange, adminManagementController.changeAdminRole);
+router.patch('/update-admin-role/:adminId', requireCapability('admin.manage'), otpRateLimit, validateObjectId('adminId'), validateAdminRoleChange, adminManagementController.initiateRoleChange);
+router.post('/update-admin-role/verify-otp', requireCapability('admin.manage'), otpRateLimit, validateRoleChangeOtp, adminManagementController.verifyRoleChangeOtp);
+router.post('/update-admin-role/resend-otp', requireCapability('admin.manage'), otpRateLimit, adminManagementController.resendRoleChangeOtp);
 router.delete('/deactivate-admin/:adminId', requireCapability('admin.manage'), validateObjectId('adminId'), adminManagementController.deactivateAdmin);
 router.patch('/activate-admin/:adminId', requireCapability('admin.manage'), validateObjectId('adminId'), adminManagementController.activateAdmin);
 
