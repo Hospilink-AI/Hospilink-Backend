@@ -31,7 +31,6 @@ router.get(
     jobVacancyController.listMyVacancies
 );
 
-// Public/staff browse — candidate or existing marketplace staff, no candidacy check
 router.get(
     '/vacancies',
     authorize('staff', 'hospital', 'admin'),

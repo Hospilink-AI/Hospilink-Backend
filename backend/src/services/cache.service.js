@@ -385,6 +385,23 @@ class CacheService {
         return await this.del(key);
     }
 
+    // ── Vacancy match scores (staff-personalized GET /vacancies) ─────────────
+    // Full sorted match list, cached per candidate+filter combination — avoids
+    // recomputing scores across every live vacancy on each pagination click
+    // within the same browse session. Short TTL, no invalidation hooks on
+    // vacancy create/edit/close or profile update — there's no single
+    // predictable key to invalidate (this is keyed per staff member), so a
+    // short staleness window is the deliberate tradeoff instead.
+    async getVacancyMatches(userId, filterKey) {
+        const key = `vacancy:matches:${userId}:${filterKey}`;
+        return await this.get(key);
+    }
+
+    async setVacancyMatches(userId, filterKey, data, ttl = 60) {
+        const key = `vacancy:matches:${userId}:${filterKey}`;
+        return await this.set(key, data, ttl);
+    }
+
     // ── Staged resume parse ───────────
     // A brand-new candidate with no MedicalStaff profile yet uploads a resume
     // before filling any form; the parse result is staged here (not written to
