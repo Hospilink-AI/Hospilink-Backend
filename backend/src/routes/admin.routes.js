@@ -33,7 +33,9 @@ const {
 const {
     validateDutyCreation,
     validateJobVacancyCreation,
-    validatePagination
+    validatePagination,
+    validateNoShowDisputeResolution,
+    validateInterviewConfigUpdate
 } = require('../middleware/validation.middleware');
 
 const {
@@ -75,6 +77,13 @@ router.get('/staff-stats', requireCapability('dashboard.view'), adminController.
 //Job Vacancy Management endpoints (admin posts on behalf of a hospital)
 router.post('/vacancy', requireCapability('vacancy.manage'), validateJobVacancyCreation, adminController.createVacancyForHospital);
 router.get('/vacancies', requireCapability('vacancy.view'), validatePagination, adminController.listAllVacancies);
+
+// Job application / interview oversight endpoints
+router.get('/vacancy-applications', requireCapability('application.view'), validatePagination, adminController.listAllVacancyApplications);
+router.get('/vacancy-applications/:applicationId', requireCapability('application.view'), validateObjectId('applicationId'), adminController.getVacancyApplicationDetail);
+router.patch('/no-show-disputes/:applicationId/resolve', requireCapability('noshow.dispute.resolve'), validateObjectId('applicationId'), validateNoShowDisputeResolution, adminController.resolveNoShowDispute);
+router.get('/interview-config', requireCapability('interview.config.manage'), adminController.getInterviewConfig);
+router.patch('/interview-config', requireCapability('interview.config.manage'), validateInterviewConfigUpdate, adminController.updateInterviewConfig);
 
 
 //Medical Staff Management endpoints

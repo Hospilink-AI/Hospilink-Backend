@@ -20,10 +20,14 @@ const logger = require('../utils/logger');
 const notificationEmitter = require('./notificationEmitter');
 const DashboardService = require('./dashboard.service');
 const JobVacancyService = require('./jobVacancy.service');
+const JobApplicationService = require('./jobApplication.service');
+const InterviewSchedulingService = require('./interviewScheduling.service');
+const SystemConfigService = require('./systemConfig.service');
 const {
     ValidationError,
     NotFoundError,
-    ConflictError
+    ConflictError,
+    UnprocessableEntityError
 } = require('../middleware/error.middleware');
 
 /**
@@ -2358,6 +2362,50 @@ class AdminService {
     // soft-deleted ones unless filters.activeOnly is set.
     async listAllVacancies(filters, pagination) {
         return JobVacancyService.listAll(filters, pagination);
+    }
+
+    // ─── Job application / interview oversight ─────────────────────────────────
+
+    // GET /api/admin/vacancy-applications — cross-hospital oversight list, no
+    // ownership scoping. Gated on the application.view capability at the route.
+    async listAllVacancyApplications(filters, pagination) {
+        return JobApplicationService.listAllForAdmin(filters, pagination);
+    }
+
+    // GET /api/admin/vacancy-applications/:applicationId — full record,
+    // including the no-show/dispute history that's never shown to hospitals.
+    // Bypasses the hospital tier projector entirely (JobApplicationService.getById
+    // only applies it when requester.role === 'hospital').
+    async getVacancyApplicationDetail(applicationId, adminUser) {
+        return JobApplicationService.getById(applicationId, adminUser);
+    }
+
+    // PATCH /api/admin/no-show-disputes/:applicationId/resolve
+    async resolveNoShowDispute(applicationId, adminUserId, decision) {
+        return InterviewSchedulingService.resolveNoShowDispute(applicationId, adminUserId, decision);
+    }
+
+    // GET /api/admin/interview-config — every setting's current effective
+    // value plus its full version history.
+    async getInterviewConfig() {
+        const keys = SystemConfigService.defaultKeys;
+        const [effective, historyEntries] = await Promise.all([
+            SystemConfigService.getAllEffective(),
+            Promise.all(keys.map(key => SystemConfigService.getHistory(key)))
+        ]);
+        return keys.map((key, i) => ({ key, value: effective[key], history: historyEntries[i] }));
+    }
+
+    // PATCH /api/admin/interview-config — inserts a new version, never edits
+    // history in place. effectiveFrom defaults to now inside SystemConfigService.
+    async updateInterviewConfig(key, value, effectiveFrom, adminUserId) {
+        if (!SystemConfigService.isKnownKey(key)) {
+            throw new UnprocessableEntityError(`Unknown config key: ${key}`);
+        }
+        return SystemConfigService.setValue(key, value, {
+            effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : undefined,
+            createdBy: adminUserId
+        });
     }
 
     // ─── Account suspension ────────────────────────────────────────────────────

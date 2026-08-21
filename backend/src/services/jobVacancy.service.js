@@ -1,8 +1,9 @@
 const JobVacancy = require('../models/JobVacancy');
 const Hospital = require('../models/Hospital');
 const MedicalStaff = require('../models/MedicalStaff');
+const JobApplication = require('../models/JobApplication');
 const { hasCapability } = require('../config/adminPermissions.config');
-const { NotFoundError, ForbiddenError } = require('../middleware/error.middleware');
+const { NotFoundError, ForbiddenError, ConflictError } = require('../middleware/error.middleware');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
 const vacancyMatchingService = require('./vacancyMatching.service');
 const cacheService = require('./cache.service');
@@ -253,6 +254,19 @@ class JobVacancyService {
         await this._assertCanManage(vacancy, requester);
 
         if (!vacancy.deletedAt) {
+            // A vacancy with a confirmed interview cannot be closed — only
+            // `confirmed` blocks; `interviewed`/`offered`/etc. do not, per
+            // the interview-flow spec's literal wording. The recruiter must
+            // cancel or record an outcome on that application first.
+            const blocking = await JobApplication.findOne({ vacancy: vacancyId, status: 'confirmed' })
+                .select('_id')
+                .lean();
+            if (blocking) {
+                throw new ConflictError(
+                    `This vacancy has a confirmed interview in progress (application ${blocking._id}). Cancel or record its outcome before closing the vacancy.`
+                );
+            }
+
             vacancy.deletedAt = new Date();
             await vacancy.save();
         }

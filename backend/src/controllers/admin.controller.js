@@ -136,6 +136,49 @@ exports.listAllVacancies = asyncHandler(async (req, res) => {
     });
 });
 
+// GET /api/admin/vacancy-applications
+exports.listAllVacancyApplications = asyncHandler(async (req, res) => {
+    const { hospitalId, vacancyId, status, page = 1, limit = 10 } = req.query;
+
+    const result = await adminService.listAllVacancyApplications(
+        { hospitalId, vacancyId, status },
+        { page: parseInt(page), limit: parseInt(limit) }
+    );
+
+    res.status(200).json({
+        success: true,
+        count: result.applications.length,
+        data: result.applications,
+        pagination: result.pagination
+    });
+});
+
+// GET /api/admin/vacancy-applications/:applicationId
+exports.getVacancyApplicationDetail = asyncHandler(async (req, res) => {
+    const application = await adminService.getVacancyApplicationDetail(req.params.applicationId, req.user);
+    res.status(200).json({ success: true, application });
+});
+
+// PATCH /api/admin/no-show-disputes/:applicationId/resolve
+exports.resolveNoShowDispute = asyncHandler(async (req, res) => {
+    const { decision } = req.body;
+    const application = await adminService.resolveNoShowDispute(req.params.applicationId, req.user.id, decision);
+    res.status(200).json({ success: true, application, message: `No-show dispute ${decision === 'uphold' ? 'upheld' : 'voided'}` });
+});
+
+// GET /api/admin/interview-config
+exports.getInterviewConfig = asyncHandler(async (req, res) => {
+    const config = await adminService.getInterviewConfig();
+    res.status(200).json({ success: true, config });
+});
+
+// PATCH /api/admin/interview-config
+exports.updateInterviewConfig = asyncHandler(async (req, res) => {
+    const { key, value, effectiveFrom } = req.body;
+    const row = await adminService.updateInterviewConfig(key, value, effectiveFrom, req.user.id);
+    res.status(200).json({ success: true, config: row, message: `${key} updated` });
+});
+
 
 
 // GET /api/admin/dashboard-stats - Get dashboard overview statistics
