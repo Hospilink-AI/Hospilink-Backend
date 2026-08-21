@@ -4,6 +4,10 @@ const { ValidationError } = require('./error.middleware');
 const { getCurrentIST, toIST } = require('../utils/helpers');
 const { INDIAN_STATES, ALLOWED_ROLES } = require('../utils/constants');
 const { DOCX_MIME_TYPE } = require('./upload.middleware');
+const {
+    STATUSES: JOB_APPLICATION_STATUSES, REJECTION_REASONS, RECRUITER_CHANGE_REASONS,
+    CANDIDATE_CHANGE_REASONS, WITHDRAW_REASONS, SLOT_DURATIONS, REASON_TEXT_MAX_LENGTH
+} = require('../utils/jobApplication.constants');
 
 
 const RESUME_ALLOWED_MIME_TYPES = [
@@ -1250,6 +1254,308 @@ const validateJobVacancyEdit = (req, res, next) => {
 
 
 
+// ─── Job application — apply / review pipeline ──────────────────────────────
+
+// Generic reviewer transitions only (applied->under_review->shortlisted->rejected,
+// plus offered->rejected). Whether THIS specific transition is legal from the
+// application's CURRENT status is checked in jobApplication.service.js via
+// canTransitionGeneric — this only validates shape.
+const validateJobApplicationStatusUpdate = (req, res, next) => {
+    const { status, reason, reasonText } = req.body;
+    const errors = [];
+
+    const allowedFields = ['status', 'reason', 'reasonText'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed: ${allowedFields.join(', ')}`);
+    }
+
+    const allowedStatuses = ['under_review', 'shortlisted', 'rejected'];
+    if (!status || !allowedStatuses.includes(status)) {
+        errors.push(`status is required and must be one of: ${allowedStatuses.join(', ')}`);
+    }
+
+    if (status === 'rejected' && (!reason || !REJECTION_REASONS.includes(reason))) {
+        errors.push(`reason is required when rejecting and must be one of: ${REJECTION_REASONS.join(', ')}`);
+    }
+
+    if (reasonText !== undefined && (typeof reasonText !== 'string' || reasonText.length > REASON_TEXT_MAX_LENGTH)) {
+        errors.push(`reasonText must be a string under ${REASON_TEXT_MAX_LENGTH} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateJobApplicationWithdraw = (req, res, next) => {
+    const { reason, reasonText } = req.body;
+    const errors = [];
+
+    const allowedFields = ['reason', 'reasonText'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed: ${allowedFields.join(', ')}`);
+    }
+
+    if (!reason || !WITHDRAW_REASONS.includes(reason)) {
+        errors.push(`reason is required and must be one of: ${WITHDRAW_REASONS.join(', ')}`);
+    }
+
+    if (reasonText !== undefined && (typeof reasonText !== 'string' || reasonText.length > REASON_TEXT_MAX_LENGTH)) {
+        errors.push(`reasonText must be a string under ${REASON_TEXT_MAX_LENGTH} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateJobApplicationListQuery = (req, res, next) => {
+    const { status } = req.query;
+    if (status && !JOB_APPLICATION_STATUSES.includes(status)) {
+        return res.status(400).json({
+            success: false,
+            message: `status must be one of: ${JOB_APPLICATION_STATUSES.join(', ')}`
+        });
+    }
+    next();
+};
+
+// ─── Job application — interview scheduling ─────────────────────────────────
+
+const validateInterviewOfferSlots = (req, res, next) => {
+    const { slots, durationMinutes } = req.body;
+    const errors = [];
+
+    const allowedFields = ['slots', 'durationMinutes'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed: ${allowedFields.join(', ')}`);
+    }
+
+    if (durationMinutes !== undefined && !SLOT_DURATIONS.includes(durationMinutes)) {
+        errors.push(`durationMinutes must be one of: ${SLOT_DURATIONS.join(', ')}`);
+    }
+
+    if (!Array.isArray(slots) || slots.length === 0) {
+        errors.push('slots is required and must be a non-empty array of { start, end }');
+    } else {
+        slots.forEach((slot, i) => {
+            if (!slot || !slot.start || !slot.end || isNaN(Date.parse(slot.start)) || isNaN(Date.parse(slot.end))) {
+                errors.push(`slots[${i}] must have valid ISO start and end dates`);
+            }
+        });
+    }
+    // Count/boundary/window rules (3-8 slots, 15-min boundaries, 24h-21d
+    // window) are enforced in interviewScheduling.service.js#offerSlots
+    // against the live, admin-editable SystemConfig values — not duplicated
+    // here against a value that could drift out of sync.
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateInterviewSlotSelect = (req, res, next) => {
+    const { picks } = req.body;
+    const errors = [];
+
+    if (!Array.isArray(picks) || picks.length === 0) {
+        errors.push('picks is required and must be a non-empty array of { start, end }');
+    } else {
+        picks.forEach((slot, i) => {
+            if (!slot || !slot.start || !slot.end || isNaN(Date.parse(slot.start)) || isNaN(Date.parse(slot.end))) {
+                errors.push(`picks[${i}] must have valid ISO start and end dates`);
+            }
+        });
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateInterviewConfirm = (req, res, next) => {
+    const { slotStart, slotEnd, meetingLink, interviewerName, interviewerDesignation } = req.body;
+    const errors = [];
+
+    if (!slotStart || isNaN(Date.parse(slotStart))) errors.push('slotStart is required and must be a valid ISO date');
+    if (!slotEnd || isNaN(Date.parse(slotEnd))) errors.push('slotEnd is required and must be a valid ISO date');
+
+    if (!meetingLink || typeof meetingLink !== 'string' || !/^https:\/\/.+/.test(meetingLink.trim())) {
+        errors.push('meetingLink is required and must be a well-formed https:// URL');
+    }
+    if (!interviewerName || typeof interviewerName !== 'string' || !interviewerName.trim()) {
+        errors.push('interviewerName is required');
+    }
+    if (!interviewerDesignation || typeof interviewerDesignation !== 'string' || !interviewerDesignation.trim()) {
+        errors.push('interviewerDesignation is required');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateInterviewMeetingLink = (req, res, next) => {
+    const { meetingLink, interviewerName, interviewerDesignation } = req.body;
+    const errors = [];
+
+    if (!meetingLink || typeof meetingLink !== 'string' || !/^https:\/\/.+/.test(meetingLink.trim())) {
+        errors.push('meetingLink is required and must be a well-formed https:// URL');
+    }
+    if (interviewerName !== undefined && (typeof interviewerName !== 'string' || !interviewerName.trim())) {
+        errors.push('interviewerName must be a non-empty string');
+    }
+    if (interviewerDesignation !== undefined && (typeof interviewerDesignation !== 'string' || !interviewerDesignation.trim())) {
+        errors.push('interviewerDesignation must be a non-empty string');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+// Shared by cancel-offer, reschedule (recruiter reasons), cancel-interview and
+// reschedule-request (candidate reasons) — which list applies depends on
+// req.user.role, checked here since both routes share this one validator.
+const validateInterviewChangeReason = (req, res, next) => {
+    const { reason, reasonText } = req.body;
+    const errors = [];
+
+    const allowedReasons = req.user?.role === 'hospital' ? RECRUITER_CHANGE_REASONS : CANDIDATE_CHANGE_REASONS;
+    if (!reason || !allowedReasons.includes(reason)) {
+        errors.push(`reason is required and must be one of: ${allowedReasons.join(', ')}`);
+    }
+    if (reasonText !== undefined && (typeof reasonText !== 'string' || reasonText.length > REASON_TEXT_MAX_LENGTH)) {
+        errors.push(`reasonText must be a string under ${REASON_TEXT_MAX_LENGTH} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateInterviewReschedule = (req, res, next) => {
+    // Same slot-array shape as offer-slots, plus the same reason requirement
+    // as a cancel — reschedule is both actions in one call.
+    validateInterviewOfferSlots(req, res, (err) => {
+        if (err) return next(err);
+        validateInterviewChangeReason(req, res, next);
+    });
+};
+
+const validateInterviewOutcome = (req, res, next) => {
+    const { result, reason, reasonText } = req.body;
+    const errors = [];
+
+    const allowedResults = ['offer', 'reject'];
+    if (!result || !allowedResults.includes(result)) {
+        errors.push(`result is required and must be one of: ${allowedResults.join(', ')}`);
+    }
+    if (result === 'reject' && (!reason || !REJECTION_REASONS.includes(reason))) {
+        errors.push(`reason is required when result is reject and must be one of: ${REJECTION_REASONS.join(', ')}`);
+    }
+    if (reasonText !== undefined && (typeof reasonText !== 'string' || reasonText.length > REASON_TEXT_MAX_LENGTH)) {
+        errors.push(`reasonText must be a string under ${REASON_TEXT_MAX_LENGTH} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateNoShowMark = (req, res, next) => {
+    const { reoffer, newSlots, durationMinutes } = req.body;
+    const errors = [];
+
+    if (typeof reoffer !== 'boolean') {
+        errors.push('reoffer is required and must be a boolean');
+    }
+    if (reoffer === true) {
+        if (!Array.isArray(newSlots) || newSlots.length === 0) {
+            errors.push('newSlots is required when reoffer is true, and must be a non-empty array of { start, end }');
+        }
+        if (durationMinutes !== undefined && !SLOT_DURATIONS.includes(durationMinutes)) {
+            errors.push(`durationMinutes must be one of: ${SLOT_DURATIONS.join(', ')}`);
+        }
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateNoShowDispute = (req, res, next) => {
+    const { reason } = req.body;
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        return res.status(400).json({ success: false, message: 'reason is required' });
+    }
+    if (reason.length > REASON_TEXT_MAX_LENGTH) {
+        return res.status(400).json({ success: false, message: `reason must be under ${REASON_TEXT_MAX_LENGTH} characters` });
+    }
+    next();
+};
+
+const validateOfferResponse = (req, res, next) => {
+    const { accept } = req.body;
+    if (typeof accept !== 'boolean') {
+        return res.status(400).json({ success: false, message: 'accept is required and must be a boolean' });
+    }
+    next();
+};
+
+const validateNoShowDisputeResolution = (req, res, next) => {
+    const { decision } = req.body;
+    const allowed = ['uphold', 'void'];
+    if (!decision || !allowed.includes(decision)) {
+        return res.status(400).json({ success: false, message: `decision is required and must be one of: ${allowed.join(', ')}` });
+    }
+    next();
+};
+
+const validateInterviewConfigUpdate = (req, res, next) => {
+    const { key, value, effectiveFrom } = req.body;
+    const errors = [];
+
+    if (!key || typeof key !== 'string' || !key.trim()) {
+        errors.push('key is required');
+    }
+    if (value === undefined) {
+        errors.push('value is required');
+    }
+    if (effectiveFrom !== undefined && isNaN(Date.parse(effectiveFrom))) {
+        errors.push('effectiveFrom must be a valid ISO date when provided');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+
+
 // Validation for pagination parameters
 const validatePagination = (req, res, next) => {
     const errors = [];
@@ -1954,6 +2260,21 @@ module.exports = {
     validateJobVacancyCreation,
     validateJobVacancyEdit,
     validatePagination,
+    validateJobApplicationStatusUpdate,
+    validateJobApplicationWithdraw,
+    validateJobApplicationListQuery,
+    validateInterviewOfferSlots,
+    validateInterviewSlotSelect,
+    validateInterviewConfirm,
+    validateInterviewMeetingLink,
+    validateInterviewChangeReason,
+    validateInterviewReschedule,
+    validateInterviewOutcome,
+    validateNoShowMark,
+    validateNoShowDispute,
+    validateOfferResponse,
+    validateNoShowDisputeResolution,
+    validateInterviewConfigUpdate,
     validateReviewSubmission,
     validateStaffIdParam,
     validateNotificationId,

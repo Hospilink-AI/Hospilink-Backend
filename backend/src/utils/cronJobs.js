@@ -5,6 +5,7 @@ const User = require('../models/User');
 const notificationEmitter = require('../services/notificationEmitter');
 const EmailService = require('../services/email.service');
 const redisClient = require('../config/redis');
+const InterviewLifecycleService = require('../services/interviewLifecycle.service');
 
 /**
  * Acquire a distributed Redis lock so only one ECS task runs a given cron job.
@@ -192,7 +193,41 @@ class CronJobs {
             'Mark incomplete duties job'
         );
 
-        console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min)');
+        // Interview lifecycle job — run every 15 minutes. Bundles all six
+        // sweeps (offer/selection expiry, day-3/10/18 nudges, 24h/1h
+        // interview reminders, both-absent 7-day lapse, hire close-out
+        // prompts) into one tick, same "bundle several checks into one
+        // scheduled run" pattern as the pending-confirmation job above.
+        this.scheduleJob(
+            async () => {
+                // 14-min TTL — shorter than the 15-min interval so it always expires before the next run
+                const hasLock = await acquireCronLock('interview-lifecycle', 14 * 60);
+                if (!hasLock) return;
+
+                const results = {
+                    offerExpiry: await InterviewLifecycleService.sweepOfferExpiry(),
+                    selectionExpiry: await InterviewLifecycleService.sweepSelectionExpiry(),
+                    nudges: await InterviewLifecycleService.sweepNudges(),
+                    reminders: await InterviewLifecycleService.sweepInterviewReminders(),
+                    bothAbsentLapse: await InterviewLifecycleService.sweepBothAbsentLapse(),
+                    hireCloseout: await InterviewLifecycleService.sweepHireCloseout()
+                };
+
+                const totalActions = Object.values(results).reduce((sum, n) => sum + n, 0);
+                if (totalActions > 0) {
+                    console.log(`Interview lifecycle job at ${new Date().toLocaleString()}:`, results);
+
+                    activityLogEmitter.emitSystemActivity(
+                        ACTIVITY_ACTIONS.CRON_JOB_EXECUTED,
+                        { jobName: 'Interview lifecycle job', ...results, timestamp: new Date().toISOString() }
+                    ).catch(err => console.error('Error logging interview lifecycle job:', err));
+                }
+            },
+            15,
+            'Interview lifecycle job'
+        );
+
+        console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min), Interview lifecycle (15 min)');
 
         // Log cron job initialization after a short delay to ensure DB/Redis are ready
         setTimeout(() => {

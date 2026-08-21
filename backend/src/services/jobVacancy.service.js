@@ -1,8 +1,12 @@
 const JobVacancy = require('../models/JobVacancy');
 const Hospital = require('../models/Hospital');
+const MedicalStaff = require('../models/MedicalStaff');
+const JobApplication = require('../models/JobApplication');
 const { hasCapability } = require('../config/adminPermissions.config');
-const { NotFoundError, ForbiddenError } = require('../middleware/error.middleware');
+const { NotFoundError, ForbiddenError, ConflictError } = require('../middleware/error.middleware');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
+const vacancyMatchingService = require('./vacancyMatching.service');
+const cacheService = require('./cache.service');
 
 const VACANCY_FIELDS = ['title', 'specialty', 'experience', 'education', 'skills', 'location', 'salary', 'description'];
 
@@ -104,6 +108,61 @@ class JobVacancyService {
         return this._paginatedFind(query, pagination);
     }
 
+
+
+    // Staff-personalized browse list — same filtered result set as
+    // listPublic, but sorted by a computed match score (jobRole/experience/
+    // skills/education/location) instead of createdAt. Hospital/admin
+    // callers never reach this method; listVacancies in the controller only
+    // calls it for role === 'staff'.
+    async listForStaff(userId, filters, pagination) {
+        const medicalStaff = await MedicalStaff.findOne({ user: userId })
+            .select('jobRole experience city state skills education resumeAnalysis.extractedData.totalExperienceYears resumeAnalysis.extractedData.skills resumeAnalysis.extractedData.education')
+            .lean();
+
+        // No profile yet — nothing to score against. GET /vacancies has no
+        // profile-completeness gate today and this must not become one, so
+        // fall back to the same unscored list a hospital/admin would see.
+        if (!medicalStaff) {
+            return this.listPublic(filters, pagination);
+        }
+
+        const query = { deletedAt: null };
+        if (filters.specialty) query.specialty = filters.specialty;
+        if (filters.location) query.location = new RegExp(escapeRegex(filters.location), 'i');
+
+        const filterKey = `${filters.specialty || ''}:${filters.location || ''}`;
+        let scored = await cacheService.getVacancyMatches(userId, filterKey);
+
+        if (!scored) {
+            const vacancies = await JobVacancy.find(query)
+                .populate('hospitalId', 'hospitalLegalName')
+                .lean();
+
+            scored = vacancies.map(vacancy => {
+                const { matchScore, matchBreakdown } = vacancyMatchingService.computeMatchScore(medicalStaff, vacancy);
+                return { ...flattenHospitalName(vacancy), matchScore, matchBreakdown };
+            });
+
+            // Highest match first; vacancies that couldn't be scored at all
+            // (matchScore null — e.g. no comparable data on either side)
+            // sort to the end rather than being treated as a 0.
+            scored.sort((a, b) => (b.matchScore ?? -1) - (a.matchScore ?? -1));
+
+            await cacheService.setVacancyMatches(userId, filterKey, scored, 60);
+        }
+
+        const { page, limit, skip } = getPaginationParams(pagination.page, pagination.limit);
+        const pageItems = scored.slice(skip, skip + limit);
+
+        return {
+            vacancies: pageItems,
+            pagination: getPaginationMeta(scored.length, page, limit)
+        };
+    }
+
+
+
     // A hospital's own postings, including closed (soft-deleted) ones.
     async listMine(userId, pagination) {
         const hospital = await Hospital.findOne({ user: userId }).select('_id').lean();
@@ -113,6 +172,8 @@ class JobVacancyService {
 
         return this._paginatedFind({ hospitalId: hospital._id }, pagination);
     }
+
+
 
     // Admin oversight view — every vacancy, every hospital, including soft-deleted by default.
     async listAll(filters, pagination) {
@@ -124,6 +185,8 @@ class JobVacancyService {
 
         return this._paginatedFind(query, pagination);
     }
+
+
 
     async _paginatedFind(query, pagination) {
         const { page, limit, skip } = getPaginationParams(pagination.page, pagination.limit);
@@ -140,6 +203,8 @@ class JobVacancyService {
 
         return { vacancies: vacancies.map(flattenHospitalName), pagination: getPaginationMeta(totalItems, page, limit) };
     }
+
+
 
     // Single posting detail — visible to anyone if live; visible to the owning hospital
     // or a capable admin even once soft-deleted.
@@ -161,6 +226,8 @@ class JobVacancyService {
         return vacancy;
     }
 
+
+
     async editVacancy(vacancyId, requester, payload) {
         const vacancy = await JobVacancy.findById(vacancyId);
         if (!vacancy) {
@@ -176,6 +243,8 @@ class JobVacancyService {
         return flattenHospitalName(vacancy.toObject());
     }
 
+
+
     async closeVacancy(vacancyId, requester) {
         const vacancy = await JobVacancy.findById(vacancyId);
         if (!vacancy) {
@@ -185,6 +254,19 @@ class JobVacancyService {
         await this._assertCanManage(vacancy, requester);
 
         if (!vacancy.deletedAt) {
+            // A vacancy with a confirmed interview cannot be closed — only
+            // `confirmed` blocks; `interviewed`/`offered`/etc. do not, per
+            // the interview-flow spec's literal wording. The recruiter must
+            // cancel or record an outcome on that application first.
+            const blocking = await JobApplication.findOne({ vacancy: vacancyId, status: 'confirmed' })
+                .select('_id')
+                .lean();
+            if (blocking) {
+                throw new ConflictError(
+                    `This vacancy has a confirmed interview in progress (application ${blocking._id}). Cancel or record its outcome before closing the vacancy.`
+                );
+            }
+
             vacancy.deletedAt = new Date();
             await vacancy.save();
         }
@@ -193,12 +275,16 @@ class JobVacancyService {
         return flattenHospitalName(vacancy.toObject());
     }
 
+
+
     async _assertCanManage(vacancy, requester) {
         const allowed = await this._canManage(vacancy, requester);
         if (!allowed) {
             throw new ForbiddenError("You don't have permission to do that.");
         }
     }
+
+
 
     // Edit/close: owning hospital, or an admin sub-role with `vacancy.manage`
     // (super_admin bypasses via hasCapability itself).
@@ -209,6 +295,8 @@ class JobVacancyService {
         return this._isOwnerHospital(vacancy, requester);
     }
 
+
+    
     // Viewing a soft-deleted detail page: owning hospital, or an admin with either
     // view or manage capability.
     async _canViewDeleted(vacancy, requester) {

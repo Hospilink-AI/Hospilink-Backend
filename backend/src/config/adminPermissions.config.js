@@ -15,7 +15,10 @@ const ADMIN_CAPABILITIES = {
         'dashboard.view',
         'admin.view',
         'vacancy.view',
-        'vacancy.manage'
+        'vacancy.manage',
+        'application.view',
+        'noshow.dispute.resolve',
+        'interview.config.manage'
     ],
     tech_support: [
         'hospital.view',

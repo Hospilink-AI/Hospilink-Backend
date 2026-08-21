@@ -14,6 +14,7 @@ const dashboardRoutes = require("./routes/dashboard.routes");
 const documentRoutes = require("./routes/document.routes");
 const dutyRoutes = require("./routes/duty.routes");
 const jobVacancyRoutes = require("./routes/jobVacancy.routes");
+const jobApplicationRoutes = require("./routes/jobApplication.routes");
 const jobVacancyPublicRoutes = require("./routes/jobVacancyPublic.routes");
 const hospitalDashboardRoutes = require("./routes/hospitalDashboard.routes");
 const notificationRoutes = require("./routes/notification.routes");
@@ -128,6 +129,10 @@ app.use("/api", jobVacancyPublicRoutes);
 
 // General API routes (should be last to avoid matching Agent routes)
 app.use("/api", dutyRoutes);
+// Mounted before jobVacancyRoutes — defensive ordering so a future
+// '/vacancies/...' route added to either router can never accidentally
+// shadow the other (see jobApplication.routes.js's routing comment).
+app.use("/api", jobApplicationRoutes);
 app.use("/api", jobVacancyRoutes);
 
 // 404 handler - FIXED: Use a function instead of *

@@ -18,13 +18,16 @@ exports.createVacancy = asyncHandler(async (req, res) => {
 
 // GET /api/vacancies — public/staff browse list. Any authenticated staff/hospital/admin
 // account can browse — candidate or existing marketplace staff, no candidacy check.
+// Staff callers get a personalized, match-score-sorted list (listForStaff);
+// hospital/admin get exactly the same unscored, date-sorted list as always.
 exports.listVacancies = asyncHandler(async (req, res) => {
     const { specialty, location, page = 1, limit = 10 } = req.query;
+    const filters = { specialty, location };
+    const paginationParams = { page: parseInt(page), limit: parseInt(limit) };
 
-    const result = await jobVacancyService.listPublic(
-        { specialty, location },
-        { page: parseInt(page), limit: parseInt(limit) }
-    );
+    const result = req.user.role === 'staff'
+        ? await jobVacancyService.listForStaff(req.user.id, filters, paginationParams)
+        : await jobVacancyService.listPublic(filters, paginationParams);
 
     res.status(200).json({
         success: true,

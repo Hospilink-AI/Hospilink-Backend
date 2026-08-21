@@ -385,6 +385,23 @@ class CacheService {
         return await this.del(key);
     }
 
+    // ── Vacancy match scores (staff-personalized GET /vacancies) ─────────────
+    // Full sorted match list, cached per candidate+filter combination — avoids
+    // recomputing scores across every live vacancy on each pagination click
+    // within the same browse session. Short TTL, no invalidation hooks on
+    // vacancy create/edit/close or profile update — there's no single
+    // predictable key to invalidate (this is keyed per staff member), so a
+    // short staleness window is the deliberate tradeoff instead.
+    async getVacancyMatches(userId, filterKey) {
+        const key = `vacancy:matches:${userId}:${filterKey}`;
+        return await this.get(key);
+    }
+
+    async setVacancyMatches(userId, filterKey, data, ttl = 60) {
+        const key = `vacancy:matches:${userId}:${filterKey}`;
+        return await this.set(key, data, ttl);
+    }
+
     // ── Staged resume parse ───────────
     // A brand-new candidate with no MedicalStaff profile yet uploads a resume
     // before filling any form; the parse result is staged here (not written to
@@ -475,6 +492,60 @@ class CacheService {
     async invalidateSuspensionStatus(userId, role) {
         const key = `suspension:${role}:${userId}`;
         return await this.del(key);
+    }
+
+    // ─── Job application / interview module ──────────────────────────────────
+
+    // Redacted resume S3 key — keyed by the source resumeDocumentId, no
+    // expiry (redaction is the expensive step; run it once per uploaded
+    // version, not once per view). Invalidated only when a candidate
+    // uploads a new resume (resumeDocumentId changes, so the old cache entry
+    // simply stops being looked up — nothing to actively evict).
+    async getRedactedResumeKey(resumeDocumentId) {
+        const key = `resume:redacted:${resumeDocumentId}`;
+        return await this.get(key);
+    }
+
+    async setRedactedResumeKey(resumeDocumentId, s3Key) {
+        const key = `resume:redacted:${resumeDocumentId}`;
+        return await this._setNoExpiry(key, { s3Key });
+    }
+
+    // Plain SETEX with ttl=0 isn't valid in Redis — this route persists the
+    // key without an expiry (Redis SET, no EX option) via the raw client,
+    // matching the "no expiry, invalidate only on re-upload" contract above.
+    async _setNoExpiry(key, value) {
+        try {
+            const client = await redisClient.getClientAsync();
+            await client.set(key, JSON.stringify(value));
+            return true;
+        } catch (error) {
+            logger.error('Cache set (no-expiry) error:', error);
+            return false;
+        }
+    }
+
+    // Hospital-facing application detail/list reads — short TTL, no
+    // invalidation hooks (same short-staleness-window tradeoff already used
+    // for getVacancyMatches/setVacancyMatches above).
+    async getApplicationDetail(applicationId, viewerRole) {
+        const key = `app:detail:${applicationId}:${viewerRole}`;
+        return await this.get(key);
+    }
+
+    async setApplicationDetail(applicationId, viewerRole, data, ttl = 30) {
+        const key = `app:detail:${applicationId}:${viewerRole}`;
+        return await this.set(key, data, ttl);
+    }
+
+    async getVacancyApplications(vacancyId, status, page, limit) {
+        const key = `app:vacancy:${vacancyId}:${status || 'all'}:${page}:${limit}`;
+        return await this.get(key);
+    }
+
+    async setVacancyApplications(vacancyId, status, page, limit, data, ttl = 30) {
+        const key = `app:vacancy:${vacancyId}:${status || 'all'}:${page}:${limit}`;
+        return await this.set(key, data, ttl);
     }
 
 }
