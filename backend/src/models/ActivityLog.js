@@ -47,7 +47,7 @@ const activityLogSchema = new mongoose.Schema({
     target: {
         type: {
             type: String,
-            enum: ['duty', 'user', 'document', 'hospital', 'staff', 'review', 'system']
+            enum: ['duty', 'user', 'document', 'hospital', 'staff', 'review', 'system', 'ticket']
         },
         id: {
             type: mongoose.Schema.Types.ObjectId

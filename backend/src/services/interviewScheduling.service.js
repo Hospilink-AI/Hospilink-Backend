@@ -397,30 +397,6 @@ class InterviewSchedulingService {
         return application.toObject();
     }
 
-    async disputeNoShow(applicationId, userId, reason) {
-        const application = await jobApplicationService._loadOwnApplicantApplication(applicationId, userId);
-        const noShow = application.interview.noShow;
-        if (!noShow?.markedAt || noShow.by !== 'candidate') {
-            throw new UnprocessableEntityError('There is no no-show marked against you on this application.');
-        }
-        if (noShow.disputeStatus !== 'none') {
-            throw new ConflictError(`This no-show has already been ${noShow.disputeStatus === 'open' ? 'disputed' : noShow.disputeStatus}.`);
-        }
-
-        const windowDays = await systemConfigService.getEffective('interview.disputeWindowDays');
-        const deadline = new Date(noShow.markedAt.getTime() + windowDays * 24 * 60 * 60 * 1000);
-        if (new Date() > deadline) {
-            throw new UnprocessableEntityError(`The ${windowDays}-day dispute window for this no-show has passed.`);
-        }
-
-        application.interview.noShow.disputeStatus = 'open';
-        application.interview.noShow.disputeReason = reason;
-        application.interview.noShow.disputedAt = new Date();
-
-        await application.save();
-        return application.toObject();
-    }
-
     // offered -> hired (accept) | withdrawn (decline)
     async respondToOffer(applicationId, userId, accept) {
         const application = await jobApplicationService._loadOwnApplicantApplication(applicationId, userId);
@@ -444,28 +420,6 @@ class InterviewSchedulingService {
             await notificationEmitter.emitApplicationWithdrawn(application);
         }
 
-        return application.toObject();
-    }
-
-    // Operations resolves a dispute opened via disputeNoShow(). 'uphold'
-    // re-activates the held penalty (disputeStatus leaves 'open', so the
-    // live trailing-window queries in noShowPenalty.service.js count it
-    // again); 'void' clears the mark entirely going forward. Neither
-    // rewrites application.status — status is already past that point by
-    // the time a dispute is resolved.
-    async resolveNoShowDispute(applicationId, adminUserId, decision) {
-        const application = await JobApplication.findById(applicationId);
-        if (!application) {
-            throw new NotFoundError('Application not found');
-        }
-        if (application.interview.noShow?.disputeStatus !== 'open') {
-            throw new ConflictError('This application has no open no-show dispute.');
-        }
-
-        application.interview.noShow.disputeStatus = decision === 'uphold' ? 'upheld' : 'voided';
-        application.interview.noShow.resolvedAt = new Date();
-        application.interview.noShow.resolvedBy = adminUserId;
-        await application.save();
         return application.toObject();
     }
 

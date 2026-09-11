@@ -8,6 +8,12 @@ const {
     STATUSES: JOB_APPLICATION_STATUSES, REJECTION_REASONS, RECRUITER_CHANGE_REASONS,
     CANDIDATE_CHANGE_REASONS, WITHDRAW_REASONS, SLOT_DURATIONS, REASON_TEXT_MAX_LENGTH
 } = require('../utils/jobApplication.constants');
+const {
+    CATEGORIES: TICKET_CATEGORIES, SUBJECT_TYPES: TICKET_SUBJECT_TYPES, PARTY_ROLES: TICKET_PARTY_ROLES,
+    PRIORITIES: TICKET_PRIORITIES, RESOLUTION_OUTCOMES: TICKET_RESOLUTION_OUTCOMES,
+    RESOLUTION_ACTIONS: TICKET_RESOLUTION_ACTIONS, DOMAINS: TICKET_DOMAINS
+} = require('../utils/ticket.constants');
+const mongoose = require('mongoose');
 
 
 const RESUME_ALLOWED_MIME_TYPES = [
@@ -1505,30 +1511,10 @@ const validateNoShowMark = (req, res, next) => {
     next();
 };
 
-const validateNoShowDispute = (req, res, next) => {
-    const { reason } = req.body;
-    if (!reason || typeof reason !== 'string' || !reason.trim()) {
-        return res.status(400).json({ success: false, message: 'reason is required' });
-    }
-    if (reason.length > REASON_TEXT_MAX_LENGTH) {
-        return res.status(400).json({ success: false, message: `reason must be under ${REASON_TEXT_MAX_LENGTH} characters` });
-    }
-    next();
-};
-
 const validateOfferResponse = (req, res, next) => {
     const { accept } = req.body;
     if (typeof accept !== 'boolean') {
         return res.status(400).json({ success: false, message: 'accept is required and must be a boolean' });
-    }
-    next();
-};
-
-const validateNoShowDisputeResolution = (req, res, next) => {
-    const { decision } = req.body;
-    const allowed = ['uphold', 'void'];
-    if (!decision || !allowed.includes(decision)) {
-        return res.status(400).json({ success: false, message: `decision is required and must be one of: ${allowed.join(', ')}` });
     }
     next();
 };
@@ -2233,6 +2219,507 @@ const validateVerifyPhoneOTP = (req, res, next) => {
 };
 
 
+// Validate ticket creation (POST /api/tickets — IN_APP_FORM path)
+//
+// Whether raisedAgainst is actually required is NOT decided here — that
+// depends on the category's resolutionClass, which needs an async
+// SystemConfig lookup (ticketCategoryConfig.service), and every other
+// validator in this file is deliberately synchronous. That check stays on
+// the Ticket schema's own conditional validator (spec §04: "enforced on
+// save, not by convention"), which surfaces as a clean 400 either way via
+// error.middleware's handleValidationErrorDB. This validator only checks
+// shape.
+const TICKET_FREE_TEXT_LIMIT = 1000; // spec §16: fixed, not admin-editable
+
+const validateTicketCreation = (req, res, next) => {
+    if (!req.body || Object.keys(req.body).length === 0) {
+        return res.status(400).json({ success: false, message: 'Request body is required' });
+    }
+
+    const { category, subjectType, subjectId, raisedAgainst, text } = req.body;
+    const errors = [];
+
+    const allowedFields = ['category', 'subjectType', 'subjectId', 'raisedAgainst', 'text', 'evidence'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!category || !TICKET_CATEGORIES.includes(category)) {
+        errors.push(`category is required and must be one of the recognised categories`);
+    }
+
+    if (subjectType !== undefined && !TICKET_SUBJECT_TYPES.includes(subjectType)) {
+        errors.push(`subjectType must be one of: ${TICKET_SUBJECT_TYPES.join(', ')}`);
+    }
+
+    const needsSubject = subjectType !== undefined && subjectType !== 'NONE';
+    if (needsSubject && (!subjectId || !mongoose.Types.ObjectId.isValid(subjectId))) {
+        errors.push('subjectId is required and must be a valid ID when subjectType is not NONE');
+    }
+
+    if (raisedAgainst !== undefined && raisedAgainst !== null) {
+        if (typeof raisedAgainst !== 'object' || !raisedAgainst.userId || !raisedAgainst.role) {
+            errors.push('raisedAgainst, when provided, must include userId and role');
+        } else {
+            if (!mongoose.Types.ObjectId.isValid(raisedAgainst.userId)) {
+                errors.push('raisedAgainst.userId must be a valid ID');
+            }
+            if (!TICKET_PARTY_ROLES.includes(raisedAgainst.role)) {
+                errors.push(`raisedAgainst.role must be one of: ${TICKET_PARTY_ROLES.join(', ')}`);
+            }
+        }
+    }
+
+    if (!text || typeof text !== 'string' || !text.trim()) {
+        errors.push('text is required');
+    } else if (text.length > TICKET_FREE_TEXT_LIMIT) {
+        errors.push(`text cannot exceed ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    req.validatedBody = {
+        category,
+        subjectType: subjectType || 'NONE',
+        subjectId: subjectId || null,
+        raisedAgainst: raisedAgainst || null,
+        text: text.trim()
+    };
+
+    next();
+};
+
+
+// Validate admin reassigning a ticket to another admin
+const validateTicketReassign = (req, res, next) => {
+    const { to, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['to', 'reason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (!to || !mongoose.Types.ObjectId.isValid(to)) {
+        errors.push('to is required and must be a valid admin ID');
+    }
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        errors.push('reason is required');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { to, reason: reason.trim() };
+    next();
+};
+
+// Validate admin requesting more information from the raiser
+const validateTicketRequestInfo = (req, res, next) => {
+    const { message } = req.body;
+    const errors = [];
+
+    const allowedFields = ['message'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (!message || typeof message !== 'string' || !message.trim()) {
+        errors.push('message is required');
+    } else if (message.length > TICKET_FREE_TEXT_LIMIT) {
+        errors.push(`message cannot exceed ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { message: message.trim() };
+    next();
+};
+
+// Validate a raiser/respondent sending a chat message (Day 3 live chat).
+// Runs after multer, same ordering as validateMagicBytes on the sibling
+// /:id/evidence route, so req.body.text is already populated. Files are
+// optional here (text-only messages are fine) — files.length is checked
+// in ticketChat.service#sendMessage, not here, since this validator has no
+// visibility into req.files either way.
+const validateTicketChatMessage = (req, res, next) => {
+    const { text } = req.body;
+    const errors = [];
+
+    const allowedFields = ['text'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (text !== undefined && (typeof text !== 'string' || text.length > TICKET_FREE_TEXT_LIMIT)) {
+        errors.push(`text must be a string of at most ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { text: text && text.trim() ? text.trim() : undefined };
+    next();
+};
+
+// Same as above, plus the admin must say which party's thread this goes to.
+const validateAdminTicketChatMessage = (req, res, next) => {
+    const { text, party } = req.body;
+    const errors = [];
+
+    const allowedFields = ['text', 'party'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (text !== undefined && (typeof text !== 'string' || text.length > TICKET_FREE_TEXT_LIMIT)) {
+        errors.push(`text must be a string of at most ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+    if (party !== undefined && !['raiser', 'respondent'].includes(party)) {
+        errors.push('party must be either raiser or respondent');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { text: text && text.trim() ? text.trim() : undefined, party };
+    next();
+};
+
+// Validate a chatbot intake turn. Runs after multer (same ordering as the
+// ticket-chat routes), so req.body.text/conversationId/selectedButton are
+// already populated from the multipart form fields.
+const CHATBOT_LANGUAGES = ['en', 'hi', 'mr'];
+
+const validateChatbotMessage = (req, res, next) => {
+    const { text, conversationId, selectedButton, language } = req.body;
+    const errors = [];
+
+    const allowedFields = ['text', 'conversationId', 'selectedButton', 'language'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (text !== undefined && (typeof text !== 'string' || text.length > TICKET_FREE_TEXT_LIMIT)) {
+        errors.push(`text must be a string of at most ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+    if (conversationId !== undefined && !mongoose.Types.ObjectId.isValid(conversationId)) {
+        errors.push('conversationId must be a valid id');
+    }
+    if (selectedButton !== undefined && typeof selectedButton !== 'string') {
+        errors.push('selectedButton must be a string');
+    }
+    // Only meaningful when starting a new conversation — ignored otherwise
+    // (see chatbotIntake.service#sendMessage) — still type/enum-checked here.
+    if (language !== undefined && !CHATBOT_LANGUAGES.includes(language)) {
+        errors.push(`language must be one of: ${CHATBOT_LANGUAGES.join(', ')}`);
+    }
+    const hasFiles = req.files && req.files.length > 0;
+    if (!text?.trim() && !selectedButton && !hasFiles) {
+        errors.push('A message needs text, a selected button, or at least one file.');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = {
+        text: text && text.trim() ? text.trim() : undefined,
+        conversationId: conversationId || undefined,
+        selectedButton: selectedButton || undefined,
+        language: language || undefined
+    };
+    next();
+};
+
+// Validate an admin creating/updating a knowledge base article (chatbot
+// intake Phase 4).
+const KB_CATEGORIES = [...TICKET_DOMAINS, 'general'];
+const validateKnowledgeBaseArticle = (req, res, next) => {
+    const { question, answer, category, keywords } = req.body;
+    const errors = [];
+
+    const allowedFields = ['question', 'answer', 'category', 'keywords'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (question !== undefined && (typeof question !== 'string' || !question.trim() || question.length > 500)) {
+        errors.push('question must be a non-empty string of at most 500 characters');
+    }
+    if (answer !== undefined && (typeof answer !== 'string' || !answer.trim() || answer.length > 2000)) {
+        errors.push('answer must be a non-empty string of at most 2000 characters');
+    }
+    if (category !== undefined && !KB_CATEGORIES.includes(category)) {
+        errors.push(`category must be one of: ${KB_CATEGORIES.join(', ')}`);
+    }
+    if (keywords !== undefined && (!Array.isArray(keywords) || !keywords.every(k => typeof k === 'string'))) {
+        errors.push('keywords must be an array of strings');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = {
+        question: question?.trim(),
+        answer: answer?.trim(),
+        category,
+        keywords
+    };
+    next();
+};
+
+// Validate admin recategorising a ticket
+const validateTicketRecategorize = (req, res, next) => {
+    const { category, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['category', 'reason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (!category || !TICKET_CATEGORIES.includes(category)) {
+        errors.push('category is required and must be one of the recognised categories');
+    }
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        errors.push('reason is required');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { category, reason: reason.trim() };
+    next();
+};
+
+// Validate admin overriding a ticket's computed priority
+const validateTicketPriorityOverride = (req, res, next) => {
+    const { value, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['value', 'reason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (!value || !TICKET_PRIORITIES.includes(value)) {
+        errors.push(`value is required and must be one of: ${TICKET_PRIORITIES.join(', ')}`);
+    }
+    // Whether a reason is actually required depends on whether this raises
+    // or lowers the ticket's current priority — that needs the ticket
+    // itself, so the conditional check lives in ticket.service#priorityOverride.
+    // Here we only type-check it when present.
+    if (reason !== undefined && (typeof reason !== 'string' || !reason.trim())) {
+        errors.push('reason must be a non-empty string when provided');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { value, reason: reason ? reason.trim() : undefined };
+    next();
+};
+
+// Validate a raiser withdrawing their own ticket
+const validateTicketWithdraw = (req, res, next) => {
+    const { reason } = req.body || {};
+    const allowedFields = ['reason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (reason !== undefined && typeof reason !== 'string') {
+        return res.status(400).json({ success: false, message: 'reason must be a string' });
+    }
+    req.validatedBody = { reason: reason ? reason.trim() : null };
+    next();
+};
+
+
+// Validate a respondent's answer to a claim
+const validateTicketRespond = (req, res, next) => {
+    const { text } = req.body || {};
+    const allowedFields = ['text'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (!text || typeof text !== 'string' || !text.trim()) {
+        return res.status(400).json({ success: false, message: 'text is required' });
+    }
+    if (text.length > TICKET_FREE_TEXT_LIMIT) {
+        return res.status(400).json({ success: false, message: `text cannot exceed ${TICKET_FREE_TEXT_LIMIT} characters` });
+    }
+    req.validatedBody = { text: text.trim() };
+    next();
+};
+
+
+// Validate an admin's proposed decision on a ticket
+const validateTicketDecision = (req, res, next) => {
+    const { resolutionOutcome, resolutionActions, note, evidenceReliedOn } = req.body || {};
+    const errors = [];
+
+    const allowedFields = ['resolutionOutcome', 'resolutionActions', 'note', 'evidenceReliedOn'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    // Only rules out a garbage value — whether this outcome is legal for
+    // THIS ticket's resolutionClass needs the ticket loaded, so that check
+    // stays in ticket.service#decide (same async-dependency reason
+    // validateTicketCreation defers raisedAgainst's conditional requirement).
+    if (!resolutionOutcome || !TICKET_RESOLUTION_OUTCOMES.includes(resolutionOutcome)) {
+        errors.push(`resolutionOutcome is required and must be one of: ${TICKET_RESOLUTION_OUTCOMES.join(', ')}`);
+    }
+
+    if (!Array.isArray(resolutionActions) || resolutionActions.length === 0) {
+        errors.push('resolutionActions is required and must be a non-empty array');
+    } else {
+        resolutionActions.forEach((entry, i) => {
+            if (!entry || typeof entry !== 'object' || !TICKET_RESOLUTION_ACTIONS.includes(entry.action)) {
+                errors.push(`resolutionActions[${i}].action must be one of the recognised actions`);
+            }
+            if (entry && entry.details !== undefined && typeof entry.details !== 'object') {
+                errors.push(`resolutionActions[${i}].details must be an object when provided`);
+            }
+        });
+    }
+
+    if (note !== undefined && typeof note !== 'string') {
+        errors.push('note must be a string');
+    }
+    if (evidenceReliedOn !== undefined) {
+        if (!Array.isArray(evidenceReliedOn) || evidenceReliedOn.some(id => !mongoose.Types.ObjectId.isValid(id))) {
+            errors.push('evidenceReliedOn must be an array of valid IDs');
+        }
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    req.validatedBody = {
+        resolutionOutcome,
+        resolutionActions: resolutionActions.map(a => ({ action: a.action, details: a.details || {} })),
+        note: note || null,
+        evidenceReliedOn: evidenceReliedOn || []
+    };
+    next();
+};
+
+// Validate a second admin returning a decision for review
+const validateTicketReturnForReview = (req, res, next) => {
+    const { reason } = req.body || {};
+    const allowedFields = ['reason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        return res.status(400).json({ success: false, message: 'reason is required' });
+    }
+    req.validatedBody = { reason: reason.trim() };
+    next();
+};
+
+
+// Validate a party appealing a decided ticket
+const validateTicketAppeal = (req, res, next) => {
+    const { reasonText } = req.body || {};
+    const allowedFields = ['reasonText'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (!reasonText || typeof reasonText !== 'string' || !reasonText.trim()) {
+        return res.status(400).json({ success: false, message: 'reasonText is required' });
+    }
+    if (reasonText.length > TICKET_FREE_TEXT_LIMIT) {
+        return res.status(400).json({ success: false, message: `reasonText cannot exceed ${TICKET_FREE_TEXT_LIMIT} characters` });
+    }
+    req.validatedBody = { reasonText: reasonText.trim() };
+    next();
+};
+
+
+// Validate an admin deciding a suspension proposal
+const validateSuspensionDecision = (req, res, next) => {
+    const { decision, decisionReason } = req.body || {};
+    const errors = [];
+    const allowedFields = ['decision', 'decisionReason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    const allowed = ['suspend', 'no_action'];
+    if (!decision || !allowed.includes(decision)) {
+        errors.push(`decision is required and must be one of: ${allowed.join(', ')}`);
+    }
+    if (!decisionReason || typeof decisionReason !== 'string' || !decisionReason.trim()) {
+        errors.push('decisionReason is required');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { decision, decisionReason: decisionReason.trim() };
+    next();
+};
+
+// Validate a party responding to a suspension proposal
+const validateSuspensionResponse = (req, res, next) => {
+    const { text } = req.body || {};
+    const allowedFields = ['text'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (!text || typeof text !== 'string' || !text.trim()) {
+        return res.status(400).json({ success: false, message: 'text is required' });
+    }
+    req.validatedBody = { text: text.trim() };
+    next();
+};
+
+
+const FEEDBACK_AREAS = ['onboarding', 'duty_flow', 'otp', 'notifications', 'payments', 'jobs', 'app_performance', 'other'];
+const FEEDBACK_SENTIMENTS = ['POSITIVE', 'NEUTRAL', 'NEGATIVE', 'SEVERE_NEGATIVE'];
+
+// Validate platform feedback submission
+const validateFeedbackSubmission = (req, res, next) => {
+    const { text, area } = req.body || {};
+    const errors = [];
+    const allowedFields = ['text', 'area'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (!text || typeof text !== 'string' || !text.trim()) {
+        errors.push('text is required');
+    } else if (text.length > TICKET_FREE_TEXT_LIMIT) {
+        errors.push(`text cannot exceed ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+    if (area !== undefined && !FEEDBACK_AREAS.includes(area)) {
+        errors.push(`area must be one of: ${FEEDBACK_AREAS.join(', ')}`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { text: text.trim(), area: area || 'other' };
+    next();
+};
+
+// Validate an admin overriding platform feedback's sentiment
+const validateSentimentOverride = (req, res, next) => {
+    const { sentiment } = req.body || {};
+    const allowedFields = ['sentiment'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (!sentiment || !FEEDBACK_SENTIMENTS.includes(sentiment)) {
+        return res.status(400).json({ success: false, message: `sentiment is required and must be one of: ${FEEDBACK_SENTIMENTS.join(', ')}` });
+    }
+    req.validatedBody = { sentiment };
+    next();
+};
+
+
 module.exports = {
     validateSignup,
     validateOTP,
@@ -2271,9 +2758,7 @@ module.exports = {
     validateInterviewReschedule,
     validateInterviewOutcome,
     validateNoShowMark,
-    validateNoShowDispute,
     validateOfferResponse,
-    validateNoShowDisputeResolution,
     validateInterviewConfigUpdate,
     validateReviewSubmission,
     validateStaffIdParam,
@@ -2291,5 +2776,23 @@ module.exports = {
     validateHospitalActiveDutiesQuery,
     validateHospitalDutyRouteMap,
     validateSendPhoneOTP,
-    validateVerifyPhoneOTP
+    validateVerifyPhoneOTP,
+    validateTicketCreation,
+    validateTicketReassign,
+    validateTicketRequestInfo,
+    validateTicketChatMessage,
+    validateAdminTicketChatMessage,
+    validateChatbotMessage,
+    validateKnowledgeBaseArticle,
+    validateTicketRecategorize,
+    validateTicketPriorityOverride,
+    validateTicketWithdraw,
+    validateTicketRespond,
+    validateTicketDecision,
+    validateTicketReturnForReview,
+    validateTicketAppeal,
+    validateSuspensionDecision,
+    validateSuspensionResponse,
+    validateFeedbackSubmission,
+    validateSentimentOverride
 };

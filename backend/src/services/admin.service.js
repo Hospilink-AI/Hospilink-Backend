@@ -2380,11 +2380,6 @@ class AdminService {
         return JobApplicationService.getById(applicationId, adminUser);
     }
 
-    // PATCH /api/admin/no-show-disputes/:applicationId/resolve
-    async resolveNoShowDispute(applicationId, adminUserId, decision) {
-        return InterviewSchedulingService.resolveNoShowDispute(applicationId, adminUserId, decision);
-    }
-
     // GET /api/admin/interview-config — every setting's current effective
     // value plus its full version history.
     async getInterviewConfig() {
