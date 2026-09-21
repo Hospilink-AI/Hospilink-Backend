@@ -159,13 +159,6 @@ exports.getVacancyApplicationDetail = asyncHandler(async (req, res) => {
     res.status(200).json({ success: true, application });
 });
 
-// PATCH /api/admin/no-show-disputes/:applicationId/resolve
-exports.resolveNoShowDispute = asyncHandler(async (req, res) => {
-    const { decision } = req.body;
-    const application = await adminService.resolveNoShowDispute(req.params.applicationId, req.user.id, decision);
-    res.status(200).json({ success: true, application, message: `No-show dispute ${decision === 'uphold' ? 'upheld' : 'voided'}` });
-});
-
 // GET /api/admin/interview-config
 exports.getInterviewConfig = asyncHandler(async (req, res) => {
     const config = await adminService.getInterviewConfig();

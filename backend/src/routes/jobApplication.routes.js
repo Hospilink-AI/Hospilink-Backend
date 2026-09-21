@@ -17,7 +17,6 @@ const {
     validateInterviewReschedule,
     validateInterviewOutcome,
     validateNoShowMark,
-    validateNoShowDispute,
     validateOfferResponse
 } = require('../middleware/validation.middleware');
 
@@ -188,13 +187,9 @@ router.patch(
     jobApplicationController.reportNoShow
 );
 
-router.patch(
-    '/applications/:applicationId/no-show/dispute',
-    authorize('staff'),
-    validateObjectId('applicationId'),
-    validateNoShowDispute,
-    jobApplicationController.disputeNoShow
-);
+// Disputing a no-show now goes through the ticket engine —
+// POST /api/tickets with category 'jobs.interview_no_show' — instead of
+// this bespoke route. See ticket.service.js#_openNoShowDispute.
 
 router.patch(
     '/applications/:applicationId/offer/respond',

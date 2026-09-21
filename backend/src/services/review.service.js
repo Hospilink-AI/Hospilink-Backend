@@ -3,6 +3,7 @@ const Duty = require("../models/Duty");
 const Hospital = require("../models/Hospital");
 const MedicalStaff = require("../models/MedicalStaff");
 const notificationEmitter = require("./notificationEmitter");
+const systemConfigService = require("./systemConfig.service");
 const {
     ValidationError,
     NotFoundError,
@@ -10,7 +11,85 @@ const {
     ForbiddenError
 } = require('../middleware/error.middleware');
 
+// Blind/simultaneous reveal (Phase 3) — a review is visible to its own
+// author always; to anyone else, only once the sibling review for the same
+// duty also exists, or the configured timeout has passed. No in-between
+// per-viewer state, so there's no indirect leak path via a third party.
+function isRevealed(review, sibling, timeoutMs) {
+    if (!review) return false;
+    if (sibling) return true;
+    return (Date.now() - review.createdAt.getTime()) >= timeoutMs;
+}
+
+function shapeReview(review) {
+    if (!review) return null;
+    return { rating: review.rating, review: review.review, reviewedAt: review.createdAt };
+}
+
 class ReviewService {
+    // The one place Review is ever queried by duty id — every per-duty
+    // read routes through this (or its batched sibling below) so "which
+    // review is which" is never ambiguous again.
+    async getReviewPairForDuty(dutyId) {
+        const reviews = await Review.find({ duty: dutyId }).select('rating review createdAt reviewType');
+        return {
+            hospitalToStaff: reviews.find(r => r.reviewType === 'hospital_to_staff') || null,
+            staffToHospital: reviews.find(r => r.reviewType === 'staff_to_hospital') || null
+        };
+    }
+
+    // Batched — one query for many duties, not one per duty. Returns
+    // Map<dutyIdString, { hospitalToStaff, staffToHospital }>.
+    async getReviewPairsForDuties(dutyIds) {
+        const byDuty = new Map(dutyIds.map(id => [id.toString(), { hospitalToStaff: null, staffToHospital: null }]));
+        if (dutyIds.length === 0) return byDuty;
+
+        const reviews = await Review.find({ duty: { $in: dutyIds } }).select('duty rating review createdAt reviewType');
+        for (const r of reviews) {
+            const pair = byDuty.get(r.duty.toString());
+            if (!pair) continue;
+            if (r.reviewType === 'hospital_to_staff') pair.hospitalToStaff = r;
+            else pair.staffToHospital = r;
+        }
+        return byDuty;
+    }
+
+    // viewerRole: 'staff' | 'hospital' | 'admin' — their relation to THIS
+    // duty specifically. 'staff' always sees their own staffToHospital
+    // review; 'hospital' always sees their own hospitalToStaff review;
+    // 'admin' sees both unconditionally; anyone else is treated as neither
+    // author, gated by the reveal rule alone.
+    _shapePair(hospitalToStaff, staffToHospital, viewerRole, timeoutMs) {
+        const admin = viewerRole === 'admin';
+        const hospitalToStaffVisible = admin || viewerRole === 'hospital' || isRevealed(hospitalToStaff, staffToHospital, timeoutMs);
+        const staffToHospitalVisible = admin || viewerRole === 'staff' || isRevealed(staffToHospital, hospitalToStaff, timeoutMs);
+
+        return {
+            hospitalToStaff: hospitalToStaffVisible ? shapeReview(hospitalToStaff) : null,
+            staffToHospital: staffToHospitalVisible ? shapeReview(staffToHospital) : null
+        };
+    }
+
+    async getVisibleReviewsForDuty(dutyId, viewerRole) {
+        const timeoutDays = await systemConfigService.getEffective('rating.blindRevealTimeoutDays');
+        const { hospitalToStaff, staffToHospital } = await this.getReviewPairForDuty(dutyId);
+        return this._shapePair(hospitalToStaff, staffToHospital, viewerRole, timeoutDays * 24 * 60 * 60 * 1000);
+    }
+
+    // Returns Map<dutyIdString, { hospitalToStaff, staffToHospital }> —
+    // same shape as getReviewPairsForDuties, but each side already shaped
+    // for viewerRole per the reveal rule.
+    async getVisibleReviewPairsForDuties(dutyIds, viewerRole) {
+        const timeoutDays = await systemConfigService.getEffective('rating.blindRevealTimeoutDays');
+        const timeoutMs = timeoutDays * 24 * 60 * 60 * 1000;
+        const pairs = await this.getReviewPairsForDuties(dutyIds);
+
+        const shaped = new Map();
+        for (const [dutyId, { hospitalToStaff, staffToHospital }] of pairs) {
+            shaped.set(dutyId, this._shapePair(hospitalToStaff, staffToHospital, viewerRole, timeoutMs));
+        }
+        return shaped;
+    }
 
     async submitReview(dutyId, userId, userRole, rating, reviewText) {
 
@@ -98,14 +177,9 @@ class ReviewService {
 
         await staff.save();
 
-        // Emit real-time notification
-        await notificationEmitter.emitReviewReceived(
-            duty,
-            hospital,
-            staff,
-            rating,
-            reviewText
-        );
+        // Emit real-time notification (content-free — see
+        // notificationEmitter.js#emitReviewReceived's own comment)
+        await notificationEmitter.emitReviewReceived(duty, hospital, staff);
 
         return populatedReview;
     }
@@ -161,6 +235,10 @@ class ReviewService {
         hospital.averageRating = Number(newAverage.toFixed(2));
 
         await hospital.save();
+
+        // Emit real-time notification (content-free — see
+        // notificationEmitter.js#emitHospitalReviewReceived's own comment)
+        await notificationEmitter.emitHospitalReviewReceived(duty, medicalStaff, hospital);
 
         return populatedReview;
     }

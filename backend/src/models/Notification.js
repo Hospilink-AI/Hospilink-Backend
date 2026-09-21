@@ -30,7 +30,13 @@ const notificationSchema = new mongoose.Schema({
             'RESCHEDULE_REQUESTED',
             // Job application — outcome, no-show, offer, close-out
             'MARKED_NO_SHOW', 'HOSPITAL_NO_SHOW_REPORTED', 'JOB_OFFER_EXTENDED',
-            'CONTACT_DETAILS_RELEASED', 'HIRE_CLOSEOUT_PROMPT'],
+            'CONTACT_DETAILS_RELEASED', 'HIRE_CLOSEOUT_PROMPT',
+            // Disputes & Support — ticket lifecycle
+            'TICKET_CREATED', 'TICKET_RECATEGORIZED',
+            'TICKET_CLAIM_EXISTS', 'TICKET_RESPONSE_WINDOW_CLOSING', 'TICKET_OUTCOME_DECIDED',
+            'TICKET_APPEAL_OUTCOME', 'TICKET_INFO_REQUESTED', 'TICKET_INFO_REQUEST_REMINDER',
+            'TICKET_CHAT_MESSAGE',
+            'PATTERN_FLAG_RAISED', 'SUSPENSION_PROPOSED', 'SUSPENSION_DECIDED'],
         required: [true, 'Notification type is required']
     },
     payload: {

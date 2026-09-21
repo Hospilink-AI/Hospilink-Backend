@@ -6,6 +6,7 @@ const notificationEmitter = require('../services/notificationEmitter');
 const EmailService = require('../services/email.service');
 const redisClient = require('../config/redis');
 const InterviewLifecycleService = require('../services/interviewLifecycle.service');
+const TicketService = require('../services/ticket.service');
 
 /**
  * Acquire a distributed Redis lock so only one ECS task runs a given cron job.
@@ -227,7 +228,42 @@ class CronJobs {
             'Interview lifecycle job'
         );
 
-        console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min), Interview lifecycle (15 min)');
+        // Ticket SLA sweeps job — run every 15 minutes. Bundles the
+        // respondent-window reminders/lapse, the awaiting-raiser day-1/day-3
+        // reminders + 5-day auto-close, and the priority-based claim-timeout
+        // sweep into one tick, same "bundle several sweeps into one
+        // scheduled run" pattern as the interview lifecycle job above. No
+        // serverless (api/cron/) mirror yet — interview-lifecycle set the
+        // precedent that a bundled sweep like this stays interval-only.
+        this.scheduleJob(
+            async () => {
+                const hasLock = await acquireCronLock('ticket-sla-sweeps', 14 * 60);
+                if (!hasLock) return;
+
+                const results = {
+                    respondentWindow: await TicketService.sweepRespondentWindow(),
+                    awaitingRaiser: await TicketService.sweepAwaitingRaiser(),
+                    claimTimeout: await TicketService.sweepClaimTimeout()
+                };
+
+                const totalActions = results.respondentWindow.remindersSent + results.respondentWindow.lapsed +
+                    results.awaitingRaiser.remindersSent + results.awaitingRaiser.autoClosed +
+                    results.claimTimeout.returned;
+
+                if (totalActions > 0) {
+                    console.log(`Ticket SLA sweeps job at ${new Date().toLocaleString()}:`, results);
+
+                    activityLogEmitter.emitSystemActivity(
+                        ACTIVITY_ACTIONS.CRON_JOB_EXECUTED,
+                        { jobName: 'Ticket SLA sweeps job', ...results, timestamp: new Date().toISOString() }
+                    ).catch(err => console.error('Error logging ticket SLA sweeps job:', err));
+                }
+            },
+            15,
+            'Ticket SLA sweeps job'
+        );
+
+        console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min), Interview lifecycle (15 min), Ticket SLA sweeps (15 min)');
 
         // Log cron job initialization after a short delay to ensure DB/Redis are ready
         setTimeout(() => {

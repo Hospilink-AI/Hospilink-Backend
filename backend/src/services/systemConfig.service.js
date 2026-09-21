@@ -34,7 +34,52 @@ const DEFAULTS = {
     'interview.lateChangeOpsFlagWindowDays': 90,
     'interview.postCloseApplicantRetentionDays': 31,
     'interview.hireCloseoutFirstPromptDays': 7,
-    'interview.hireCloseoutRepeatDays': 7
+    'interview.hireCloseoutRepeatDays': 7,
+
+    // Disputes & Support module (spec §16). Ack/decide SLA windows are NOT
+    // here — those are marked "No — statutory" in the spec and live as
+    // fixed constants in utils/ticket.constants.js (REGIME_SLA) instead,
+    // since changing them is a legal-review event, not a settings edit.
+    // 3-tier respondent window (spec update) — keyed off _dutyUrgencyTier's
+    // NORMAL/WITHIN_A_DAY/LIVE_OR_IMMINENT bands. Still admin-editable, only
+    // the tier count/numbers changed. The old flat imminentDutyThresholdHours
+    // (12h) is gone — dead since Day 1 moved that boundary into
+    // DUTY_URGENCY_THRESHOLDS in ticket.constants.js. Claim timeout is also
+    // gone from here — it's priority-tied now, see
+    // CLAIM_TIMEOUT_MINUTES_BY_PRIORITY in ticket.constants.js instead.
+    'ticket.respondentWindowNormalHours': 24,
+    'ticket.respondentWindowWithinADayHours': 4,
+    'ticket.respondentWindowLiveHours': 1,
+    'ticket.awaitingRaiserAutoCloseDays': 5,
+    'ticket.reopenWindowDays': 30,
+    'ticket.evidenceMaxFiles': 5,
+    'ticket.evidenceMaxSizeMB': 10,
+    'ticket.botConfidenceThresholdEn': 0.75,
+    'ticket.botConfidenceThresholdHiMr': 0.85,
+    'ticket.appealWindowDays': 7,
+    'ticket.appealWindowSuspensionDays': 14,
+    'ticket.suspensionResponseWindowDays': 14,
+    'ticket.precautionaryRestrictionCapDays': 7,
+    'ticket.payoutFreezeCapDays': 7,
+    'ticket.clawbackCapPercent': 25,
+    'ticket.paymentSignoffThresholdINR': 10000,
+    'ticket.freeTextLimit': 1000,
+    'ticket.retentionYearsConsequenceBearing': 3,
+    'ticket.retentionYearsOther': 1,
+    'payments.mediatedPayoutsEnabled': false,
+
+    // Algorithmic rating (Phase 1) — general policy knobs, admin-editable
+    // without a deploy. Per-category penalty point values are NOT here —
+    // those are a fixed constant (RATING_PENALTY_POINTS_BY_CATEGORY in
+    // utils/rating.constants.js), same precedent as ticket priority SLAs.
+    'rating.penaltyWindowDays': 180,
+    'rating.penaltyCapTotal': 0.75,
+    'rating.floor': 1.0,
+    'rating.dampingConfidenceCount': 5,
+    // Phase 3 — blind/simultaneous review reveal. A review stays visible
+    // only to its own author until either the sibling review for the same
+    // duty also exists, or this many days have passed.
+    'rating.blindRevealTimeoutDays': 14
 };
 
 const CACHE_TTL_SECONDS = 300;
