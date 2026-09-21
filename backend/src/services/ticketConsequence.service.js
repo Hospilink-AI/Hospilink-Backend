@@ -2,6 +2,7 @@ const adminService = require('./admin.service');
 const systemConfigService = require('./systemConfig.service');
 const { UnprocessableEntityError } = require('../middleware/error.middleware');
 const { RESOLUTION_ACTIONS_GATED } = require('../utils/ticket.constants');
+const { RATING_PENALTY_POINTS_BY_CATEGORY } = require('../utils/rating.constants');
 
 // Two-person sign-off is required whenever any proposed action touches
 // money, a rating, or account status (spec §07.03/§08.04). Classification
@@ -64,18 +65,26 @@ const HANDLERS = {
     // review.service.js computes that as a running weighted mean from real
     // Review documents; a direct adjustment here would corrupt that math
     // with no clean way to un-apply it later. Recording the penalty *is*
-    // the execution, same pattern noShowPenalty.service.js already uses:
-    // nothing is stamped, a live reader counts qualifying tickets in a
-    // trailing window later (that reader is a follow-up, not required for
-    // this action to be correctly "done").
-    APPLY_RATING_PENALTY: async (ticket, entry) => {
-        if (typeof entry.details?.ratingDelta !== 'number') {
-            throw new UnprocessableEntityError('APPLY_RATING_PENALTY requires details.ratingDelta');
+    // the execution: ratingAlgorithm.service.js#getEffectiveRating is the
+    // live reader that counts qualifying tickets (this one included) in a
+    // trailing window and subtracts them from the damped review average.
+    // The point value is derived from category, not admin-typed — every
+    // admin applies the same number for the same category.
+    APPLY_RATING_PENALTY: async (ticket) => {
+        const points = RATING_PENALTY_POINTS_BY_CATEGORY[ticket.category];
+        if (points === undefined) {
+            throw new UnprocessableEntityError(`APPLY_RATING_PENALTY is not applicable to category ${ticket.category}.`);
         }
-        return { appliedAt: new Date() };
+        return { ratingDelta: points, appliedAt: new Date() };
     },
 
-    REVERSE_RATING_PENALTY: async (ticket, entry) => {
+    // Only ever runs on an appeal ticket (ticket.appealOf points at the
+    // original penalised ticket) — a pure stamp, same as before. The
+    // reversal itself happens in ratingAlgorithm.service.js#_qualifyingPenalties,
+    // which excludes any original ticket that has a decided appeal against
+    // it carrying this action. Nothing here needs to know the original's
+    // points or ratingDelta — "reversed" is a yes/no signal, not a math op.
+    REVERSE_RATING_PENALTY: async () => {
         return { reversedAt: new Date() };
     },
 

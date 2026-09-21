@@ -66,7 +66,20 @@ const DEFAULTS = {
     'ticket.freeTextLimit': 1000,
     'ticket.retentionYearsConsequenceBearing': 3,
     'ticket.retentionYearsOther': 1,
-    'payments.mediatedPayoutsEnabled': false
+    'payments.mediatedPayoutsEnabled': false,
+
+    // Algorithmic rating (Phase 1) — general policy knobs, admin-editable
+    // without a deploy. Per-category penalty point values are NOT here —
+    // those are a fixed constant (RATING_PENALTY_POINTS_BY_CATEGORY in
+    // utils/rating.constants.js), same precedent as ticket priority SLAs.
+    'rating.penaltyWindowDays': 180,
+    'rating.penaltyCapTotal': 0.75,
+    'rating.floor': 1.0,
+    'rating.dampingConfidenceCount': 5,
+    // Phase 3 — blind/simultaneous review reveal. A review stays visible
+    // only to its own author until either the sibling review for the same
+    // duty also exists, or this many days have passed.
+    'rating.blindRevealTimeoutDays': 14
 };
 
 const CACHE_TTL_SECONDS = 300;

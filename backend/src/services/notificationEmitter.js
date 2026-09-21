@@ -711,7 +711,12 @@ class NotificationEmitter {
     }
 
 
-    async emitReviewReceived(duty, hospital, staff, rating, reviewText) {
+    // Deliberately does NOT include rating/review content — blind/
+    // simultaneous reveal (Phase 3) gates that behind the read paths
+    // (getDutyDetail, getCompletedDutiesForStaff, getStaffReviews); putting
+    // the real score/text straight into a push payload here would leak it
+    // to the staff member immediately regardless of any of that gating.
+    async emitReviewReceived(duty, hospital, staff) {
         try {
             const payload = {
                 type: 'REVIEW_RECEIVED',
@@ -726,10 +731,7 @@ class NotificationEmitter {
                     id: hospital._id.toString(),
                     name: hospital.hospitalLegalName || hospital.user?.name
                 },
-                rating: rating,
-                review: reviewText ? reviewText : "",
-                message: reviewText
-                    ? `You received a ${rating}⭐ review: "${reviewText}"`: `You received a ${rating}⭐ rating from hospital`,
+                message: "You've received a new review for a completed shift.",
                 timestamp: new Date().toISOString()
             };
 
@@ -749,6 +751,48 @@ class NotificationEmitter {
 
         } catch (error) {
             console.error('Error emitting review notification:', error);
+        }
+    }
+
+    // Staff -> Hospital direction of emitReviewReceived above — same
+    // content-free payload for the same reveal-gating reason.
+    async emitHospitalReviewReceived(duty, staff, hospital) {
+        try {
+            const staffName = staff.fullName || staff.user?.name || 'A staff member';
+
+            const payload = {
+                type: 'REVIEW_RECEIVED',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime
+                },
+                staff: {
+                    id: staff._id.toString(),
+                    name: staffName
+                },
+                message: "You've received a new review for a completed shift.",
+                timestamp: new Date().toISOString()
+            };
+
+            const hospitalUserId = hospital.user.toString();
+
+            // Save notification
+            const { unreadCount } = await notificationService.createNotificationWithCount(
+                hospitalUserId,
+                'REVIEW_RECEIVED',
+                payload
+            );
+
+            // Deliver via smart routing (WebSocket or FCM)
+            await notificationDelivery.deliverToUser(hospitalUserId, 'REVIEW_RECEIVED', payload, unreadCount);
+
+            console.log(`Review notification sent to hospital ${hospitalUserId}`);
+
+        } catch (error) {
+            console.error('Error emitting hospital review notification:', error);
         }
     }
 
