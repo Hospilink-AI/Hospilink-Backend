@@ -109,22 +109,81 @@ exports.getStaffReviews = asyncHandler(async (req, res) => {
 
     const { staffId } = req.params;
 
-    const reviews = await Review.find({ medicalStaff: staffId })
+    // Only reviews ABOUT this staff member (hospitals rating them) — the
+    // old query had no reviewType filter, so it also silently returned
+    // reviews this staff member wrote ABOUT hospitals, mislabeled as if
+    // they were reviews of the staff. Two different things, conflated.
+    const reviews = await Review.find({ medicalStaff: staffId, reviewType: 'hospital_to_staff', suppressed: { $ne: true } })
         .populate("hospital", "hospitalLegalName")
         .populate("duty", "date startTime endTime")
         .select("rating review duty hospital createdAt")
         .sort({ createdAt: -1 });
-    const formattedReviews = reviews.map(r => {
-        const obj = r.toObject();
-        return {
-            _id: obj._id,
-            rating: obj.rating,
-            review: obj.review,
-            createdAt: obj.createdAt,
-            hospital: obj.hospital,
-            ...(obj.duty && { duty: obj.duty })
-        };
+
+    // Blind/simultaneous reveal (Phase 3) — staffId is never the author of
+    // a hospital_to_staff review, so viewing this list (even your own)
+    // grants no early access; gated the same as anyone else. Admins see
+    // everything, same precedent as the rest of this module.
+    const dutyIds = reviews.filter(r => r.duty).map(r => r.duty._id);
+    const visiblePairs = await ReviewService.getVisibleReviewPairsForDuties(
+        dutyIds, req.user.role === 'admin' ? 'admin' : null
+    );
+
+    const formattedReviews = reviews
+        .filter(r => !r.duty || visiblePairs.get(r.duty._id.toString())?.hospitalToStaff)
+        .map(r => {
+            const obj = r.toObject();
+            return {
+                _id: obj._id,
+                rating: obj.rating,
+                review: obj.review,
+                createdAt: obj.createdAt,
+                hospital: obj.hospital,
+                ...(obj.duty && { duty: obj.duty })
+            };
+        });
+    res.status(200).json({
+        success: true,
+        count: formattedReviews.length,
+        reviews: formattedReviews
     });
+
+});
+
+// Get Reviews for Hospital (staff -> hospital direction)
+exports.getHospitalReviews = asyncHandler(async (req, res) => {
+
+    const { hospitalId } = req.params;
+
+    // Only reviews ABOUT this hospital (staff rating them) — mirrors
+    // getStaffReviews' reviewType filter for the opposite direction.
+    const reviews = await Review.find({ hospital: hospitalId, reviewType: 'staff_to_hospital', suppressed: { $ne: true } })
+        .populate("medicalStaff", "fullName jobRole")
+        .populate("duty", "date startTime endTime")
+        .select("rating review duty medicalStaff createdAt")
+        .sort({ createdAt: -1 });
+
+    // Blind/simultaneous reveal (Phase 3) — hospitalId is never the author
+    // of a staff_to_hospital review, so viewing this list (even your own)
+    // grants no early access; gated the same as anyone else. Admins see
+    // everything, same precedent as the rest of this module.
+    const dutyIds = reviews.filter(r => r.duty).map(r => r.duty._id);
+    const visiblePairs = await ReviewService.getVisibleReviewPairsForDuties(
+        dutyIds, req.user.role === 'admin' ? 'admin' : null
+    );
+
+    const formattedReviews = reviews
+        .filter(r => !r.duty || visiblePairs.get(r.duty._id.toString())?.staffToHospital)
+        .map(r => {
+            const obj = r.toObject();
+            return {
+                _id: obj._id,
+                rating: obj.rating,
+                review: obj.review,
+                createdAt: obj.createdAt,
+                medicalStaff: obj.medicalStaff,
+                ...(obj.duty && { duty: obj.duty })
+            };
+        });
     res.status(200).json({
         success: true,
         count: formattedReviews.length,

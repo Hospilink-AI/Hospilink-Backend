@@ -426,3 +426,7 @@ class JobApplicationService {
 }
 
 module.exports = new JobApplicationService();
+// deriveGateTier is a private module function, not a class method — exposed
+// here so RECOMPUTE_MATCH_SCORE (ticketConsequence.service.js) can reuse the
+// exact same gate-tier derivation apply() uses, instead of a duplicate copy.
+module.exports.deriveGateTier = deriveGateTier;

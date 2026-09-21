@@ -19,6 +19,7 @@ const jobVacancyPublicRoutes = require("./routes/jobVacancyPublic.routes");
 const hospitalDashboardRoutes = require("./routes/hospitalDashboard.routes");
 const notificationRoutes = require("./routes/notification.routes");
 const profileRoutes = require("./routes/profile.routes");
+const ticketRoutes = require("./routes/ticket.routes");
 const logger = require("./utils/logger");
 // Only run interval-based cron in persistent environments (local dev)
 // On Vercel, cron jobs are handled via api/cron/* endpoints + vercel.json schedules
@@ -109,6 +110,14 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/reviews", reviewRoutes);
+app.use("/api/tickets", ticketRoutes);
+app.use("/api/admin/tickets", require("./routes/adminTicket.routes"));
+app.use("/api/chatbot", require("./routes/chatbot.routes"));
+app.use("/api/admin/knowledge-base", require("./routes/adminKnowledgeBase.routes"));
+app.use("/api/admin", require("./routes/adminPattern.routes"));
+app.use("/api/account", require("./routes/accountStanding.routes"));
+app.use("/api/support/feedback", require("./routes/feedback.routes"));
+app.use("/api/admin/feedback", require("./routes/adminFeedback.routes"));
 
 
 // Document Management Routes

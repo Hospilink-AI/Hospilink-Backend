@@ -195,12 +195,6 @@ exports.reportNoShow = asyncHandler(async (req, res) => {
     res.status(200).json({ success: true, application, message: 'Reported — the hospital has been notified' });
 });
 
-// PATCH /api/applications/:applicationId/no-show/dispute — staff.
-exports.disputeNoShow = asyncHandler(async (req, res) => {
-    const application = await interviewSchedulingService.disputeNoShow(req.params.applicationId, req.user.id, req.body.reason);
-    res.status(200).json({ success: true, application, message: 'Dispute submitted' });
-});
-
 // PATCH /api/applications/:applicationId/offer/respond — staff.
 exports.respondToOffer = asyncHandler(async (req, res) => {
     const application = await interviewSchedulingService.respondToOffer(req.params.applicationId, req.user.id, req.body.accept);

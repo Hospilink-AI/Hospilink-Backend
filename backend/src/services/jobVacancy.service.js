@@ -170,7 +170,25 @@ class JobVacancyService {
             throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
         }
 
-        return this._paginatedFind({ hospitalId: hospital._id }, pagination);
+        const result = await this._paginatedFind({ hospitalId: hospital._id }, pagination);
+        return { ...result, vacancies: await this._withApplicantCounts(result.vacancies) };
+    }
+
+    // Batched — one aggregate query for the whole page of vacancies, not one
+    // count per vacancy (same lesson as ratingAlgorithm.service.js's batching).
+    // Counts every application regardless of status; the Applicants List
+    // screen is where status breakdown belongs, not this summary badge.
+    async _withApplicantCounts(vacancies) {
+        if (vacancies.length === 0) return vacancies;
+
+        const vacancyIds = vacancies.map(v => v._id);
+        const counts = await JobApplication.aggregate([
+            { $match: { vacancy: { $in: vacancyIds } } },
+            { $group: { _id: '$vacancy', count: { $sum: 1 } } }
+        ]);
+        const countByVacancy = new Map(counts.map(c => [c._id.toString(), c.count]));
+
+        return vacancies.map(v => ({ ...v, applicantCount: countByVacancy.get(v._id.toString()) || 0 }));
     }
 
 

@@ -17,15 +17,38 @@ const ADMIN_CAPABILITIES = {
         'vacancy.view',
         'vacancy.manage',
         'application.view',
-        'noshow.dispute.resolve',
-        'interview.config.manage'
+        'interview.config.manage',
+        // Chatbot intake Phase 4 — same Operations floor as interview.config.manage
+        'knowledgeBase.manage',
+
+        // Disputes & Support — Operations floor (spec §07's route table)
+        'ticket.view',
+        'ticket.claim',
+        'ticket.decide',
+        'ticket.approve',
+        'pattern.view',
+        'suspension.decide',
+        'feedback.view'
     ],
     tech_support: [
         'hospital.view',
         'staff.view',
         'duty.view',
         'document.view',
-        'activityLog.view'
+        'activityLog.view',
+
+        // Disputes & Support — Support floor. Deliberately no
+        // 'ticket.approve': Support can propose an outcome but any action
+        // touching money, a rating, or account status needs a second admin
+        // at Operations level or above (spec §07.03/§08.04).
+        'ticket.view',
+        'ticket.claim',
+        'ticket.decide',
+
+        // Spec update — Support now sees the feedback board, scoped in
+        // feedback.service#listForAdmin to their own conversations only
+        // (feedback that converted into a ticket assigned to them).
+        'feedback.view'
     ]
 };
 

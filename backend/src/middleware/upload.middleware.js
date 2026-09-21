@@ -106,6 +106,28 @@ const validateMagicBytes = async (req, res, next) => {
     }
 };
 
+// Ticket evidence (spec §08.03): images and PDF only, 5 files, 10 MB each —
+// the 10 MB figure lives in SystemConfig (ticket.evidenceMaxSizeMB) and is
+// admin-adjustable, so this static limit is deliberately a generous ceiling
+// above it, not the real enforced number. The real, live-configurable limit
+// is checked per-file in ticket.service.js#addEvidence — multer's own limit
+// can't be dynamic per-request.
+const TICKET_EVIDENCE_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "application/pdf"]);
+
+const ticketEvidenceFileFilter = (req, file, cb) => {
+    if (!TICKET_EVIDENCE_MIME_TYPES.has(file.mimetype)) {
+        return cb(new Error("Only JPEG, PNG, or PDF files are allowed"), false);
+    }
+    cb(null, true);
+};
+
+const ticketEvidenceUpload = multer({
+    storage,
+    limits: { fileSize: 15 * 1024 * 1024, files: 5 },
+    fileFilter: ticketEvidenceFileFilter
+});
+
 module.exports = upload;
 module.exports.validateMagicBytes = validateMagicBytes;
 module.exports.DOCX_MIME_TYPE = DOCX_MIME_TYPE;
+module.exports.ticketEvidenceUpload = ticketEvidenceUpload;

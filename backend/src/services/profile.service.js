@@ -17,6 +17,7 @@ const logger = require('../utils/logger');
 const { formatRoleForDisplay } = require('../utils/helpers');
 const DashboardService = require('./dashboard.service');
 const SMSService = require('./sms.service');
+const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const resumeExtractionService = require('./resumeExtraction.service');
 const resumeParsingService = require('./resumeParsing.service');
 const {
@@ -521,6 +522,8 @@ class ProfileService {
                     const filled = completionFields.filter(Boolean).length;
                     const profileCompletion = Math.round((filled / completionFields.length) * 100);
 
+                    const { ratingShown, breakdown } = await ratingAlgorithmService.getEffectiveRating(raw, 'hospital_to_staff');
+
                     profile = {
                         id: raw._id,
                         fullName: raw.fullName,
@@ -546,6 +549,8 @@ class ProfileService {
                         verifiedDocs,
                         averageRating: raw.averageRating,
                         totalRatings: raw.totalRatings,
+                        effectiveRating: ratingShown,
+                        ratingBreakdown: breakdown,
                         location: {
                             latitude: raw.coordinates?.coordinates?.latitude,
                             longitude: raw.coordinates?.coordinates?.longitude
@@ -567,6 +572,9 @@ class ProfileService {
                             console.error('Failed to generate profile picture URL:', error.message);
                         }
                     }
+
+                    const { ratingShown, breakdown } = await ratingAlgorithmService.getEffectiveRating(raw, 'staff_to_hospital');
+
                     profile = {
                         id: raw._id,
                         hospitalLegalName: raw.hospitalLegalName,
@@ -583,6 +591,10 @@ class ProfileService {
                         verificationStatus: raw.verificationStatus,
                         staffCount: raw.staffCount,
                         description: raw.description || '',
+                        averageRating: raw.averageRating,
+                        totalRatings: raw.totalRatings,
+                        effectiveRating: ratingShown,
+                        ratingBreakdown: breakdown,
                         coordinates: {
                             latitude: raw.coordinates?.coordinates?.latitude,
                             longitude: raw.coordinates?.coordinates?.longitude
@@ -1271,7 +1283,7 @@ class ProfileService {
             // Get staff within bounding box 
             const nearbyStaff = await MedicalStaff.find(query)
                 .populate('user', 'name email')
-                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating verificationStatus user')
+                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating totalRatings verificationStatus user')
                 .sort({ 'coordinates.coordinates.latitude': 1, 'coordinates.coordinates.longitude': 1 })
                 .lean();
 
@@ -1386,8 +1398,12 @@ class ProfileService {
             const staffIds = validStaff.map(staff => staff._id);
             const dutyStatusMap = await getBatchStaffDutyStatus(staffIds);
 
+            // Batched, not one call per staff member — see
+            // ratingAlgorithm.service.js#getEffectiveRatingsForMany.
+            const effectiveRatings = await ratingAlgorithmService.getEffectiveRatingsForMany(validStaff, 'hospital_to_staff');
+
             // Format response with duty status
-            const staffWithDutyStatus = validStaff.map(staff => {
+            const staffWithDutyStatus = validStaff.map((staff, index) => {
                 const dutyStatus = dutyStatusMap.get(staff._id.toString());
 
                 return {
@@ -1398,6 +1414,7 @@ class ProfileService {
                     formattedRole: formatRoleForDisplay(staff.jobRole),
                     phone: staff.phoneNumber,
                     rating: staff.averageRating || 0,
+                    effectiveRating: effectiveRatings[index].ratingShown,
                     isAvailable: staff.isAvailable,
                     verificationStatus: staff.verificationStatus,
                     distance: staff.distance,

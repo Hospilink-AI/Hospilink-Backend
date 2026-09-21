@@ -1,7 +1,6 @@
 const Duty = require('../models/Duty');
 const Hospital = require('../models/Hospital');
 const MedicalStaff = require('../models/MedicalStaff');
-const Review = require('../models/Review');
 const mongoose = require('mongoose');
 const {
     doDutiesOverlap,
@@ -27,6 +26,8 @@ const s3Service = require('./s3.service');
 const OTPService = require('./otp.service');
 const SMSService = require('./sms.service');
 const { isWithinGeofence, GEOFENCE_RADIUS_KM } = require('./geofence.service');
+const ratingAlgorithmService = require('./ratingAlgorithm.service');
+const reviewService = require('./review.service');
 const {
     AppError,
     ValidationError,
@@ -192,6 +193,14 @@ class DutyService {
             Duty.countDocuments(match)
         ]);
 
+        // Batched, not one call per row — see
+        // ratingAlgorithm.service.js#getEffectiveRatingsForMany. Keyed by
+        // MedicalStaff _id (not positional index) since duty.assignedTo can
+        // be null and we don't want a null to shift later rows' ratings.
+        const assignedStaff = duties.map(d => d.assignedTo).filter(Boolean);
+        const effectiveRatingsList = await ratingAlgorithmService.getEffectiveRatingsForMany(assignedStaff, 'hospital_to_staff');
+        const effectiveRatingByStaffId = new Map(assignedStaff.map((s, i) => [s._id.toString(), effectiveRatingsList[i].ratingShown]));
+
         const formatted = duties.map(duty => {
             const staff = duty.assignedTo;
             const hoursCompleted = calculateDutyDuration(
@@ -210,7 +219,8 @@ class DutyService {
                     name: staff.fullName || staff.user?.name || '—',
                     email: staff.user?.email || '—',
                     averageRating: staff.averageRating ?? 0,
-                    totalRatings: staff.totalRatings ?? 0
+                    totalRatings: staff.totalRatings ?? 0,
+                    effectiveRating: effectiveRatingByStaffId.get(staff._id.toString()) ?? 0
                 } : null,
                 staffRole: duty.staffRole,
                 shiftDuration: `${duty.startTime} - ${duty.endTime}`,
@@ -286,6 +296,14 @@ class DutyService {
             Duty.countDocuments(match)
         ]);
 
+        // Batched, not one call per row — see
+        // ratingAlgorithm.service.js#getEffectiveRatingsForMany. Keyed by
+        // MedicalStaff _id (not positional index) since duty.assignedTo can
+        // be null and we don't want a null to shift later rows' ratings.
+        const assignedStaff = duties.map(d => d.assignedTo).filter(Boolean);
+        const effectiveRatingsList = await ratingAlgorithmService.getEffectiveRatingsForMany(assignedStaff, 'hospital_to_staff');
+        const effectiveRatingByStaffId = new Map(assignedStaff.map((s, i) => [s._id.toString(), effectiveRatingsList[i].ratingShown]));
+
         const formatted = await Promise.all(duties.map(async (duty) => {
             const staff = duty.assignedTo;
             const hoursCompleted = calculateDutyDuration(
@@ -317,6 +335,7 @@ class DutyService {
                     email: staff.user?.email || '—',
                     averageRating: staff.averageRating ?? 0,
                     totalRatings: staff.totalRatings ?? 0,
+                    effectiveRating: effectiveRatingByStaffId.get(staff._id.toString()) ?? 0,
                     profilePicture: profilePictureUrl
                 } : null,
                 staffRole: duty.staffRole,
@@ -1203,6 +1222,15 @@ class DutyService {
             throw new NotFoundError('Duty not found');
         }
 
+        // Blind/simultaneous reveal (Phase 3) — computed once, used at
+        // every exit path below instead of each doing its own ambiguous
+        // Review.findOne({ duty: dutyId }) (that had no reviewType filter,
+        // so which of up to two reviews came back was non-deterministic).
+        const visibleReviews = await reviewService.getVisibleReviewsForDuty(dutyId, userRole);
+        const myReview = userRole === 'staff' ? visibleReviews.staffToHospital
+            : userRole === 'hospital' ? visibleReviews.hospitalToStaff
+            : null;
+
         // Role-based authorization
         console.log(`getDutyDetail called with userRole: "${userRole}" for duty ${dutyId}`);
         if (userRole === 'staff') {
@@ -1290,14 +1318,9 @@ class DutyService {
                         };
 
                         // Add review data before returning
-                        const review = await Review.findOne({ duty: dutyId })
-                            .select('rating review createdAt');
-
-                        dutyObject.review = review ? {
-                            rating: review.rating,
-                            review: review.review,
-                            reviewedAt: review.createdAt
-                        } : null;
+                        dutyObject.review = myReview;
+                        dutyObject.hospitalReview = visibleReviews.hospitalToStaff;
+                        dutyObject.staffReview = visibleReviews.staffToHospital;
 
                         return dutyObject;
                     } catch (distanceError) {
@@ -1305,14 +1328,9 @@ class DutyService {
 
                         // Add review data even if distance calculation fails
                         const dutyObject = duty.toObject();
-                        const review = await Review.findOne({ duty: dutyId })
-                            .select('rating review createdAt');
-
-                        dutyObject.review = review ? {
-                            rating: review.rating,
-                            review: review.review,
-                            reviewedAt: review.createdAt
-                        } : null;
+                        dutyObject.review = myReview;
+                        dutyObject.hospitalReview = visibleReviews.hospitalToStaff;
+                        dutyObject.staffReview = visibleReviews.staffToHospital;
 
                         return dutyObject;
                     }
@@ -1324,14 +1342,9 @@ class DutyService {
 
                     // Still add review data even without coordinates
                     const dutyObject = duty.toObject();
-                    const review = await Review.findOne({ duty: dutyId })
-                        .select('rating review createdAt');
-
-                    dutyObject.review = review ? {
-                        rating: review.rating,
-                        review: review.review,
-                        reviewedAt: review.createdAt
-                    } : null;
+                    dutyObject.review = myReview;
+                    dutyObject.hospitalReview = visibleReviews.hospitalToStaff;
+                    dutyObject.staffReview = visibleReviews.staffToHospital;
 
                     return dutyObject;
                 }
@@ -1340,14 +1353,9 @@ class DutyService {
 
                 // Add review data even if distance calculation fails
                 const dutyObject = duty.toObject();
-                const review = await Review.findOne({ duty: dutyId })
-                    .select('rating review createdAt');
-
-                dutyObject.review = review ? {
-                    rating: review.rating,
-                    review: review.review,
-                    reviewedAt: review.createdAt
-                } : null;
+                dutyObject.review = myReview;
+                dutyObject.hospitalReview = visibleReviews.hospitalToStaff;
+                dutyObject.staffReview = visibleReviews.staffToHospital;
 
                 return dutyObject;
             }
@@ -1413,13 +1421,9 @@ class DutyService {
                     };
 
                     // Add review data
-                    const review = await Review.findOne({ duty: dutyId })
-                        .select('rating review createdAt');
-                    dutyObject.review = review ? {
-                        rating: review.rating,
-                        review: review.review,
-                        reviewedAt: review.createdAt
-                    } : null;
+                    dutyObject.review = myReview;
+                    dutyObject.hospitalReview = visibleReviews.hospitalToStaff;
+                    dutyObject.staffReview = visibleReviews.staffToHospital;
 
                     return dutyObject;
                 } catch (distanceError) {
@@ -1438,14 +1442,9 @@ class DutyService {
         const dutyObject = duty.toObject();
 
         // Add review data for hospital users
-        const review = await Review.findOne({ duty: dutyId })
-            .select('rating review createdAt');
-
-        dutyObject.review = review ? {
-            rating: review.rating,
-            review: review.review,
-            reviewedAt: review.createdAt
-        } : null;
+        dutyObject.review = myReview;
+        dutyObject.hospitalReview = visibleReviews.hospitalToStaff;
+        dutyObject.staffReview = visibleReviews.staffToHospital;
 
         return dutyObject;
     }
@@ -1730,16 +1729,13 @@ class DutyService {
                 .skip(paginationParams.skip)
                 .limit(paginationParams.limit);
 
-            // Fetch reviews for completed duties only (in single batch query)
+            // Blind/simultaneous reveal (Phase 3) — one batched call, not
+            // one per duty (same lesson as the rating algorithm's own
+            // batching). Replaces the old reviewMap, which keyed only by
+            // duty id — when both directions existed for a duty, the
+            // second one processed silently overwrote the first.
             const dutyIds = duties.map(duty => duty._id);
-            const reviews = await Review.find({
-                duty: { $in: dutyIds }
-            }).select('duty rating review createdAt');
-
-            const reviewMap = {};
-            reviews.forEach(review => {
-                reviewMap[review.duty.toString()] = review;
-            });
+            const visibleReviewPairs = await reviewService.getVisibleReviewPairsForDuties(dutyIds, 'staff');
 
             let totalHours = 0;
             let totalEarnings = 0;
@@ -1796,11 +1792,12 @@ class DutyService {
                     incompleteAt: duty.incompleteAt || null,
                     cancellation: duty.cancellation || null,
                     statusHistory: duty.statusHistory,
-                    rating: reviewMap[duty._id.toString()] ? {
-                        rating: reviewMap[duty._id.toString()].rating,
-                        review: reviewMap[duty._id.toString()].review,
-                        reviewedAt: reviewMap[duty._id.toString()].createdAt
-                    } : null
+                    // rating = the staff's own submitted review (always
+                    // visible — they wrote it); hospitalReview = the
+                    // hospital's review of them, gated until both sides
+                    // exist or the reveal timeout passes.
+                    rating: visibleReviewPairs.get(duty._id.toString())?.staffToHospital || null,
+                    hospitalReview: visibleReviewPairs.get(duty._id.toString())?.hospitalToStaff || null
                 };
             });
 
@@ -2106,7 +2103,7 @@ class DutyService {
             })
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating experience currentAddress city state pincode email verificationStatus education profileSummary',
+                    select: 'fullName user coordinates phoneNumber skills averageRating totalRatings experience currentAddress city state pincode email verificationStatus education profileSummary',
                     populate: {
                         path: 'user',
                         select: 'name email'
@@ -2204,6 +2201,8 @@ class DutyService {
                 };
             }
 
+            const { ratingShown: staffEffectiveRating } = await ratingAlgorithmService.getEffectiveRating(staff, 'hospital_to_staff');
+
             // Return hospital-specific route map
             return {
                 staff: {
@@ -2212,6 +2211,7 @@ class DutyService {
                     mobileNumber: staff.phoneNumber,
                     skills: staff.skills || [],
                     avgRating: staff.averageRating || 0,
+                    effectiveRating: staffEffectiveRating,
                     address: staff.currentAddress ? `${staff.currentAddress}, ${staff.city}, ${staff.state} - ${staff.pincode}` : `${staff.city}, ${staff.state} - ${staff.pincode}`,
                     currentAddress: staff.currentAddress,
                     city: staff.city,

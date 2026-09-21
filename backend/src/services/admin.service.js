@@ -23,6 +23,9 @@ const JobVacancyService = require('./jobVacancy.service');
 const JobApplicationService = require('./jobApplication.service');
 const InterviewSchedulingService = require('./interviewScheduling.service');
 const SystemConfigService = require('./systemConfig.service');
+const ratingAlgorithmService = require('./ratingAlgorithm.service');
+const JobApplication = require('../models/JobApplication');
+const { ACTIVE_STATUSES } = require('../utils/jobApplication.constants');
 const {
     ValidationError,
     NotFoundError,
@@ -452,7 +455,7 @@ class AdminService {
             // Get staff within bounding box (reduces dataset significantly)
             const nearbyStaff = await MedicalStaff.find(query)
                 .populate('user', 'name email')
-                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating verificationStatus user')
+                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating totalRatings verificationStatus user')
                 .sort({ 'coordinates.coordinates.latitude': 1, 'coordinates.coordinates.longitude': 1 })
                 .lean();
 
@@ -528,10 +531,16 @@ class AdminService {
             googleMapsApiCalls = actualApiCalls;
             console.log(`[Admin Google Maps API] Batch call completed for ${destinations.length} destinations`);
 
+            // Batched, not one call per staff member — see
+            // ratingAlgorithm.service.js#getEffectiveRatingsForMany.
+            const effectiveRatings = await ratingAlgorithmService.getEffectiveRatingsForMany(
+                validStaffWithLocations.map(s => s.staff), 'hospital_to_staff'
+            );
+
             // Combine staff with distance results
-            const staffWithRealTimeLocation = validStaffWithLocations.map(s => {
+            const staffWithRealTimeLocation = validStaffWithLocations.map((s, index) => {
                 const distanceResult = distanceResults.get(s.staff._id.toString());
-                
+
                 if (!distanceResult) {
                     console.warn(`Admin: No distance result for staff ${s.staff._id}`);
                     return null;
@@ -545,6 +554,7 @@ class AdminService {
                     formattedRole: formatRoleForDisplay(s.staff.jobRole),
                     phone: s.staff.phoneNumber,
                     rating: s.staff.averageRating || 0,
+                    effectiveRating: effectiveRatings[index].ratingShown,
                     isAvailable: s.staff.isAvailable,
                     verificationStatus: s.staff.verificationStatus,
                     distance: parseFloat(distanceResult.distance.toFixed(2)),
@@ -814,6 +824,8 @@ class AdminService {
 
         if (!hospital) throw new NotFoundError('Hospital not found');
 
+        const { ratingShown, breakdown } = await ratingAlgorithmService.getEffectiveRating(hospital, 'staff_to_hospital');
+
         // Documents are stored against the User's _id, not the Hospital profile's _id
         const docRecord = await Document.findOne({ userId: hospital.user._id }).lean();
         const documents = [];
@@ -846,6 +858,10 @@ class AdminService {
             pincode: hospital.pincode,
             staffCount: hospital.staffCount,
             servicesAvailable: hospital.servicesAvailable,
+            averageRating: hospital.averageRating,
+            totalRatings: hospital.totalRatings,
+            effectiveRating: ratingShown,
+            ratingBreakdown: breakdown,
             verificationStatus: hospital.verificationStatus,
             rejectionReason: hospital.rejectionReason,
             isSuspended: hospital.isSuspended || false,
@@ -1368,6 +1384,8 @@ class AdminService {
             status: 'completed'
         });
 
+        const { ratingShown, breakdown } = await ratingAlgorithmService.getEffectiveRating(staff, 'hospital_to_staff');
+
         return {
             id: staff._id,
             userId: staff.user?._id,
@@ -1395,6 +1413,8 @@ class AdminService {
             experience: staff.experience,
             averageRating: staff.averageRating,
             totalRatings: staff.totalRatings,
+            effectiveRating: ratingShown,
+            ratingBreakdown: breakdown,
             completedDuties,
             coordinates: {
                 latitude: staff.coordinates?.coordinates?.latitude,
@@ -1839,7 +1859,7 @@ class AdminService {
             const duty = await Duty.findById(dutyId)
                 .populate({
                     path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating experience currentAddress city state pincode email verificationStatus education profileSummary',
+                    select: 'fullName user coordinates phoneNumber skills averageRating totalRatings experience currentAddress city state pincode email verificationStatus education profileSummary',
                     populate: {
                         path: 'user',
                         select: 'name email'
@@ -1903,6 +1923,8 @@ class AdminService {
                 };
             }
 
+            const { ratingShown: staffEffectiveRating } = await ratingAlgorithmService.getEffectiveRating(staff, 'hospital_to_staff');
+
             // Enhanced response with all required fields
             const enhancedResponse = {
                 staff: {
@@ -1911,6 +1933,7 @@ class AdminService {
                     mobileNumber: staff.phoneNumber,
                     skills: staff.skills || [],
                     avgRating: staff.averageRating || 0,
+                    effectiveRating: staffEffectiveRating,
                     currentAddress: staff.currentAddress,
                     city: staff.city,
                     state: staff.state,
@@ -2380,11 +2403,6 @@ class AdminService {
         return JobApplicationService.getById(applicationId, adminUser);
     }
 
-    // PATCH /api/admin/no-show-disputes/:applicationId/resolve
-    async resolveNoShowDispute(applicationId, adminUserId, decision) {
-        return InterviewSchedulingService.resolveNoShowDispute(applicationId, adminUserId, decision);
-    }
-
     // GET /api/admin/interview-config — every setting's current effective
     // value plus its full version history.
     async getInterviewConfig() {
@@ -2648,6 +2666,116 @@ class AdminService {
         return duty;
     }
 
+
+
+
+    // Admin bypasses the normal hospital/candidate ownership check to force
+    // a JobApplication status change — used by REVOKE_APPLICATION (target
+    // 'withdrawn', never active) and REINSTATE_APPLICATION (target is
+    // whatever status the ticketConsequence handler resolved as "prior",
+    // which CAN be active). Deliberately doesn't own the "is this
+    // transition legal" business rule — that differs between the two
+    // callers — only the mechanics: load, guard the one real collision
+    // case, patch, save.
+    async adminOverrideApplicationStatus(applicationId, adminId, newStatus, reason, extraFields = {}) {
+        const application = await JobApplication.findById(applicationId);
+        if (!application) {
+            throw new NotFoundError('Application not found');
+        }
+
+        if (ACTIVE_STATUSES.includes(newStatus)) {
+            // Landing back in an ACTIVE status could collide with a fresh
+            // active application the candidate has since filed for the same
+            // vacancy — the partial unique index on {vacancy, staff} allows
+            // only one. Caught here with a clear message; the try/catch
+            // around save() below is a second line of defense against the
+            // check-then-write race window.
+            const collision = await JobApplication.findOne({
+                vacancy: application.vacancy,
+                staff: application.staff,
+                _id: { $ne: application._id },
+                status: { $in: ACTIVE_STATUSES }
+            }).select('_id').lean();
+            if (collision) {
+                throw new UnprocessableEntityError(
+                    'Cannot restore this application to an active status — the candidate already has a newer active application for this vacancy. Resolve or withdraw that one first.'
+                );
+            }
+        }
+
+        Object.assign(application, extraFields);
+        application.status = newStatus;
+        application.pushHistory(newStatus, adminId, reason);
+
+        try {
+            await application.save();
+        } catch (err) {
+            if (err.code === 11000) {
+                throw new UnprocessableEntityError(
+                    'Cannot restore this application — it now conflicts with another active application for the same vacancy.'
+                );
+            }
+            throw err;
+        }
+        return application;
+    }
+
+
+
+    // Admin-triggered reschedule (RESCHEDULE_INTERVIEW dispute-resolution
+    // action) — confirmed -> slots_offered, same mechanics as
+    // interviewScheduling.service.js#rescheduleInterview, but not routed
+    // through it: that method's _loadOwnedApplication assumes a hospital
+    // requester (an admin isn't one), and it enforces interview.rescheduleCap,
+    // which an admin dispute resolution deliberately bypasses — the
+    // jobs.interview_reschedule dispute category exists largely because the
+    // parties are already stuck at that cap. rescheduleCount/rescheduleHistory
+    // are still updated so the count stays accurate for anyone looking later.
+    async adminRescheduleInterview(applicationId, adminId, { slots, durationMinutes }, reason) {
+        const application = await JobApplication.findById(applicationId);
+        if (!application) {
+            throw new NotFoundError('Application not found');
+        }
+        if (application.status !== 'confirmed') {
+            throw new UnprocessableEntityError(
+                `Admin reschedule is only allowed from status confirmed (currently ${application.status}).`
+            );
+        }
+
+        const resolvedDuration = durationMinutes || await SystemConfigService.getEffective('interview.slotDurationDefault');
+        await InterviewSchedulingService._validateSlotWindow(slots, resolvedDuration);
+        const { normalizedSlots, offeredAt, expiresAt } = await InterviewSchedulingService._buildOfferWindow(slots);
+
+        const previousSlot = application.interview.confirmedSlot?.start
+            ? { start: application.interview.confirmedSlot.start, end: application.interview.confirmedSlot.end }
+            : null;
+        const isLateChange = await InterviewSchedulingService._computeIsLateChange(application.interview.confirmedSlot?.start);
+
+        application.status = 'slots_offered';
+        application.interview.confirmedSlot = undefined;
+        application.interview.confirmedAt = null;
+        application.interview.confirmedBy = null;
+        application.interview.offer = {
+            slots: normalizedSlots,
+            durationMinutes: resolvedDuration,
+            offeredAt,
+            offeredBy: adminId,
+            expiresAt,
+            cancelledAt: null,
+            cancelReason: null,
+            cancelReasonText: null,
+            nudgesSent: { day3: false, day10: false, day18: false }
+        };
+        application.interview.candidatePicks = undefined;
+        application.interview.pickedAt = null;
+        application.interview.rescheduleCount += 1;
+        application.interview.rescheduleHistory.push({ by: 'admin', reason, previousSlot });
+        application.pushHistory('slots_offered', adminId, reason, isLateChange);
+
+        await application.save();
+        await notificationEmitter.emitInterviewRescheduled(application);
+        return application;
+    }
 
 
 
