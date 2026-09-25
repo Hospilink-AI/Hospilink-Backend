@@ -24,7 +24,7 @@ const {
     NotFoundError, ForbiddenError, ConflictError, UnprocessableEntityError
 } = require('../middleware/error.middleware');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
-const { ACTIVE_STATUSES } = require('../utils/jobApplication.constants');
+const { ACTIVE_STATUSES, APPLICATION_ERROR_CODES } = require('../utils/jobApplication.constants');
 
 // jobRole dimension only — 100 (exact role match) -> 'exact', 40 (same
 // specialty family) -> 'related', anything else (including null, when either
@@ -56,7 +56,8 @@ class JobApplicationService {
         if (!medicalStaff) {
             await notificationEmitter.emitProfileRequiredForApplication(userId, vacancy);
             throw new UnprocessableEntityError(
-                'Complete your profile before applying for a permanent job. You can apply using just your resume.'
+                'Complete your profile before applying for a permanent job. You can apply using just your resume.',
+                APPLICATION_ERROR_CODES.PROFILE_REQUIRED
             );
         }
 
@@ -67,7 +68,8 @@ class JobApplicationService {
             throw new UnprocessableEntityError(
                 wasRejected
                     ? 'Your uploaded resume was rejected. Please upload a new resume before applying.'
-                    : 'Upload your resume to apply for permanent job openings.'
+                    : 'Upload your resume to apply for permanent job openings.',
+                APPLICATION_ERROR_CODES.RESUME_REQUIRED
             );
         }
 

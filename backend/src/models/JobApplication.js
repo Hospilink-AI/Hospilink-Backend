@@ -68,11 +68,17 @@ const jobApplicationSchema = new mongoose.Schema({
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     reviewedAt: { type: Date, default: null },
 
-    rejectionReason: { type: String, enum: REJECTION_REASONS, default: null },
+    // No `default: null` on these enum fields — Mongoose's enum validator
+    // rejects `null` unless it's explicitly listed in the enum array, so a
+    // `null` default fails validation on every single document creation.
+    // Leaving them unset (undefined) passes enum validation trivially and
+    // means the path is simply absent until an action explicitly sets it —
+    // same convention already used for `interview.confirmedSlot` above.
+    rejectionReason: { type: String, enum: REJECTION_REASONS },
     rejectionReasonText: { type: String, maxlength: REASON_TEXT_MAX_LENGTH, default: null },
 
     withdrawnAt: { type: Date, default: null },
-    withdrawReason: { type: String, enum: WITHDRAW_REASONS, default: null },
+    withdrawReason: { type: String, enum: WITHDRAW_REASONS },
     withdrawReasonText: { type: String, maxlength: REASON_TEXT_MAX_LENGTH, default: null },
 
     interview: {
@@ -88,7 +94,7 @@ const jobApplicationSchema = new mongoose.Schema({
             // correct without a live computation on every read.
             expiresAt: { type: Date, default: null },
             cancelledAt: { type: Date, default: null },
-            cancelReason: { type: String, enum: RECRUITER_CHANGE_REASONS, default: null },
+            cancelReason: { type: String, enum: RECRUITER_CHANGE_REASONS },
             cancelReasonText: { type: String, maxlength: REASON_TEXT_MAX_LENGTH, default: null },
             nudgesSent: {
                 day3: { type: Boolean, default: false },
@@ -159,20 +165,20 @@ const jobApplicationSchema = new mongoose.Schema({
         // stands until the recruiter acts."
         rescheduleRequest: {
             requestedAt: { type: Date, default: null },
-            reason: { type: String, enum: CANDIDATE_CHANGE_REASONS, default: null },
+            reason: { type: String, enum: CANDIDATE_CHANGE_REASONS },
             reasonText: { type: String, maxlength: REASON_TEXT_MAX_LENGTH, default: null },
             pending: { type: Boolean, default: false }
         },
 
         outcome: {
-            result: { type: String, enum: ['offer', 'reject', 'no_show', 'not_recorded'], default: null },
+            result: { type: String, enum: ['offer', 'reject', 'no_show', 'not_recorded'] },
             recordedAt: { type: Date, default: null },
             // ObjectId of the recruiter, or 'system' for the both-absent cron lapse.
             recordedBy: { type: mongoose.Schema.Types.Mixed, default: null }
         },
 
         noShow: {
-            by: { type: String, enum: ['candidate', 'hospital'], default: null },
+            by: { type: String, enum: ['candidate', 'hospital'] },
             markedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
             markedAt: { type: Date, default: null },
             disputeStatus: { type: String, enum: ['none', 'open', 'upheld', 'voided'], default: 'none' },

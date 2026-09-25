@@ -96,6 +96,10 @@ class AdminManagementService {
             throw new NotFoundError('Admin not found');
         }
 
+        if (admin.adminSubRole === 'super_admin') {
+            throw new ForbiddenError('You cannot change the role of another super admin account. This can only be done via direct DB access.');
+        }
+
         const requester = await User.findById(requestingAdminId);
 
         const otp = OTPService.generateOTP();
@@ -191,6 +195,12 @@ class AdminManagementService {
         const admin = await User.findOne({ _id: pending.targetAdminId, role: 'admin' });
         if (!admin) {
             throw new NotFoundError('Admin not found');
+        }
+
+        // Re-check here too: the target may have become a super admin (or the change may have been
+        // staged before this rule existed) in the up-to-10-minute gap since step 1.
+        if (admin.adminSubRole === 'super_admin') {
+            throw new ForbiddenError('You cannot change the role of another super admin account. This can only be done via direct DB access.');
         }
 
         const previousSubRole = admin.adminSubRole;

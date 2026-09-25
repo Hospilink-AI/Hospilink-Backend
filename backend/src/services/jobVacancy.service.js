@@ -83,10 +83,14 @@ class JobVacancyService {
 
     async _create(hospital, createdByUserId, payload) {
         const data = pickVacancyFields(payload);
-        if (!data.location) {
-            const fallbackLocation = buildHospitalLocation(hospital);
-            if (fallbackLocation) data.location = fallbackLocation;
-        }
+
+        // location is always derived from the owning hospital's own profile on
+        // creation — never accepted from the client — so a vacancy's location
+        // can't drift from where the hospital actually is. Editable afterward
+        // via PATCH /vacancies/:id if it ever needs correcting.
+        delete data.location;
+        const derivedLocation = buildHospitalLocation(hospital);
+        if (derivedLocation) data.location = derivedLocation;
 
         const vacancy = await JobVacancy.create({
             ...data,

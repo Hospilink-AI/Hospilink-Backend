@@ -2752,9 +2752,7 @@ class AdminService {
         const isLateChange = await InterviewSchedulingService._computeIsLateChange(application.interview.confirmedSlot?.start);
 
         application.status = 'slots_offered';
-        application.interview.confirmedSlot = undefined;
-        application.interview.confirmedAt = null;
-        application.interview.confirmedBy = null;
+        InterviewSchedulingService._releaseBooking(application);
         application.interview.offer = {
             slots: normalizedSlots,
             durationMinutes: resolvedDuration,
@@ -2762,7 +2760,8 @@ class AdminService {
             offeredBy: adminId,
             expiresAt,
             cancelledAt: null,
-            cancelReason: null,
+            // cancelReason is an enum field — never assign it null explicitly
+            // (Mongoose's enum validator rejects null); omit so it stays unset.
             cancelReasonText: null,
             nudgesSent: { day3: false, day10: false, day18: false }
         };
