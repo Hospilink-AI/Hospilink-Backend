@@ -11,8 +11,10 @@ const vacancyMatchingService = require('./vacancyMatching.service');
 // resumeAnalysis blob) are structurally absent from the output, not filtered
 // out after the fact — there is no blacklist to forget to update.
 //
-// The one non-candidate block is `interview` (tier 2+): the hospital's own
-// scheduling state for this application, see buildInterviewView.
+// The non-candidate blocks are `interview` (tier 2+): the hospital's own
+// scheduling state for this application, see buildInterviewView; and, once an
+// application has ended, the reason it did (rejectionReason / withdrawReason),
+// see buildApplicantView.
 
 const DIMENSION_LABELS = {
     jobRole: 'Specialty match',
@@ -208,6 +210,21 @@ function buildApplicantView(application, medicalStaff) {
         tier,
         ...buildTier1(application, medicalStaff)
     };
+
+    // Why the application ended, so the hospital can see why a candidate was
+    // rejected or withdrew. Read off the already-loaded application (no extra
+    // query) and gated on the current status, so only the pair matching how it
+    // ended is shown. null, not omitted, if a terminal status was set without a
+    // reason (e.g. an admin override). withdrawReasonText is free text typed by
+    // the candidate; rejectionReasonText is the hospital's own.
+    if (application.status === 'rejected') {
+        view.rejectionReason = application.rejectionReason ?? null;
+        view.rejectionReasonText = application.rejectionReasonText ?? null;
+    } else if (application.status === 'withdrawn') {
+        view.withdrawnAt = application.withdrawnAt ?? null;
+        view.withdrawReason = application.withdrawReason ?? null;
+        view.withdrawReasonText = application.withdrawReasonText ?? null;
+    }
 
     if (tier >= 2) {
         view = {
