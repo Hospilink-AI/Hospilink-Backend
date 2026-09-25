@@ -7,6 +7,13 @@ const Hospital = require('../models/Hospital');
 const User = require('../models/User');
 const JobVacancy = require('../models/JobVacancy');
 
+// Same formatting ticketConsequence.service.js's own (unexported)
+// humanizeCategory uses — duplicated as a one-liner rather than importing
+// across that boundary for a single string transform.
+function humanizeTicketCategory(category) {
+    return category.replace('.', ' — ').replace(/_/g, ' ');
+}
+
 
 
 /**
@@ -2434,6 +2441,62 @@ class NotificationEmitter {
             await notificationDelivery.deliverToUser(recipient, 'TICKET_APPEAL_OUTCOME', payload, unreadCount);
         } catch (error) {
             console.error('Error emitting appeal-outcome notification:', error);
+        }
+    }
+
+    // TICKET_OUTCOME_DECIDED's own statement only ever says "Action taken:
+    // apply rating penalty" — same generic wording regardless of category or
+    // point value, sent identically to both parties, so the respondent can't
+    // tell from it alone that THEY'RE the one who lost points. This is the
+    // specific one, to the respondent only.
+    async emitRatingPenaltyApplied(ticket, points) {
+        try {
+            const recipient = ticket.raisedAgainst.user;
+            const payload = {
+                type: 'RATING_PENALTY_APPLIED',
+                ticket: { id: ticket._id, ticketId: ticket.ticketId },
+                category: ticket.category,
+                points,
+                message: `A ${points}-point rating penalty was applied to your account following ticket ${ticket.ticketId} (${humanizeTicketCategory(ticket.category)}). You can appeal this from the ticket.`,
+                timestamp: new Date().toISOString()
+            };
+            const { unreadCount } = await notificationService.createNotificationWithCount(recipient, 'RATING_PENALTY_APPLIED', payload);
+            await notificationDelivery.deliverToUser(recipient, 'RATING_PENALTY_APPLIED', payload, unreadCount);
+        } catch (error) {
+            console.error('Error emitting rating-penalty-applied notification:', error);
+        }
+    }
+
+    // The appellant already gets emitAppealOutcome's generic statement; this
+    // adds the specifics (category, points). The ORIGINAL ticket's raiser —
+    // whoever's complaint the penalty came from, and who benefited from it
+    // existing — otherwise gets no notice at all that it's been reversed;
+    // included here as a second recipient when different from the appellant.
+    async emitRatingPenaltyReversed(appealTicket, originalTicket, points) {
+        try {
+            const appellantId = appealTicket.raisedBy.user.toString();
+            const recipients = [appealTicket.raisedBy.user];
+            if (originalTicket?.raisedBy?.user && originalTicket.raisedBy.user.toString() !== appellantId) {
+                recipients.push(originalTicket.raisedBy.user);
+            }
+
+            await Promise.all(recipients.map(async (recipient) => {
+                const isAppellant = recipient.toString() === appellantId;
+                const payload = {
+                    type: 'RATING_PENALTY_REVERSED',
+                    ticket: { id: appealTicket._id, ticketId: appealTicket.ticketId },
+                    category: appealTicket.category,
+                    points,
+                    message: isAppellant
+                        ? `Your appeal succeeded — the ${points}-point rating penalty from this dispute has been reversed.`
+                        : `A rating penalty related to a case you raised (ticket ${originalTicket.ticketId}) has been reversed on appeal.`,
+                    timestamp: new Date().toISOString()
+                };
+                const { unreadCount } = await notificationService.createNotificationWithCount(recipient, 'RATING_PENALTY_REVERSED', payload);
+                await notificationDelivery.deliverToUser(recipient, 'RATING_PENALTY_REVERSED', payload, unreadCount);
+            }));
+        } catch (error) {
+            console.error('Error emitting rating-penalty-reversed notification:', error);
         }
     }
 

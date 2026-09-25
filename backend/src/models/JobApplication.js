@@ -151,7 +151,10 @@ const jobApplicationSchema = new mongoose.Schema({
 
         rescheduleCount: { type: Number, default: 0 },
         rescheduleHistory: [{
-            by: { type: String, enum: ['staff', 'hospital'] },
+            // 'admin' added for the RESCHEDULE_INTERVIEW dispute-resolution
+            // action (ticketConsequence.service.js) — an admin-triggered
+            // reschedule via a resolved dispute, neither party's own request.
+            by: { type: String, enum: ['staff', 'hospital', 'admin'] },
             reason: String,
             reasonText: { type: String, maxlength: REASON_TEXT_MAX_LENGTH },
             at: { type: Date, default: Date.now },

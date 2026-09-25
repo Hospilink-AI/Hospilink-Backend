@@ -24,6 +24,8 @@ const JobApplicationService = require('./jobApplication.service');
 const InterviewSchedulingService = require('./interviewScheduling.service');
 const SystemConfigService = require('./systemConfig.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
+const JobApplication = require('../models/JobApplication');
+const { ACTIVE_STATUSES } = require('../utils/jobApplication.constants');
 const {
     ValidationError,
     NotFoundError,
@@ -2664,6 +2666,116 @@ class AdminService {
         return duty;
     }
 
+
+
+
+    // Admin bypasses the normal hospital/candidate ownership check to force
+    // a JobApplication status change — used by REVOKE_APPLICATION (target
+    // 'withdrawn', never active) and REINSTATE_APPLICATION (target is
+    // whatever status the ticketConsequence handler resolved as "prior",
+    // which CAN be active). Deliberately doesn't own the "is this
+    // transition legal" business rule — that differs between the two
+    // callers — only the mechanics: load, guard the one real collision
+    // case, patch, save.
+    async adminOverrideApplicationStatus(applicationId, adminId, newStatus, reason, extraFields = {}) {
+        const application = await JobApplication.findById(applicationId);
+        if (!application) {
+            throw new NotFoundError('Application not found');
+        }
+
+        if (ACTIVE_STATUSES.includes(newStatus)) {
+            // Landing back in an ACTIVE status could collide with a fresh
+            // active application the candidate has since filed for the same
+            // vacancy — the partial unique index on {vacancy, staff} allows
+            // only one. Caught here with a clear message; the try/catch
+            // around save() below is a second line of defense against the
+            // check-then-write race window.
+            const collision = await JobApplication.findOne({
+                vacancy: application.vacancy,
+                staff: application.staff,
+                _id: { $ne: application._id },
+                status: { $in: ACTIVE_STATUSES }
+            }).select('_id').lean();
+            if (collision) {
+                throw new UnprocessableEntityError(
+                    'Cannot restore this application to an active status — the candidate already has a newer active application for this vacancy. Resolve or withdraw that one first.'
+                );
+            }
+        }
+
+        Object.assign(application, extraFields);
+        application.status = newStatus;
+        application.pushHistory(newStatus, adminId, reason);
+
+        try {
+            await application.save();
+        } catch (err) {
+            if (err.code === 11000) {
+                throw new UnprocessableEntityError(
+                    'Cannot restore this application — it now conflicts with another active application for the same vacancy.'
+                );
+            }
+            throw err;
+        }
+        return application;
+    }
+
+
+
+    // Admin-triggered reschedule (RESCHEDULE_INTERVIEW dispute-resolution
+    // action) — confirmed -> slots_offered, same mechanics as
+    // interviewScheduling.service.js#rescheduleInterview, but not routed
+    // through it: that method's _loadOwnedApplication assumes a hospital
+    // requester (an admin isn't one), and it enforces interview.rescheduleCap,
+    // which an admin dispute resolution deliberately bypasses — the
+    // jobs.interview_reschedule dispute category exists largely because the
+    // parties are already stuck at that cap. rescheduleCount/rescheduleHistory
+    // are still updated so the count stays accurate for anyone looking later.
+    async adminRescheduleInterview(applicationId, adminId, { slots, durationMinutes }, reason) {
+        const application = await JobApplication.findById(applicationId);
+        if (!application) {
+            throw new NotFoundError('Application not found');
+        }
+        if (application.status !== 'confirmed') {
+            throw new UnprocessableEntityError(
+                `Admin reschedule is only allowed from status confirmed (currently ${application.status}).`
+            );
+        }
+
+        const resolvedDuration = durationMinutes || await SystemConfigService.getEffective('interview.slotDurationDefault');
+        await InterviewSchedulingService._validateSlotWindow(slots, resolvedDuration);
+        const { normalizedSlots, offeredAt, expiresAt } = await InterviewSchedulingService._buildOfferWindow(slots);
+
+        const previousSlot = application.interview.confirmedSlot?.start
+            ? { start: application.interview.confirmedSlot.start, end: application.interview.confirmedSlot.end }
+            : null;
+        const isLateChange = await InterviewSchedulingService._computeIsLateChange(application.interview.confirmedSlot?.start);
+
+        application.status = 'slots_offered';
+        application.interview.confirmedSlot = undefined;
+        application.interview.confirmedAt = null;
+        application.interview.confirmedBy = null;
+        application.interview.offer = {
+            slots: normalizedSlots,
+            durationMinutes: resolvedDuration,
+            offeredAt,
+            offeredBy: adminId,
+            expiresAt,
+            cancelledAt: null,
+            cancelReason: null,
+            cancelReasonText: null,
+            nudgesSent: { day3: false, day10: false, day18: false }
+        };
+        application.interview.candidatePicks = undefined;
+        application.interview.pickedAt = null;
+        application.interview.rescheduleCount += 1;
+        application.interview.rescheduleHistory.push({ by: 'admin', reason, previousSlot });
+        application.pushHistory('slots_offered', adminId, reason, isLateChange);
+
+        await application.save();
+        await notificationEmitter.emitInterviewRescheduled(application);
+        return application;
+    }
 
 
 

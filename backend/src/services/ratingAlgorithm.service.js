@@ -26,13 +26,21 @@ class RatingAlgorithmService {
         if (cached !== null) return cached;
 
         const [result] = await Review.aggregate([
-            { $match: { reviewType } },
+            { $match: { reviewType, suppressed: { $ne: true } } },
             { $group: { _id: null, avg: { $avg: '$rating' } } }
         ]);
         const average = result ? Number(result.avg.toFixed(2)) : PLATFORM_AVERAGE_FALLBACK;
 
         await cacheService.set(cacheKeyFor(reviewType), average, PLATFORM_AVERAGE_CACHE_TTL_SECONDS);
         return average;
+    }
+
+    // Busts the cache above — used by SUPPRESS_REVIEW, since a suppressed
+    // review changes this aggregate but nothing else invalidates this
+    // specific 1-hour-TTL key (invalidateUserProfiles only covers the
+    // per-user profile cache, a separate key entirely).
+    async invalidatePlatformAverageCache(reviewType) {
+        return cacheService.del(cacheKeyFor(reviewType));
     }
 
     // Bayesian blend — smooth, not a hard cutoff. At count=0 this is
