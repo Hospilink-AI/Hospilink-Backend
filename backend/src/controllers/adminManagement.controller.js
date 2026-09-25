@@ -90,7 +90,7 @@ exports.verifyRoleChangeOtp = asyncHandler(async (req, res) => {
         ACTIVITY_ACTIONS.ADMIN_ROLE_CHANGED,
         { type: 'admin', id: result.id, name: result.name },
         actorFrom(req),
-        { previousSubRole: result.previousSubRole, newSubRole: result.newSubRole },
+        { targetAdminEmail: result.email, previousSubRole: result.previousSubRole, newSubRole: result.newSubRole },
         req
     ).catch(() => {});
 
