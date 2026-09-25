@@ -43,7 +43,9 @@ class InterviewSchedulingService {
             offeredBy: actorId,
             expiresAt,
             cancelledAt: null,
-            cancelReason: null,
+            // cancelReason is an enum field — never assign it null explicitly
+            // (Mongoose's enum validator rejects null unless it's listed in
+            // the enum itself); omit the key so it stays genuinely unset.
             cancelReasonText: null,
             nudgesSent: { day3: false, day10: false, day18: false }
         };
@@ -228,7 +230,8 @@ class InterviewSchedulingService {
             offeredBy: actorId,
             expiresAt,
             cancelledAt: null,
-            cancelReason: null,
+            // See offerSlots() above — cancelReason is an enum field, must
+            // never be explicitly set to null.
             cancelReasonText: null,
             nudgesSent: { day3: false, day10: false, day18: false }
         };
