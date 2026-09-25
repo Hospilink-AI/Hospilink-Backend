@@ -114,7 +114,6 @@ app.use("/api/tickets", ticketRoutes);
 app.use("/api/admin/tickets", require("./routes/adminTicket.routes"));
 app.use("/api/chatbot", require("./routes/chatbot.routes"));
 app.use("/api/admin/knowledge-base", require("./routes/adminKnowledgeBase.routes"));
-app.use("/api/admin", require("./routes/adminPattern.routes"));
 app.use("/api/account", require("./routes/accountStanding.routes"));
 app.use("/api/support/feedback", require("./routes/feedback.routes"));
 app.use("/api/admin/feedback", require("./routes/adminFeedback.routes"));
@@ -126,6 +125,9 @@ app.use("/api/webhook", require("./routes/webhook.route"));
 
 // Admin routes
 app.use("/api/admin", adminRoutes);
+// Must stay AFTER adminRoutes: this router starts with router.use(protect), so mounting it
+// first would 401 the public /api/admin/signin* routes before adminRoutes can serve them.
+app.use("/api/admin", require("./routes/adminPattern.routes"));
 
 // Hospital dashboard routes
 app.use("/api/hospital-dashboard", hospitalDashboardRoutes);
