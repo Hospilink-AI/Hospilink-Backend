@@ -172,6 +172,8 @@ app.use((err, req, res, next) => {
   res.status(statusCode).json({
     success: false,
     message: message,
+    
+    ...(err.isOperational && err.code && { code: err.code }),
     ...(process.env.NODE_ENV !== "production" && { stack: err.stack }),
     requestId: req.requestId,
   });

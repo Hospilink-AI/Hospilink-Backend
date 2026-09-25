@@ -63,7 +63,16 @@ const SLOT_DURATIONS = [15, 30, 45, 60];
 const SLOT_GRANULARITY_MINUTES = 15;
 const REASON_TEXT_MAX_LENGTH = 300;
 
+// Stable machine-readable `code` values sent on POST /vacancies/:id/apply's
+// 422s. Same strings as the matching Notification types so the app can use
+// one vocabulary for the HTTP error and the push notification.
+const APPLICATION_ERROR_CODES = {
+    PROFILE_REQUIRED: 'PROFILE_REQUIRED_FOR_APPLICATION',
+    RESUME_REQUIRED: 'RESUME_REQUIRED_FOR_APPLICATION'
+};
+
 module.exports = {
+    APPLICATION_ERROR_CODES,
     STATUSES,
     TERMINAL_STATUSES,
     ACTIVE_STATUSES,
