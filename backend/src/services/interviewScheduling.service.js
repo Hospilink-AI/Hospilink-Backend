@@ -217,12 +217,7 @@ class InterviewSchedulingService {
         const by = requester.role === 'hospital' ? 'hospital' : 'staff';
 
         application.status = 'slots_offered';
-        // Unsets confirmedSlot.start/end (no default in the schema — see the
-        // model's comment), which removes this document from the partial
-        // unique index's filter and frees that wall-clock time immediately.
-        application.interview.confirmedSlot = undefined;
-        application.interview.confirmedAt = null;
-        application.interview.confirmedBy = null;
+        this._releaseBooking(application);
         application.interview.offer = {
             slots: normalizedSlots,
             durationMinutes: resolvedDuration,
@@ -261,9 +256,7 @@ class InterviewSchedulingService {
         const actorId = actorIdOf(requester);
 
         application.status = 'shortlisted';
-        application.interview.confirmedSlot = undefined;
-        application.interview.confirmedAt = null;
-        application.interview.confirmedBy = null;
+        this._releaseBooking(application);
         application.interview.offer = undefined;
         application.interview.candidatePicks = undefined;
         application.pushHistory('shortlisted', actorId, reason, isLateChange);
@@ -392,7 +385,9 @@ class InterviewSchedulingService {
             by: 'hospital', markedBy: userId, markedAt: new Date(), disputeStatus: 'none'
         };
         application.status = 'shortlisted';
-        application.interview.confirmedSlot = undefined;
+        this._releaseBooking(application);
+        application.interview.offer = undefined;
+        application.interview.candidatePicks = undefined;
         application.pushHistory('shortlisted', userId, 'Hospital did not join the interview');
 
         await application.save();
@@ -427,6 +422,33 @@ class InterviewSchedulingService {
     }
 
     // ─── Shared validation / helpers ────────────────────────────────────────
+
+    // Ends the current booking on an in-memory application: the booked time and
+    // everything that only made sense for it — who confirmed it, its meeting
+    // link and interviewer, and any reschedule request raised against it. Every
+    // path that moves an application out of `confirmed` must call this (reschedule,
+    // cancel, hospital no-show, admin reschedule); a path that only unset
+    // confirmedSlot would leave the old link/interviewer stored and
+    // rescheduleRequest.pending stuck at true, to reappear on the next booking.
+    //
+    // interview.linkHistory is deliberately NOT touched — it is the audit trail
+    // of every link ever used. Callers own the offer/picks: reschedule replaces
+    // them with a fresh offer, cancel and no-show clear them.
+    _releaseBooking(application) {
+        const interview = application.interview;
+        // Unsets confirmedSlot.start/end (no default in the schema — see the
+        // model's comment), which removes this document from the partial
+        // unique index's filter and frees that wall-clock time immediately.
+        interview.confirmedSlot = undefined;
+        interview.confirmedAt = null;
+        interview.confirmedBy = null;
+        interview.meetingLink = null;
+        interview.interviewerName = null;
+        interview.interviewerDesignation = null;
+        // The request is resolved by whatever released the booking. `reason` is
+        // an enum field — omitted so it stays genuinely unset, never null.
+        interview.rescheduleRequest = { requestedAt: null, reasonText: null, pending: false };
+    }
 
     async _validateSlotWindow(slots, durationMinutes) {
         if (!Array.isArray(slots) || slots.length === 0) {

@@ -10,6 +10,9 @@ const vacancyMatchingService = require('./vacancyMatching.service');
 // duty history/rates, no-show/dispute history, isSuspended, the raw
 // resumeAnalysis blob) are structurally absent from the output, not filtered
 // out after the fact — there is no blacklist to forget to update.
+//
+// The one non-candidate block is `interview` (tier 2+): the hospital's own
+// scheduling state for this application, see buildInterviewView.
 
 const DIMENSION_LABELS = {
     jobRole: 'Specialty match',
@@ -114,6 +117,82 @@ function buildTier3(medicalStaff) {
     };
 }
 
+// The offered times are only meaningful while an offer is live; picks only
+// while there is something to act on (or the booking they led to).
+const LIVE_OFFER_STATUSES = ['slots_offered', 'slot_selected'];
+const PICKS_VISIBLE_STATUSES = ['slot_selected', 'confirmed'];
+
+function toSlot(slot) {
+    return { start: slot.start, end: slot.end };
+}
+
+// Interview scheduling state for the hospital — the offered times, the
+// candidate's picks, and the booking (time, link, interviewer). Every field is
+// assembled by hand, never spread from application.interview: that subdocument
+// also holds no-show/dispute history, link/reschedule history and reminder
+// bookkeeping, none of which a hospital may see.
+//
+// What is valid right now is derived here rather than trusted from storage:
+//  - offer.slots survive cancelOffer and cron expiry (only cancelledAt is
+//    set / the status changes), so the offer is shown only for a live status.
+//  - Releasing a booking now clears its link, interviewer and reschedule
+//    request at write time (interviewScheduling.service.js#_releaseBooking),
+//    but records written before that still carry them. So the link and
+//    interviewer are shown only while a booking exists (confirmedSlot set),
+//    and a request only while confirmed and only if it was made after this
+//    booking was confirmed — otherwise an old request would reappear on the
+//    next booking. Kept as a safety net for those older records.
+function buildInterviewView(application) {
+    const interview = application.interview || {};
+    const status = application.status;
+    const offer = interview.offer;
+
+    const hasLiveOffer = LIVE_OFFER_STATUSES.includes(status)
+        && !offer?.cancelledAt
+        && Array.isArray(offer?.slots)
+        && offer.slots.length > 0;
+
+    const confirmedSlot = interview.confirmedSlot?.start ? toSlot(interview.confirmedSlot) : null;
+    const hasBooking = confirmedSlot !== null;
+
+    const request = interview.rescheduleRequest;
+    const hasCurrentRescheduleRequest = status === 'confirmed'
+        && hasBooking
+        && !!request?.pending
+        && !!request.requestedAt
+        && (!interview.confirmedAt || new Date(request.requestedAt) >= new Date(interview.confirmedAt));
+
+    return {
+        offer: hasLiveOffer
+            ? {
+                slots: offer.slots.map(toSlot),
+                durationMinutes: offer.durationMinutes ?? null,
+                // offer.expiresAt is the candidate's pick-by deadline. Once they
+                // have picked (slot_selected) the confirm-by clock is a different,
+                // live-computed one (interviewLifecycle.service.js), so echoing this
+                // date there would show the hospital the wrong deadline.
+                expiresAt: status === 'slots_offered' ? (offer.expiresAt ?? null) : null
+            }
+            : null,
+        candidatePicks: PICKS_VISIBLE_STATUSES.includes(status)
+            ? (interview.candidatePicks || []).map(toSlot)
+            : [],
+        confirmedSlot,
+        meetingLink: hasBooking ? (interview.meetingLink ?? null) : null,
+        interviewerName: hasBooking ? (interview.interviewerName ?? null) : null,
+        interviewerDesignation: hasBooking ? (interview.interviewerDesignation ?? null) : null,
+        rescheduleCount: interview.rescheduleCount || 0,
+        rescheduleRequest: hasCurrentRescheduleRequest
+            ? {
+                pending: true,
+                requestedAt: request.requestedAt,
+                reason: request.reason ?? null,
+                reasonText: request.reasonText ?? null
+            }
+            : null
+    };
+}
+
 function tierForStatus(status) {
     if (status === 'hired') return 3;
     if (status === 'applied' || status === 'under_review') return 1;
@@ -130,10 +209,18 @@ function buildApplicantView(application, medicalStaff) {
         ...buildTier1(application, medicalStaff)
     };
 
-    if (tier >= 2) view = { ...view, ...buildTier2(medicalStaff) };
+    if (tier >= 2) {
+        view = {
+            ...view,
+            ...buildTier2(medicalStaff),
+            // No extra query: `application` is already loaded by both callers
+            // (getById / listForVacancy), interview is part of that document.
+            interview: buildInterviewView(application)
+        };
+    }
     if (tier >= 3) view = { ...view, ...buildTier3(medicalStaff) };
 
     return view;
 }
 
-module.exports = { buildApplicantView, tierForStatus };
+module.exports = { buildApplicantView, buildInterviewView, tierForStatus };
