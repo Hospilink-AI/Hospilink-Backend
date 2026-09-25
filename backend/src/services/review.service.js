@@ -4,6 +4,7 @@ const Hospital = require("../models/Hospital");
 const MedicalStaff = require("../models/MedicalStaff");
 const notificationEmitter = require("./notificationEmitter");
 const systemConfigService = require("./systemConfig.service");
+const cacheService = require("./cache.service");
 const {
     ValidationError,
     NotFoundError,
@@ -31,7 +32,7 @@ class ReviewService {
     // read routes through this (or its batched sibling below) so "which
     // review is which" is never ambiguous again.
     async getReviewPairForDuty(dutyId) {
-        const reviews = await Review.find({ duty: dutyId }).select('rating review createdAt reviewType');
+        const reviews = await Review.find({ duty: dutyId, suppressed: { $ne: true } }).select('rating review createdAt reviewType');
         return {
             hospitalToStaff: reviews.find(r => r.reviewType === 'hospital_to_staff') || null,
             staffToHospital: reviews.find(r => r.reviewType === 'staff_to_hospital') || null
@@ -44,7 +45,7 @@ class ReviewService {
         const byDuty = new Map(dutyIds.map(id => [id.toString(), { hospitalToStaff: null, staffToHospital: null }]));
         if (dutyIds.length === 0) return byDuty;
 
-        const reviews = await Review.find({ duty: { $in: dutyIds } }).select('duty rating review createdAt reviewType');
+        const reviews = await Review.find({ duty: { $in: dutyIds }, suppressed: { $ne: true } }).select('duty rating review createdAt reviewType');
         for (const r of reviews) {
             const pair = byDuty.get(r.duty.toString());
             if (!pair) continue;
@@ -177,6 +178,11 @@ class ReviewService {
 
         await staff.save();
 
+        // GET /api/profile/me caches its whole response for 15 minutes —
+        // without this, a staff member could keep seeing their pre-review
+        // rating for up to that long after receiving one.
+        await cacheService.invalidateUserProfiles(staff.user.toString());
+
         // Emit real-time notification (content-free — see
         // notificationEmitter.js#emitReviewReceived's own comment)
         await notificationEmitter.emitReviewReceived(duty, hospital, staff);
@@ -235,6 +241,9 @@ class ReviewService {
         hospital.averageRating = Number(newAverage.toFixed(2));
 
         await hospital.save();
+
+        // Same staleness fix as the hospital-to-staff direction above.
+        await cacheService.invalidateUserProfiles(hospital.user.toString());
 
         // Emit real-time notification (content-free — see
         // notificationEmitter.js#emitHospitalReviewReceived's own comment)

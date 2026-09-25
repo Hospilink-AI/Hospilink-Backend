@@ -37,6 +37,28 @@ const reviewSchema = new mongoose.Schema(
             type: String,
             trim: true,
             maxlength: 1000
+        },
+
+        // Set via the SUPPRESS_REVIEW dispute-resolution action — retained,
+        // not deleted, but excluded from every read path and from the
+        // profile average it once contributed to. See
+        // ticketConsequence.service.js#SUPPRESS_REVIEW.
+        suppressed: {
+            type: Boolean,
+            default: false
+        },
+        suppressedAt: {
+            type: Date,
+            default: null
+        },
+        suppressedReason: {
+            type: String,
+            default: null
+        },
+        suppressedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            default: null
         }
 
     },
