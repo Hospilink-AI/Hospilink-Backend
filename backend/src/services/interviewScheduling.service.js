@@ -4,7 +4,12 @@ const systemConfigService = require('./systemConfig.service');
 const noShowPenaltyService = require('./noShowPenalty.service');
 const notificationEmitter = require('./notificationEmitter');
 const { UnprocessableEntityError, ConflictError, NotFoundError } = require('../middleware/error.middleware');
-const { SLOT_GRANULARITY_MINUTES } = require('../utils/jobApplication.constants');
+const {
+    SLOT_DURATIONS,
+    SLOT_GRANULARITY_MINUTES,
+    REASON_TEXT_MAX_LENGTH,
+    CLIENT_VISIBLE_INTERVIEW_CONFIG_KEYS
+} = require('../utils/jobApplication.constants');
 
 function actorIdOf(requester) {
     return requester.id || requester._id;
@@ -20,6 +25,31 @@ function toDate(v) {
 // module's _loadOwnedApplication / _loadOwnApplicantApplication rather than
 // duplicated here.
 class InterviewSchedulingService {
+    // GET /api/interview/config — the interview rules a client screen needs to
+    // show correct limits, read from the same live SystemConfig values the
+    // server enforces (so the two can't drift). `config` is the admin-editable
+    // allowlist with the "interview." prefix dropped (the route is already
+    // namespaced); `constants` are the code-level rules that are never
+    // admin-editable but the client needs all the same. No history, no
+    // createdBy, no scheduled changes — only what is in force right now.
+    async getClientConfig() {
+        const effective = await systemConfigService.getManyEffective(CLIENT_VISIBLE_INTERVIEW_CONFIG_KEYS);
+
+        const config = {};
+        for (const key of CLIENT_VISIBLE_INTERVIEW_CONFIG_KEYS) {
+            config[key.slice('interview.'.length)] = effective[key];
+        }
+
+        return {
+            config,
+            constants: {
+                slotDurations: SLOT_DURATIONS,
+                slotGranularityMinutes: SLOT_GRANULARITY_MINUTES,
+                reasonTextMaxLength: REASON_TEXT_MAX_LENGTH
+            }
+        };
+    }
+
     // shortlisted -> slots_offered
     async offerSlots(applicationId, requester, { slots, durationMinutes }) {
         const application = await jobApplicationService._loadOwnedApplication(applicationId, requester);

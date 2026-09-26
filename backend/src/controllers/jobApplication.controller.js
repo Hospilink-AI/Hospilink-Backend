@@ -99,6 +99,16 @@ exports.withdraw = asyncHandler(async (req, res) => {
 
 // ─── Interview scheduling ───────────────────────────────────────────────────
 
+// GET /api/interview/config — staff and hospital, read-only. `no-cache` (not
+// `no-store`) so the client revalidates on every load: Express's automatic
+// ETag turns an unchanged answer into a bodyless 304, while an admin's change
+// shows up on the very next request instead of after a max-age.
+exports.getInterviewConfig = asyncHandler(async (req, res) => {
+    const { config, constants } = await interviewSchedulingService.getClientConfig();
+    res.set('Cache-Control', 'private, no-cache');
+    res.status(200).json({ success: true, config, constants });
+});
+
 // POST /api/applications/:applicationId/interview/offer-slots — hospital.
 exports.offerSlots = asyncHandler(async (req, res) => {
     const { slots, durationMinutes } = req.body;
