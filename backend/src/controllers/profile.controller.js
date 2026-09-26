@@ -63,6 +63,35 @@ class ProfileController {
     });
 
 
+    // POST /api/profile/resume-stage — brand-new candidate, no profile yet,
+    // starting the resume-first "apply for a job" flow (Scenario 5). Parses
+    // the resume and stages the result in Redis for 15 minutes so the
+    // frontend can pre-fill the profile form for review — does NOT create a
+    // MedicalStaff profile. See ProfileService.createMedicalStaffProfile for
+    // the confirm step that consumes this staged data.
+    stageResume = asyncHandler(async (req, res) => {
+        const result = await ProfileService.stageResumeForProfile(req.user, req.file);
+
+        res.status(200).json({
+            success: true,
+            ...result,
+            message: 'Resume parsed. Review the pre-filled form and submit to complete your profile.'
+        });
+    });
+
+
+    // GET /api/profile/resume-stage — re-fetch the currently staged resume
+    // data, e.g. if the profile form page is reloaded before it's submitted.
+    getStagedResume = asyncHandler(async (req, res) => {
+        const staged = await cacheService.getParsedResumeStage(req.user.id);
+
+        res.status(200).json({
+            success: true,
+            staged: staged || null
+        });
+    });
+
+
     // Create hospital profile
     createHospitalProfile = asyncHandler(async (req, res) => {
         const userId = req.user.id;

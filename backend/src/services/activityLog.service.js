@@ -248,7 +248,7 @@ class ActivityLogService {
             })
             .sort({ timestamp: -1 })
             .limit(limit)
-            .select('timestamp action actor.name actor.role status details location')
+            .select('timestamp action actor.name actor.role target.type target.name status details location')
             .lean();
             
             return {

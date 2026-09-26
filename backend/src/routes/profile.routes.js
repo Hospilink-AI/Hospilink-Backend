@@ -12,10 +12,12 @@ const {
     validateNearbyStaff,
     validateDashboardLocationPermission,
     validateSendPhoneOTP,
-    validateVerifyPhoneOTP
+    validateVerifyPhoneOTP,
+    validateResumeStageUpload
 } = require('../middleware/validation.middleware');
 const { staffAvailabilityRateLimit, phoneOtpRateLimit, verifyPhoneOtpRateLimit } = require('../middleware/rateLimit.middleware');
 const upload = require('../middleware/upload.middleware');
+const { validateMagicBytes } = require('../middleware/upload.middleware');
 const { requireHospitalVerification, requireStaffVerificationandisAvailable, requireVerifiedStaffOnly} = require('../middleware/accountsVerification.middleware');
 
 // Apply protection to all profile routes
@@ -51,6 +53,26 @@ router.post('/medical-staff',
     validateMedicalStaffProfile,
     profileController.createMedicalStaffProfile
 );
+
+
+
+// Resume-first onboarding (brand-new candidates, no profile yet — Scenario 5):
+// stage a parsed resume in Redis for 15 minutes so the profile-creation form
+// above can be pre-filled and reviewed before anything is submitted.
+router.post('/resume-stage',
+    authorize('staff'),
+    upload.single('resume'),
+    validateMagicBytes,
+    validateResumeStageUpload,
+    profileController.stageResume
+);
+
+router.get('/resume-stage',
+    authorize('staff'),
+    profileController.getStagedResume
+);
+
+
 
 
 // Create hospital profile (only for hospital role)

@@ -3,29 +3,30 @@ const { fromBuffer } = require("file-type");
 
 const storage = multer.memoryStorage();
 
-// ── Allowed MIME types (client-declared) ─────────────────────────────────────
-// This is a fast first-pass check on the Content-Type header sent by the client.
-// It rejects obviously wrong types before the buffer is even read.
+
+const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+
 const ALLOWED_MIME_TYPES = new Set([
     "image/jpeg",
     "image/jpg",
     "image/png",
-    "application/pdf"
+    "application/pdf",
+    DOCX_MIME_TYPE
 ]);
 
-// ── Magic byte signatures ─────────────────────────────────────────────────────
-// Maps the MIME types we accept to what file-type will detect from actual bytes.
-// 'image/jpg' is an alias for 'image/jpeg' — file-type always returns 'image/jpeg'.
+
 const ALLOWED_DETECTED_TYPES = new Set([
     "image/jpeg",
     "image/png",
-    "application/pdf"
+    "application/pdf",
+    DOCX_MIME_TYPE
 ]);
 
 const fileFilter = (req, file, cb) => {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
         return cb(
-            new Error("Only JPEG, PNG, or PDF files are allowed"),
+            new Error("Only JPEG, PNG, PDF, or DOCX files are allowed"),
             false
         );
     }
@@ -38,17 +39,8 @@ const upload = multer({
     fileFilter
 });
 
-/**
- * Magic-byte validation middleware.
- *
- * Must run AFTER multer (which populates req.files / req.file) because
- * the buffer is only available once multer has finished processing.
- *
- * Reads the first bytes of each uploaded file and checks the actual
- * file signature against the allowed types. Rejects files where the
- * content doesn't match the claimed MIME type — catches renamed files
- * (e.g. malicious.html uploaded as photo.jpg).
- */
+
+
 const validateMagicBytes = async (req, res, next) => {
     try {
         // Collect all uploaded files — multer puts them in req.files (array/object) or req.file
@@ -114,5 +106,28 @@ const validateMagicBytes = async (req, res, next) => {
     }
 };
 
+// Ticket evidence (spec §08.03): images and PDF only, 5 files, 10 MB each —
+// the 10 MB figure lives in SystemConfig (ticket.evidenceMaxSizeMB) and is
+// admin-adjustable, so this static limit is deliberately a generous ceiling
+// above it, not the real enforced number. The real, live-configurable limit
+// is checked per-file in ticket.service.js#addEvidence — multer's own limit
+// can't be dynamic per-request.
+const TICKET_EVIDENCE_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "application/pdf"]);
+
+const ticketEvidenceFileFilter = (req, file, cb) => {
+    if (!TICKET_EVIDENCE_MIME_TYPES.has(file.mimetype)) {
+        return cb(new Error("Only JPEG, PNG, or PDF files are allowed"), false);
+    }
+    cb(null, true);
+};
+
+const ticketEvidenceUpload = multer({
+    storage,
+    limits: { fileSize: 15 * 1024 * 1024, files: 5 },
+    fileFilter: ticketEvidenceFileFilter
+});
+
 module.exports = upload;
 module.exports.validateMagicBytes = validateMagicBytes;
+module.exports.DOCX_MIME_TYPE = DOCX_MIME_TYPE;
+module.exports.ticketEvidenceUpload = ticketEvidenceUpload;
