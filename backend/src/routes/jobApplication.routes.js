@@ -90,6 +90,16 @@ router.patch(
 
 // ─── Interview scheduling ───────────────────────────────────────────────────
 
+// Read-only view of the admin-editable interview rules (slot counts, window,
+// reschedule cap, ...) so the app shows what the server actually enforces.
+// Deliberately no requireHospitalVerification — these are non-sensitive rules
+// an unverified hospital's screens may still need to render.
+router.get(
+    '/interview/config',
+    authorize('staff', 'hospital'),
+    jobApplicationController.getInterviewConfig
+);
+
 router.post(
     '/applications/:applicationId/interview/offer-slots',
     authorize('hospital'),

@@ -1,5 +1,6 @@
 const SystemConfig = require('../models/SystemConfig');
 const cacheService = require('./cache.service');
+const { validateValue, CROSS_KEY_RULES } = require('../utils/systemConfig.rules');
 
 // Hardcoded fallbacks — used only when a key has never been seeded into
 // SystemConfig (e.g. a fresh environment before `scripts/seedInterviewConfig.js`
@@ -89,6 +90,11 @@ function cacheKeyFor(key) {
 }
 
 class SystemConfigService {
+    async getEffective(key, atDate = null) {
+        const values = await this.getManyEffective([key], atDate);
+        return values[key];
+    }
+
     // atDate omitted (or null) → "current effective value", which is the only
     // form that's cached. An explicit atDate is a historical lookup (used
     // when recomputing something against the setting that was in force on a
@@ -96,29 +102,50 @@ class SystemConfigService {
     // enough that caching them isn't worth the key-space complexity, and
     // caching "now" only would silently return a stale value for a real
     // historical query.
-    async getEffective(key, atDate = null) {
-        const isCurrent = !atDate;
-
-        if (isCurrent) {
-            const cached = await cacheService.get(cacheKeyFor(key));
-            if (cached !== null) return cached.value;
-        }
-
-        const query = isCurrent ? { key } : { key, effectiveFrom: { $lte: atDate } };
-        const row = await SystemConfig.findOne(query).sort({ effectiveFrom: -1 }).lean();
-        const value = row ? row.value : DEFAULTS[key];
-
-        if (isCurrent) {
-            await cacheService.set(cacheKeyFor(key), { value }, CACHE_TTL_SECONDS);
-        }
-
-        return value;
-    }
-
+    //
+    // Either way a row only counts once its effectiveFrom has arrived — "now"
+    // for a current lookup, atDate for a historical one — so a change an admin
+    // scheduled for next month stays dormant until then. This is the single
+    // place that rule is applied; getEffective delegates here.
+    //
+    // Cache misses are resolved together in one aggregation (newest eligible
+    // row per key, served by the { key, effectiveFrom } index) rather than one
+    // query per key, so a cold cache costs one round trip however many keys
+    // are asked for. A scheduled change that becomes due can lag by up to
+    // CACHE_TTL_SECONDS for a key whose value is already cached.
     async getManyEffective(keys, atDate = null) {
-        const values = await Promise.all(keys.map(key => this.getEffective(key, atDate)));
-        return keys.reduce((acc, key, i) => {
-            acc[key] = values[i];
+        const isCurrent = !atDate;
+        const resolved = {};
+        let misses = keys;
+
+        if (isCurrent) {
+            const cached = await Promise.all(keys.map(key => cacheService.get(cacheKeyFor(key))));
+            misses = keys.filter((key, i) => {
+                if (cached[i] === null) return true;
+                resolved[key] = cached[i].value;
+                return false;
+            });
+        }
+
+        if (misses.length > 0) {
+            const rows = await SystemConfig.aggregate([
+                { $match: { key: { $in: misses }, effectiveFrom: { $lte: atDate || new Date() } } },
+                { $sort: { key: 1, effectiveFrom: -1 } },
+                { $group: { _id: '$key', value: { $first: '$value' } } }
+            ]);
+            const found = new Map(rows.map(row => [row._id, row.value]));
+
+            await Promise.all(misses.map(async key => {
+                const value = found.has(key) ? found.get(key) : DEFAULTS[key];
+                resolved[key] = value;
+                if (isCurrent) {
+                    await cacheService.set(cacheKeyFor(key), { value }, CACHE_TTL_SECONDS);
+                }
+            }));
+        }
+
+        return keys.reduce((acc, key) => {
+            acc[key] = resolved[key];
             return acc;
         }, {});
     }
@@ -142,6 +169,25 @@ class SystemConfigService {
 
     isKnownKey(key) {
         return Object.prototype.hasOwnProperty.call(DEFAULTS, key);
+    }
+
+    // Admin-edit guardrail — returns an error message, or null when `value` is
+    // acceptable for `key`. Deliberately NOT called from setValue: internal
+    // writers (e.g. ticketCategoryConfig, whose keys and object values aren't
+    // in DEFAULTS) go through setValue directly and have their own shape.
+    async validateUpdate(key, value) {
+        const error = validateValue(key, value, DEFAULTS[key]);
+        if (error) return error;
+
+        for (const rule of CROSS_KEY_RULES) {
+            if (!rule.keys.includes(key)) continue;
+
+            const siblings = await this.getManyEffective(rule.keys.filter(k => k !== key));
+            const proposed = { ...siblings, [key]: value };
+            if (!rule.check(...rule.keys.map(k => proposed[k]))) return rule.message;
+        }
+
+        return null;
     }
 
     get defaultKeys() {
