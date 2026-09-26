@@ -189,7 +189,7 @@ router.patch(
 
 // Disputing a no-show now goes through the ticket engine —
 // POST /api/tickets with category 'jobs.interview_no_show' — instead of
-// this bespoke route. See ticket.service.js#_openNoShowDispute.
+// this bespoke route. See ticket.service.js#_assertNoShowTicketAllowed.
 
 router.patch(
     '/applications/:applicationId/offer/respond',
