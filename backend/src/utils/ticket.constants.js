@@ -11,7 +11,7 @@ const DOMAIN_CODES = {
     duty: 'DTY',
     payment: 'PAY',
     safety: 'SFT',
-    jobs: 'JOB',
+    jobs: 'VAC',
     account: 'ACC',
     platform: 'PLT',
     data: 'DAT'

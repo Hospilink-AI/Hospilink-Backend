@@ -2420,6 +2420,10 @@ class AdminService {
         if (!SystemConfigService.isKnownKey(key)) {
             throw new UnprocessableEntityError(`Unknown config key: ${key}`);
         }
+        const invalid = await SystemConfigService.validateUpdate(key, value);
+        if (invalid) {
+            throw new UnprocessableEntityError(invalid);
+        }
         return SystemConfigService.setValue(key, value, {
             effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : undefined,
             createdBy: adminUserId

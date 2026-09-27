@@ -1,4 +1,5 @@
 const Ticket = require('../models/Ticket');
+const TicketConversation = require('../models/TicketConversation');
 const Duty = require('../models/Duty');
 const JobApplication = require('../models/JobApplication');
 const JobVacancy = require('../models/JobVacancy');
@@ -52,7 +53,7 @@ class TicketService {
             }
             if (subjectType === 'APPLICATION' || subjectType === 'INTERVIEW') {
                 const application = await JobApplication.findById(subjectId)
-                    .select('vacancy hospitalId staff status interview.confirmedSlot interview.noShow')
+                    .select('vacancy hospitalId staff user status interview.confirmedSlot interview.noShow')
                     .lean();
                 return application ? { application } : {};
             }
@@ -264,36 +265,27 @@ class TicketService {
         const { resolutionClass } = await ticketCategoryConfigService.getByCategory(category);
         const isAdjudicated = resolutionClass === 'ADJUDICATED';
 
-        // The caller (chatbot, or a future client that already has it) may
-        // already supply raisedAgainst — trust it and skip re-deriving.
-        // Otherwise, for ADJUDICATED categories with a subject that has a
-        // natural counterparty (DUTY/PAYMENT/APPLICATION/INTERVIEW/VACANCY),
-        // resolve it here so the plain form works the same way the chatbot
-        // already does for duties. A category with no such subject (e.g.
-        // account.rating_challenge raised with no linked duty) still can't
-        // be resolved automatically — fails clearly rather than silently
-        // saving an ADJUDICATED ticket the model itself would reject.
-        if (isAdjudicated && !raisedAgainst) {
-            raisedAgainst = await this._resolveCounterparty(subjectType, linkedContext, userRole);
-            if (!raisedAgainst) {
-                throw new UnprocessableEntityError(
-                    "We couldn't automatically determine who this complaint is against. Please contact support directly for this type of issue."
-                );
+        // The client only knows the hospital's profile id, never its User id,
+        // so for interviews the other party is always derived here from the
+        // application — whatever raisedAgainst the client sent is ignored.
+        // Both steps below only read: nothing is written until the ticket
+        // has saved, so an ineligible or failed request leaves no trace.
+        let shouldOpenNoShowDispute = false;
+        if (subjectType === 'INTERVIEW' && isAdjudicated) {
+            const application = linkedContext.application;
+            raisedAgainst = await this._resolveInterviewCounterparty(application, user);
+            if (category === 'jobs.interview_no_show') {
+                shouldOpenNoShowDispute = await this._assertNoShowTicketAllowed(application, user);
             }
+        }
+        if (isAdjudicated && !raisedAgainst) {
+            raisedAgainst = await this._resolveSubjectCounterparty(subjectType, subjectId, linkedContext, user);
         }
 
         const priority = await this._computePriority({
             domain, category, subjectType, resolutionClass, linkedContext, raisedBy: { user: userId }
         });
         const { slaAcknowledgeBy, slaFirstReplyBy, slaDecideBy, slaCeilingBy } = this._computeSla(domain, priority);
-
-        // Migration from the old bespoke no-show dispute flow (see
-        // _openNoShowDispute) — gates ticket creation on the same
-        // eligibility checks the old disputeNoShow() enforced, so an
-        // ineligible dispute never produces a ticket.
-        if (category === 'jobs.interview_no_show' && subjectType === 'INTERVIEW' && subjectId) {
-            await this._openNoShowDispute(subjectId, userId, text);
-        }
 
         const ticketData = {
             category,
@@ -302,7 +294,7 @@ class TicketService {
             raisedBy: { user: userId, role: userRole },
             raisedAgainst: raisedAgainst ? { user: raisedAgainst.userId, role: raisedAgainst.role } : undefined,
             source,
-            botCategory: botCategory || null,
+            botCategory: botCategory || undefined,
             botConfidence: botConfidence ?? null,
             priority,
             slaAcknowledgeBy,
@@ -331,6 +323,11 @@ class TicketService {
                 throw new ConflictError('You already have an open ticket for this — check "My Tickets" instead of raising a new one.');
             }
             throw err;
+        }
+
+        if (shouldOpenNoShowDispute) {
+            await this._markNoShowDisputed(subjectId, text)
+                .catch(err => console.error('markNoShowDisputed failed:', err));
         }
 
         notificationEmitter.emitTicketCreated(ticket).catch(err => console.error('emitTicketCreated failed:', err));
@@ -396,39 +393,39 @@ class TicketService {
         };
     }
 
-    // Admin-only enrichment — raiser/respondent must keep seeing bare ids
-    // (they never learn a real identity beyond what the ticket itself
-    // already tells them), same restraint this whole module applies
-    // everywhere else. One batched User lookup, not one query per field.
-    async _enrichForAdmin(ticket) {
-        const userIds = [
-            ticket.raisedBy?.user,
-            ticket.raisedAgainst?.user,
-            ticket.assignedTo,
-            ticket.decidedBy,
-            ticket.approvedBy
-        ].filter(Boolean).map(id => id.toString());
+    // Admin case file only: names and profile ids for both parties, and the
+    // handling admins as { _id, name }. Parties never get these.
+    async _withPeopleForAdmin(ticket) {
+        const ids = [ticket.raisedBy?.user, ticket.raisedAgainst?.user, ticket.assignedTo, ticket.decidedBy].filter(Boolean);
+        const users = await User.find({ _id: { $in: ids } }).select('name').lean();
+        const userById = new Map(users.map(u => [u._id.toString(), u]));
 
-        if (userIds.length === 0) return ticket;
-
-        const users = await User.find({ _id: { $in: userIds } }).select('name role').lean();
-        const byId = new Map(users.map(u => [u._id.toString(), u]));
-
-        const withName = (id) => {
-            if (!id) return null;
-            const u = byId.get(id.toString());
-            return { _id: id, name: u?.name || null, role: u?.role || null };
+        const withProfile = async (party) => {
+            if (!party || !party.user) return party;
+            let profile = null;
+            if (party.role === 'hospital') {
+                profile = await Hospital.findOne({ user: party.user }).select('hospitalLegalName').lean();
+            } else if (party.role === 'staff') {
+                profile = await MedicalStaff.findOne({ user: party.user }).select('fullName').lean();
+            }
+            return {
+                ...party,
+                name: profile?.hospitalLegalName || profile?.fullName || userById.get(party.user.toString())?.name || null,
+                profileId: profile ? profile._id : null
+            };
+        };
+        const adminRef = (id) => {
+            const admin = id && userById.get(id.toString());
+            return admin ? { _id: admin._id, name: admin.name } : id;
         };
 
+        const [raisedBy, raisedAgainst] = await Promise.all([withProfile(ticket.raisedBy), withProfile(ticket.raisedAgainst)]);
         return {
             ...ticket,
-            raisedBy: { ...ticket.raisedBy, name: byId.get(ticket.raisedBy.user.toString())?.name || null },
-            raisedAgainst: ticket.raisedAgainst
-                ? { ...ticket.raisedAgainst, name: byId.get(ticket.raisedAgainst.user.toString())?.name || null }
-                : ticket.raisedAgainst,
-            assignedTo: withName(ticket.assignedTo),
-            decidedBy: withName(ticket.decidedBy),
-            approvedBy: withName(ticket.approvedBy)
+            raisedBy,
+            raisedAgainst,
+            assignedTo: adminRef(ticket.assignedTo),
+            decidedBy: adminRef(ticket.decidedBy)
         };
     }
 
@@ -453,7 +450,7 @@ class TicketService {
         const relation = this._relationToTicket(ticket, user);
         if (relation === 'raiser') return this._shapeForRaiser(ticket);
         if (relation === 'respondent') return this._shapeForRespondent(ticket);
-        if (relation === 'admin') return this._enrichForAdmin(ticket);
+        if (relation === 'admin') return this._withPeopleForAdmin(ticket);
 
         throw new ForbiddenError("You don't have permission to view this ticket.");
     }
@@ -465,6 +462,7 @@ class TicketService {
     // for a file that exists but isn't yours to see, not Forbidden, so a
     // raiser can't distinguish "no such evidence" from "that's the
     // respondent's" by the error alone.
+    // Short-lived link to one evidence file. Same visibility as getById.
     async getEvidenceUrl(ticketId, evidenceId, user) {
         const ticket = await Ticket.findById(ticketId).lean();
         if (!ticket) {
@@ -472,22 +470,18 @@ class TicketService {
         }
 
         const relation = this._relationToTicket(ticket, user);
-        if (!relation) {
-            throw new ForbiddenError("You don't have permission to view this ticket.");
-        }
+        let evidence;
+        if (relation === 'raiser') evidence = this._shapeForRaiser(ticket).evidence;
+        else if (relation === 'respondent') evidence = this._shapeForRespondent(ticket).evidence;
+        else if (relation === 'admin') evidence = ticket.evidence || [];
+        else throw new ForbiddenError("You don't have permission to view this ticket.");
 
-        const item = (ticket.evidence || []).find(e => e._id.toString() === evidenceId);
-        const visible = item && (
-            relation === 'admin' ||
-            (relation === 'raiser' && item.suppliedBy !== 'respondent') ||
-            (relation === 'respondent' && item.suppliedBy !== 'raiser')
-        );
-        if (!visible) {
+        const item = evidence.find(e => e._id.toString() === evidenceId.toString());
+        if (!item) {
             throw new NotFoundError('Evidence not found');
         }
 
-        const url = await s3Service.generatePreSignedURL(item.s3Key);
-        return { url, originalFileName: item.originalFileName, mimeType: item.mimeType };
+        return s3Service.generatePreSignedURL(item.s3Key);
     }
 
     // spec §08.03: images and PDF, 5 files, 10 MB each, from either party.
@@ -635,6 +629,49 @@ class TicketService {
         ]);
 
         return { tickets, pagination: getPaginationMeta(total, page, limit) };
+    }
+
+    // Admin case file: the bot chat the ticket came from, null if none.
+    async getConversationForAdmin(ticketId) {
+        const ticket = await Ticket.findById(ticketId).select('_id').lean();
+        if (!ticket) throw new NotFoundError('Ticket not found');
+
+        const conversation = await TicketConversation.findOne({ ticket: ticket._id })
+            .select('language botCategory botConfidence messages')
+            .lean();
+        if (!conversation) return null;
+
+        return {
+            language: conversation.language,
+            botCategory: conversation.botCategory || null,
+            botConfidence: conversation.botConfidence ?? null,
+            messages: (conversation.messages || []).map(m => ({
+                sender: m.sender,
+                text: m.text || m.selectedButton || null,
+                at: m.at
+            }))
+        };
+    }
+
+    // spec US-D3.2: up to 20 other tickets between the same two people, either way round.
+    async getCounterpartyHistory(ticketId) {
+        const ticket = await Ticket.findById(ticketId).select('raisedBy raisedAgainst').lean();
+        if (!ticket) throw new NotFoundError('Ticket not found');
+        if (!ticket.raisedAgainst?.user) return [];
+
+        const a = ticket.raisedBy.user;
+        const b = ticket.raisedAgainst.user;
+        return Ticket.find({
+            _id: { $ne: ticket._id },
+            $or: [
+                { 'raisedBy.user': a, 'raisedAgainst.user': b },
+                { 'raisedBy.user': b, 'raisedAgainst.user': a }
+            ]
+        })
+            .select('_id ticketId category status resolutionOutcome createdAt')
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .lean();
     }
 
     // Conditional write — no claim-then-check race window, same pattern as
@@ -1067,35 +1104,114 @@ class TicketService {
     // same mapping here, just triggered by a ticket decision instead of a
     // dedicated admin endpoint. noShowPenalty.service.js's live trailing-
     // window computation already excludes 'voided' and only 'open' disputes
-    // are held — unchanged by this migration.
+    // are held — unchanged by this migration. Only a candidate-marked no-show
+    // (noShow.by === 'candidate') carries a dispute status: a candidate's
+    // report that the hospital didn't join is a plain complaint, so the
+    // filter leaves it untouched.
     async _syncNoShowDisputeOnDecision(ticket, adminId) {
         if (ticket.category !== 'jobs.interview_no_show' || ticket.subjectType !== 'INTERVIEW' || !ticket.subjectId) {
             return;
         }
         const disputeStatus = ticket.status === 'REJECTED' ? 'upheld' : 'voided';
-        await JobApplication.findByIdAndUpdate(ticket.subjectId, {
-            'interview.noShow.disputeStatus': disputeStatus,
-            'interview.noShow.resolvedAt': new Date(),
-            'interview.noShow.resolvedBy': adminId
-        });
+        await JobApplication.updateOne(
+            { _id: ticket.subjectId, 'interview.noShow.by': 'candidate' },
+            {
+                $set: {
+                    'interview.noShow.disputeStatus': disputeStatus,
+                    'interview.noShow.resolvedAt': new Date(),
+                    'interview.noShow.resolvedBy': adminId
+                }
+            }
+        );
     }
 
-    // Migration note: replaces the old
-    // interviewScheduling.service.js#disputeNoShow's precondition checks and
-    // 'open' transition — called from createTicket() before the ticket
-    // itself is saved, so an ineligible dispute never produces a ticket.
-    async _openNoShowDispute(applicationId, userId, reason) {
-        const application = await JobApplication.findById(applicationId);
+    // Who an INTERVIEW-subject ticket is against, derived from the
+    // application rather than sent by the client (same idea as
+    // chatbotIntake's _resolveDutyCounterparty for duties). application
+    // carries the hospital's profile id (hospitalId) but tickets need its
+    // User id, so one Hospital lookup by _id serves both directions and
+    // doubles as the check that the caller is actually a party to the
+    // application — createTicket never verified that before.
+    async _resolveInterviewCounterparty(application, user) {
         if (!application) {
             throw new NotFoundError('Application not found');
         }
+        const userId = (user._id || user.id).toString();
+
+        const hospital = await Hospital.findById(application.hospitalId).select('user').lean();
+        if (!hospital) {
+            throw new UnprocessableEntityError('The hospital for this interview could not be found.');
+        }
+
+        if (user.role === 'staff' && application.user?.toString() === userId) {
+            return { userId: hospital.user, role: 'hospital' };
+        }
+        if (user.role === 'hospital' && hospital.user.toString() === userId) {
+            return { userId: application.user, role: 'staff' };
+        }
+        throw new ForbiddenError('You can only raise this for an interview you are part of.');
+    }
+
+    // Other party for DUTY/PAYMENT/APPLICATION/VACANCY tickets when the client
+    // didn't send one. Left unset if the caller isn't a party to the subject.
+    async _resolveSubjectCounterparty(subjectType, subjectId, linkedContext, user) {
+        const userId = user._id || user.id;
+
+        if (subjectType === 'APPLICATION') {
+            return linkedContext.application
+                ? this._resolveInterviewCounterparty(linkedContext.application, user)
+                : undefined;
+        }
+
+        if (subjectType === 'DUTY' || subjectType === 'PAYMENT') {
+            const duty = linkedContext.duty || await Duty.findById(subjectId).select('hospital assignedTo').lean();
+            if (!duty) return undefined;
+
+            const profile = user.role === 'staff'
+                ? await MedicalStaff.findOne({ user: userId }).select('_id').lean()
+                : await Hospital.findOne({ user: userId }).select('_id').lean();
+            const partyId = user.role === 'staff' ? duty.assignedTo : duty.hospital;
+            if (!profile || !partyId || profile._id.toString() !== partyId.toString()) return undefined;
+
+            const chatbotIntakeService = require('./chatbotIntake.service');
+            return (await chatbotIntakeService._resolveDutyCounterparty(duty, user.role)) || undefined;
+        }
+
+        if (subjectType === 'VACANCY' && user.role === 'staff') {
+            const vacancy = await JobVacancy.findById(subjectId).select('hospitalId').lean();
+            const hospital = vacancy && await Hospital.findById(vacancy.hospitalId).select('user').lean();
+            return hospital ? { userId: hospital.user, role: 'hospital' } : undefined;
+        }
+
+        return undefined;
+    }
+
+    // Migration note: replaces the old
+    // interviewScheduling.service.js#disputeNoShow's precondition checks.
+    // Read-only, and run before the ticket is saved, so an ineligible ticket
+    // is never created. The old flow only allowed a candidate disputing a
+    // no-show the hospital marked; this also lets the candidate complain
+    // that the hospital didn't join (noShow.by === 'hospital', already
+    // grace-period-checked by reportNoShow), and lets the hospital answer
+    // such a report. Returns true only for the case that opens a dispute —
+    // see _markNoShowDisputed.
+    async _assertNoShowTicketAllowed(application, user) {
         const noShow = application.interview?.noShow;
-        if (!noShow?.markedAt || noShow.by !== 'candidate') {
-            throw new UnprocessableEntityError('There is no no-show marked against you on this application.');
+        if (!noShow?.markedAt) {
+            throw new UnprocessableEntityError('No interview no-show has been recorded on this application.');
         }
-        if (!application.user || application.user.toString() !== userId.toString()) {
-            throw new ForbiddenError('You can only dispute a no-show marked against your own application.');
+
+        // A hospital already acts on its own mark directly (markNoShow), so
+        // the only thing it can raise is a report made against it.
+        if (user.role === 'hospital') {
+            if (noShow.by !== 'hospital') {
+                throw new UnprocessableEntityError('No interview no-show has been reported against your hospital on this application.');
+            }
+            return false;
         }
+
+        if (noShow.by !== 'candidate') return false;
+
         if (noShow.disputeStatus !== 'none') {
             throw new ConflictError(`This no-show has already been ${noShow.disputeStatus === 'open' ? 'disputed' : noShow.disputeStatus}.`);
         }
@@ -1105,11 +1221,26 @@ class TicketService {
         if (new Date() > deadline) {
             throw new UnprocessableEntityError(`The ${windowDays}-day dispute window for this no-show has passed.`);
         }
+        return true;
+    }
 
-        application.interview.noShow.disputeStatus = 'open';
-        application.interview.noShow.disputeReason = reason;
-        application.interview.noShow.disputedAt = new Date();
-        await application.save();
+    // The 'open' transition, run only after the ticket has saved. A single
+    // conditional update rather than load-modify-save, so it can't overwrite
+    // a concurrent change.
+    async _markNoShowDisputed(applicationId, reason) {
+        const result = await JobApplication.updateOne(
+            { _id: applicationId, 'interview.noShow.disputeStatus': 'none' },
+            {
+                $set: {
+                    'interview.noShow.disputeStatus': 'open',
+                    'interview.noShow.disputeReason': reason,
+                    'interview.noShow.disputedAt': new Date()
+                }
+            }
+        );
+        if (result.matchedCount === 0) {
+            console.error(`markNoShowDisputed: application ${applicationId} was no longer in a disputable state`);
+        }
     }
 
     // ─── Appeals ─────────────────────────────────────────────────────────
@@ -1354,7 +1485,7 @@ class TicketService {
             throw new ForbiddenError('The approver must be a different admin from whoever proposed the decision.');
         }
 
-        ticket.resolutionOutcome = null;
+        ticket.resolutionOutcome = undefined;
         ticket.resolutionActions = [];
         ticket.actionTakenStatement = null;
         ticket.decidedBy = null;

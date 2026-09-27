@@ -28,6 +28,18 @@ exports.listTriage = asyncHandler(async (req, res) => {
     });
 });
 
+// GET /api/admin/tickets/:id/conversation
+exports.getConversation = asyncHandler(async (req, res) => {
+    const conversation = await ticketService.getConversationForAdmin(req.params.id);
+    res.status(200).json({ success: true, conversation });
+});
+
+// GET /api/admin/tickets/:id/history
+exports.getHistory = asyncHandler(async (req, res) => {
+    const tickets = await ticketService.getCounterpartyHistory(req.params.id);
+    res.status(200).json({ success: true, tickets });
+});
+
 // PATCH /api/admin/tickets/:id/claim
 exports.claim = asyncHandler(async (req, res) => {
     const ticket = await ticketService.claim(req.params.id, req.user);

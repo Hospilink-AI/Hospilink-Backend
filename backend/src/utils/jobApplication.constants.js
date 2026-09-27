@@ -63,6 +63,28 @@ const SLOT_DURATIONS = [15, 30, 45, 60];
 const SLOT_GRANULARITY_MINUTES = 15;
 const REASON_TEXT_MAX_LENGTH = 300;
 
+// The SystemConfig keys staff and hospitals may read via
+// GET /api/interview/config — an explicit allowlist, never a prefix match.
+// Everything else in SystemConfig stays admin-only: the no-show penalty
+// maths, suspension triggers and late-change ops-flag thresholds (knowing
+// them lets someone game them), and all ticket.* / rating.* / payments.*
+// settings. Add a key here only if a client screen genuinely needs it.
+const CLIENT_VISIBLE_INTERVIEW_CONFIG_KEYS = [
+    'interview.slotDurationDefault',
+    'interview.slotsPerOfferMin',
+    'interview.slotsPerOfferMax',
+    'interview.schedulingWindowMinHours',
+    'interview.schedulingWindowMaxDays',
+    'interview.offerExpiryDays',
+    'interview.rescheduleCap',
+    'interview.joinWindowBeforeMin',
+    'interview.joinWindowAfterMin',
+    'interview.noShowGraceMin',
+    'interview.lateChangeThresholdHours',
+    'interview.outcomeRecordingWindowDays',
+    'interview.disputeWindowDays'
+];
+
 // Stable machine-readable `code` values sent on POST /vacancies/:id/apply's
 // 422s. Same strings as the matching Notification types so the app can use
 // one vocabulary for the HTTP error and the push notification.
@@ -83,5 +105,6 @@ module.exports = {
     WITHDRAW_REASONS,
     SLOT_DURATIONS,
     SLOT_GRANULARITY_MINUTES,
-    REASON_TEXT_MAX_LENGTH
+    REASON_TEXT_MAX_LENGTH,
+    CLIENT_VISIBLE_INTERVIEW_CONFIG_KEYS
 };

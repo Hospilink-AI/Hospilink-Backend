@@ -142,7 +142,8 @@ class RatingAlgorithmService {
             const ratingShown = Number(Math.max(floor, Math.min(5, dampedAverage - penaltyTotal)).toFixed(2));
 
             return {
-                ratingShown,
+                // no reviews yet = unrated
+                ratingShown: reviewCount === 0 ? null : ratingShown,
                 breakdown: {
                     rawAverage, reviewCount, platformAverage, dampedAverage,
                     penaltyTotal, penaltyCapped, qualifyingIncidents

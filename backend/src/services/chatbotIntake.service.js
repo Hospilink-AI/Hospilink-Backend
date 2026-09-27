@@ -234,7 +234,7 @@ class ChatbotIntakeService {
     async _handleConfirmation(conversation, user, selectedButton) {
         const language = conversation.language;
         if (selectedButton !== t('confirmYes', language)) {
-            conversation.botCategory = null;
+            conversation.botCategory = undefined;
             conversation.botConfidence = null;
             return { sender: 'bot', text: t('confirmationDeclined', language), buttons: [], at: new Date() };
         }

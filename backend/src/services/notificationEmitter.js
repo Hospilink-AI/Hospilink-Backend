@@ -1781,7 +1781,7 @@ class NotificationEmitter {
             const payload = {
                 type: 'PROFILE_REQUIRED_FOR_APPLICATION',
                 vacancy: { id: vacancy._id, title: vacancy.title },
-                message: 'Complete your profile before applying for a permanent job. You can apply using just your resume.',
+                message: 'Complete your profile before applying for a vacancy. You can apply using just your resume.',
                 timestamp: new Date().toISOString()
             };
             const { unreadCount } = await notificationService.createNotificationWithCount(
@@ -1798,7 +1798,7 @@ class NotificationEmitter {
             const payload = {
                 type: 'RESUME_REQUIRED_FOR_APPLICATION',
                 vacancy: { id: vacancy._id, title: vacancy.title },
-                message: 'Upload your resume to apply for permanent job openings.',
+                message: 'Upload your resume to apply for vacancies.',
                 timestamp: new Date().toISOString()
             };
             const { unreadCount } = await notificationService.createNotificationWithCount(
@@ -2090,7 +2090,7 @@ class NotificationEmitter {
             const payload = {
                 type: 'APPLICATION_HIRED',
                 application: { id: application._id },
-                message: `A candidate accepted your job offer for ${title}.`,
+                message: `A candidate accepted your offer for ${title}.`,
                 timestamp: new Date().toISOString()
             };
             const { unreadCount } = await notificationService.createNotificationWithCount(hospital.userId, 'APPLICATION_HIRED', payload);
