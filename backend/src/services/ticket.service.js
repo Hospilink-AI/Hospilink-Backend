@@ -797,7 +797,7 @@ class TicketService {
             ACTIVITY_ACTIONS.TICKET_WITHDRAWN, ticket, { userId, name: user.name, role: user.role }, { reason }
         ).catch(err => console.error('emitTicketActivity(TICKET_WITHDRAWN) failed:', err));
 
-        return ticket.toObject();
+        return this._shapeForRaiser(ticket.toObject());
     }
 
     // ─── Respondent: answer a claim ────────────────────────────────────────
@@ -837,7 +837,7 @@ class TicketService {
             ACTIVITY_ACTIONS.TICKET_RESPONDED, ticket, { userId, name: user.name, role: user.role }
         ).catch(err => console.error('emitTicketActivity(TICKET_RESPONDED) failed:', err));
 
-        return ticket.toObject();
+        return this._shapeForRespondent(ticket.toObject());
     }
 
     // ─── Cron: respondent-window reminders & lapse ─────────────────────────
