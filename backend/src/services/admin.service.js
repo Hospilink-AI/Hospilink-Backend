@@ -553,7 +553,7 @@ class AdminService {
                     role: s.staff.jobRole,
                     formattedRole: formatRoleForDisplay(s.staff.jobRole),
                     phone: s.staff.phoneNumber,
-                    rating: s.staff.averageRating || 0,
+                    rating: s.staff.totalRatings ? s.staff.averageRating : null,
                     effectiveRating: effectiveRatings[index].ratingShown,
                     isAvailable: s.staff.isAvailable,
                     verificationStatus: s.staff.verificationStatus,
