@@ -4,6 +4,7 @@ const JobApplication = require('../models/JobApplication');
 const JobVacancy = require('../models/JobVacancy');
 const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
+const User = require('../models/User');
 const { hasCapability } = require('../config/adminPermissions.config');
 const { NotFoundError, ForbiddenError, ConflictError, UnprocessableEntityError } = require('../middleware/error.middleware');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
@@ -337,6 +338,42 @@ class TicketService {
         };
     }
 
+    // Admin case file only: names and profile ids for both parties, and the
+    // handling admins as { _id, name }. Parties never get these.
+    async _withPeopleForAdmin(ticket) {
+        const ids = [ticket.raisedBy?.user, ticket.raisedAgainst?.user, ticket.assignedTo, ticket.decidedBy].filter(Boolean);
+        const users = await User.find({ _id: { $in: ids } }).select('name').lean();
+        const userById = new Map(users.map(u => [u._id.toString(), u]));
+
+        const withProfile = async (party) => {
+            if (!party || !party.user) return party;
+            let profile = null;
+            if (party.role === 'hospital') {
+                profile = await Hospital.findOne({ user: party.user }).select('hospitalLegalName').lean();
+            } else if (party.role === 'staff') {
+                profile = await MedicalStaff.findOne({ user: party.user }).select('fullName').lean();
+            }
+            return {
+                ...party,
+                name: profile?.hospitalLegalName || profile?.fullName || userById.get(party.user.toString())?.name || null,
+                profileId: profile ? profile._id : null
+            };
+        };
+        const adminRef = (id) => {
+            const admin = id && userById.get(id.toString());
+            return admin ? { _id: admin._id, name: admin.name } : id;
+        };
+
+        const [raisedBy, raisedAgainst] = await Promise.all([withProfile(ticket.raisedBy), withProfile(ticket.raisedAgainst)]);
+        return {
+            ...ticket,
+            raisedBy,
+            raisedAgainst,
+            assignedTo: adminRef(ticket.assignedTo),
+            decidedBy: adminRef(ticket.decidedBy)
+        };
+    }
+
     _relationToTicket(ticket, user) {
         const userId = (user._id || user.id).toString();
         if (ticket.raisedBy.user.toString() === userId) return 'raiser';
@@ -358,7 +395,7 @@ class TicketService {
         const relation = this._relationToTicket(ticket, user);
         if (relation === 'raiser') return this._shapeForRaiser(ticket);
         if (relation === 'respondent') return this._shapeForRespondent(ticket);
-        if (relation === 'admin') return ticket;
+        if (relation === 'admin') return this._withPeopleForAdmin(ticket);
 
         throw new ForbiddenError("You don't have permission to view this ticket.");
     }
