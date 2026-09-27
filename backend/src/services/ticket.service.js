@@ -400,6 +400,28 @@ class TicketService {
         throw new ForbiddenError("You don't have permission to view this ticket.");
     }
 
+    // Short-lived link to one evidence file. Same visibility as getById.
+    async getEvidenceUrl(ticketId, evidenceId, user) {
+        const ticket = await Ticket.findById(ticketId).lean();
+        if (!ticket) {
+            throw new NotFoundError('Ticket not found');
+        }
+
+        const relation = this._relationToTicket(ticket, user);
+        let evidence;
+        if (relation === 'raiser') evidence = this._shapeForRaiser(ticket).evidence;
+        else if (relation === 'respondent') evidence = this._shapeForRespondent(ticket).evidence;
+        else if (relation === 'admin') evidence = ticket.evidence || [];
+        else throw new ForbiddenError("You don't have permission to view this ticket.");
+
+        const item = evidence.find(e => e._id.toString() === evidenceId.toString());
+        if (!item) {
+            throw new NotFoundError('Evidence not found');
+        }
+
+        return s3Service.generatePreSignedURL(item.s3Key);
+    }
+
     // spec §08.03: images and PDF, 5 files, 10 MB each, from either party.
     // The 10 MB/5-file numbers are read live from SystemConfig, not the
     // generous static ceiling upload.middleware.js's multer instance

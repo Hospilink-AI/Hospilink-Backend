@@ -61,6 +61,14 @@ router.post(
     ticketController.addEvidence
 );
 
+router.get(
+    '/:id/evidence/:evidenceId',
+    authorize('staff', 'hospital', 'admin'),
+    validateObjectId('id'),
+    validateObjectId('evidenceId'),
+    ticketController.getEvidenceUrl
+);
+
 // Day 3 — raiser/respondent's own thread with the admin. Party is implicit
 // (derived from the caller's relation to the ticket), unlike the admin-side
 // route which must say which party's thread it means.
