@@ -97,7 +97,7 @@ const COPY = {
     domainDuty: { en: "It's about a shift", hi: 'यह शिफ्ट के बारे में है', mr: 'हे शिफ्टबद्दल आहे' },
     domainPayment: { en: "It's about payment", hi: 'यह भुगतान के बारे में है', mr: 'हे पेमेंटबद्दल आहे' },
     domainSafety: { en: "It's a safety concern", hi: 'यह सुरक्षा से जुड़ा मामला है', mr: 'ही सुरक्षेशी संबंधित बाब आहे' },
-    domainJobs: { en: "It's about a job application", hi: 'यह नौकरी के आवेदन के बारे में है', mr: 'हे नोकरीच्या अर्जाबद्दल आहे' },
+    domainJobs: { en: "It's about a vacancy application", hi: 'यह नौकरी के आवेदन के बारे में है', mr: 'हे नोकरीच्या अर्जाबद्दल आहे' },
     domainAccount: { en: "It's about my account", hi: 'यह मेरे खाते के बारे में है', mr: 'हे माझ्या खात्याबद्दल आहे' },
     domainPlatform: { en: "It's about the app itself", hi: 'यह ऐप से जुड़ी बात है', mr: 'हे अ‍ॅपशी संबंधित आहे' },
     domainData: { en: "It's about my data", hi: 'यह मेरे डेटा के बारे में है', mr: 'हे माझ्या डेटाबद्दल आहे' },

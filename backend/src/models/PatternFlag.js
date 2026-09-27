@@ -42,7 +42,7 @@ const patternFlagSchema = new mongoose.Schema({
         responseDeadline: { type: Date, default: null },
         partyResponse: { type: partyResponseSchema, default: null },
         decidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-        decision: { type: String, enum: ['suspend', 'no_action'], default: null },
+        decision: { type: String, enum: ['suspend', 'no_action'] },
         decisionReason: { type: String, default: null },
         decidedAt: { type: Date, default: null }
     }

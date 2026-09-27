@@ -81,7 +81,7 @@ const ticketSchema = new mongoose.Schema({
     },
 
     source: { type: String, enum: SOURCES, required: true },
-    botCategory: { type: String, enum: CATEGORIES, default: null },
+    botCategory: { type: String, enum: CATEGORIES },
     botConfidence: { type: Number, min: 0, max: 1, default: null },
     language: { type: String, enum: ['en', 'hi', 'mr'], default: 'en' },
 
@@ -90,7 +90,7 @@ const ticketSchema = new mongoose.Schema({
     // in the service, not a cheap pure-lookup hook like domain/queue below).
     priority: { type: String, enum: PRIORITIES, required: true },
     priorityOverride: {
-        value: { type: String, enum: PRIORITIES, default: null },
+        value: { type: String, enum: PRIORITIES },
         reason: { type: String, default: null },
         by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
         at: { type: Date, default: null }
@@ -159,7 +159,7 @@ const ticketSchema = new mongoose.Schema({
         slaAt75Percent: { type: Boolean, default: false }
     },
 
-    resolutionOutcome: { type: String, enum: RESOLUTION_OUTCOMES, default: null },
+    resolutionOutcome: { type: String, enum: RESOLUTION_OUTCOMES },
     resolutionActions: { type: [resolutionActionSchema], default: [] },
     actionTakenStatement: { type: String, default: null }, // generated, never hand-typed (spec §08.05)
 

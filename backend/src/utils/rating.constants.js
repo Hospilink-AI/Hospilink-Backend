@@ -8,7 +8,8 @@ const RATING_PENALTY_POINTS_BY_CATEGORY = {
     'duty.no_show_staff': 0.25,
     'duty.no_show_hospital': 0.25,
     'duty.conduct_staff': 0.4,
-    'duty.conduct_hospital': 0.4
+    'duty.conduct_hospital': 0.4,
+    'jobs.interview_no_show': 0.25
 };
 
 const RATING_PENALTY_CATEGORIES = Object.keys(RATING_PENALTY_POINTS_BY_CATEGORY);

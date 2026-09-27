@@ -28,6 +28,12 @@ exports.getById = asyncHandler(async (req, res) => {
     res.status(200).json({ success: true, ticket });
 });
 
+// GET /api/tickets/:id/evidence/:evidenceId — signed link, same visibility as getById
+exports.getEvidenceUrl = asyncHandler(async (req, res) => {
+    const url = await ticketService.getEvidenceUrl(req.params.id, req.params.evidenceId, req.user);
+    res.status(200).json({ success: true, url });
+});
+
 // PATCH /api/tickets/:id/withdraw — raiser-only
 exports.withdraw = asyncHandler(async (req, res) => {
     const ticket = await ticketService.withdraw(req.params.id, req.user, req.validatedBody.reason);

@@ -1,8 +1,11 @@
 const Ticket = require('../models/Ticket');
+const TicketConversation = require('../models/TicketConversation');
 const Duty = require('../models/Duty');
 const JobApplication = require('../models/JobApplication');
+const JobVacancy = require('../models/JobVacancy');
 const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
+const User = require('../models/User');
 const { hasCapability } = require('../config/adminPermissions.config');
 const { NotFoundError, ForbiddenError, ConflictError, UnprocessableEntityError } = require('../middleware/error.middleware');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
@@ -221,6 +224,9 @@ class TicketService {
                 shouldOpenNoShowDispute = await this._assertNoShowTicketAllowed(application, user);
             }
         }
+        if (isAdjudicated && !raisedAgainst) {
+            raisedAgainst = await this._resolveSubjectCounterparty(subjectType, subjectId, linkedContext, user);
+        }
 
         const priority = await this._computePriority({
             domain, category, subjectType, resolutionClass, linkedContext, raisedBy: { user: userId }
@@ -234,7 +240,7 @@ class TicketService {
             raisedBy: { user: userId, role: userRole },
             raisedAgainst: raisedAgainst ? { user: raisedAgainst.userId, role: raisedAgainst.role } : undefined,
             source,
-            botCategory: botCategory || null,
+            botCategory: botCategory || undefined,
             botConfidence: botConfidence ?? null,
             priority,
             slaAcknowledgeBy,
@@ -333,6 +339,42 @@ class TicketService {
         };
     }
 
+    // Admin case file only: names and profile ids for both parties, and the
+    // handling admins as { _id, name }. Parties never get these.
+    async _withPeopleForAdmin(ticket) {
+        const ids = [ticket.raisedBy?.user, ticket.raisedAgainst?.user, ticket.assignedTo, ticket.decidedBy].filter(Boolean);
+        const users = await User.find({ _id: { $in: ids } }).select('name').lean();
+        const userById = new Map(users.map(u => [u._id.toString(), u]));
+
+        const withProfile = async (party) => {
+            if (!party || !party.user) return party;
+            let profile = null;
+            if (party.role === 'hospital') {
+                profile = await Hospital.findOne({ user: party.user }).select('hospitalLegalName').lean();
+            } else if (party.role === 'staff') {
+                profile = await MedicalStaff.findOne({ user: party.user }).select('fullName').lean();
+            }
+            return {
+                ...party,
+                name: profile?.hospitalLegalName || profile?.fullName || userById.get(party.user.toString())?.name || null,
+                profileId: profile ? profile._id : null
+            };
+        };
+        const adminRef = (id) => {
+            const admin = id && userById.get(id.toString());
+            return admin ? { _id: admin._id, name: admin.name } : id;
+        };
+
+        const [raisedBy, raisedAgainst] = await Promise.all([withProfile(ticket.raisedBy), withProfile(ticket.raisedAgainst)]);
+        return {
+            ...ticket,
+            raisedBy,
+            raisedAgainst,
+            assignedTo: adminRef(ticket.assignedTo),
+            decidedBy: adminRef(ticket.decidedBy)
+        };
+    }
+
     _relationToTicket(ticket, user) {
         const userId = (user._id || user.id).toString();
         if (ticket.raisedBy.user.toString() === userId) return 'raiser';
@@ -354,9 +396,31 @@ class TicketService {
         const relation = this._relationToTicket(ticket, user);
         if (relation === 'raiser') return this._shapeForRaiser(ticket);
         if (relation === 'respondent') return this._shapeForRespondent(ticket);
-        if (relation === 'admin') return ticket;
+        if (relation === 'admin') return this._withPeopleForAdmin(ticket);
 
         throw new ForbiddenError("You don't have permission to view this ticket.");
+    }
+
+    // Short-lived link to one evidence file. Same visibility as getById.
+    async getEvidenceUrl(ticketId, evidenceId, user) {
+        const ticket = await Ticket.findById(ticketId).lean();
+        if (!ticket) {
+            throw new NotFoundError('Ticket not found');
+        }
+
+        const relation = this._relationToTicket(ticket, user);
+        let evidence;
+        if (relation === 'raiser') evidence = this._shapeForRaiser(ticket).evidence;
+        else if (relation === 'respondent') evidence = this._shapeForRespondent(ticket).evidence;
+        else if (relation === 'admin') evidence = ticket.evidence || [];
+        else throw new ForbiddenError("You don't have permission to view this ticket.");
+
+        const item = evidence.find(e => e._id.toString() === evidenceId.toString());
+        if (!item) {
+            throw new NotFoundError('Evidence not found');
+        }
+
+        return s3Service.generatePreSignedURL(item.s3Key);
     }
 
     // spec §08.03: images and PDF, 5 files, 10 MB each, from either party.
@@ -498,6 +562,49 @@ class TicketService {
         ]);
 
         return { tickets, pagination: getPaginationMeta(total, page, limit) };
+    }
+
+    // Admin case file: the bot chat the ticket came from, null if none.
+    async getConversationForAdmin(ticketId) {
+        const ticket = await Ticket.findById(ticketId).select('_id').lean();
+        if (!ticket) throw new NotFoundError('Ticket not found');
+
+        const conversation = await TicketConversation.findOne({ ticket: ticket._id })
+            .select('language botCategory botConfidence messages')
+            .lean();
+        if (!conversation) return null;
+
+        return {
+            language: conversation.language,
+            botCategory: conversation.botCategory || null,
+            botConfidence: conversation.botConfidence ?? null,
+            messages: (conversation.messages || []).map(m => ({
+                sender: m.sender,
+                text: m.text || m.selectedButton || null,
+                at: m.at
+            }))
+        };
+    }
+
+    // spec US-D3.2: up to 20 other tickets between the same two people, either way round.
+    async getCounterpartyHistory(ticketId) {
+        const ticket = await Ticket.findById(ticketId).select('raisedBy raisedAgainst').lean();
+        if (!ticket) throw new NotFoundError('Ticket not found');
+        if (!ticket.raisedAgainst?.user) return [];
+
+        const a = ticket.raisedBy.user;
+        const b = ticket.raisedAgainst.user;
+        return Ticket.find({
+            _id: { $ne: ticket._id },
+            $or: [
+                { 'raisedBy.user': a, 'raisedAgainst.user': b },
+                { 'raisedBy.user': b, 'raisedAgainst.user': a }
+            ]
+        })
+            .select('_id ticketId category status resolutionOutcome createdAt')
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .lean();
     }
 
     // Conditional write — no claim-then-check race window, same pattern as
@@ -978,6 +1085,40 @@ class TicketService {
         throw new ForbiddenError('You can only raise this for an interview you are part of.');
     }
 
+    // Other party for DUTY/PAYMENT/APPLICATION/VACANCY tickets when the client
+    // didn't send one. Left unset if the caller isn't a party to the subject.
+    async _resolveSubjectCounterparty(subjectType, subjectId, linkedContext, user) {
+        const userId = user._id || user.id;
+
+        if (subjectType === 'APPLICATION') {
+            return linkedContext.application
+                ? this._resolveInterviewCounterparty(linkedContext.application, user)
+                : undefined;
+        }
+
+        if (subjectType === 'DUTY' || subjectType === 'PAYMENT') {
+            const duty = linkedContext.duty || await Duty.findById(subjectId).select('hospital assignedTo').lean();
+            if (!duty) return undefined;
+
+            const profile = user.role === 'staff'
+                ? await MedicalStaff.findOne({ user: userId }).select('_id').lean()
+                : await Hospital.findOne({ user: userId }).select('_id').lean();
+            const partyId = user.role === 'staff' ? duty.assignedTo : duty.hospital;
+            if (!profile || !partyId || profile._id.toString() !== partyId.toString()) return undefined;
+
+            const chatbotIntakeService = require('./chatbotIntake.service');
+            return (await chatbotIntakeService._resolveDutyCounterparty(duty, user.role)) || undefined;
+        }
+
+        if (subjectType === 'VACANCY' && user.role === 'staff') {
+            const vacancy = await JobVacancy.findById(subjectId).select('hospitalId').lean();
+            const hospital = vacancy && await Hospital.findById(vacancy.hospitalId).select('user').lean();
+            return hospital ? { userId: hospital.user, role: 'hospital' } : undefined;
+        }
+
+        return undefined;
+    }
+
     // Migration note: replaces the old
     // interviewScheduling.service.js#disputeNoShow's precondition checks.
     // Read-only, and run before the ticket is saved, so an ineligible ticket
@@ -1277,7 +1418,7 @@ class TicketService {
             throw new ForbiddenError('The approver must be a different admin from whoever proposed the decision.');
         }
 
-        ticket.resolutionOutcome = null;
+        ticket.resolutionOutcome = undefined;
         ticket.resolutionActions = [];
         ticket.actionTakenStatement = null;
         ticket.decidedBy = null;

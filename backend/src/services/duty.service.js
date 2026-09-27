@@ -220,7 +220,7 @@ class DutyService {
                     email: staff.user?.email || '—',
                     averageRating: staff.averageRating ?? 0,
                     totalRatings: staff.totalRatings ?? 0,
-                    effectiveRating: effectiveRatingByStaffId.get(staff._id.toString()) ?? 0
+                    effectiveRating: effectiveRatingByStaffId.get(staff._id.toString()) ?? null
                 } : null,
                 staffRole: duty.staffRole,
                 shiftDuration: `${duty.startTime} - ${duty.endTime}`,
@@ -335,7 +335,7 @@ class DutyService {
                     email: staff.user?.email || '—',
                     averageRating: staff.averageRating ?? 0,
                     totalRatings: staff.totalRatings ?? 0,
-                    effectiveRating: effectiveRatingByStaffId.get(staff._id.toString()) ?? 0,
+                    effectiveRating: effectiveRatingByStaffId.get(staff._id.toString()) ?? null,
                     profilePicture: profilePictureUrl
                 } : null,
                 staffRole: duty.staffRole,

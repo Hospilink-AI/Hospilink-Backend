@@ -25,6 +25,10 @@ router.get('/triage', requireCapability('ticket.view'), validatePagination, admi
 // already keeps elsewhere (e.g. jobApplication.routes.js).
 router.get('/approval-queue', requireCapability('ticket.approve'), validatePagination, adminTicketController.listApprovalQueue);
 
+router.get('/:id/conversation', requireCapability('ticket.view'), validateObjectId('id'), adminTicketController.getConversation);
+
+router.get('/:id/history', requireCapability('ticket.view'), validateObjectId('id'), adminTicketController.getHistory);
+
 router.patch('/:id/claim', requireCapability('ticket.claim'), validateObjectId('id'), adminTicketController.claim);
 
 router.patch(
