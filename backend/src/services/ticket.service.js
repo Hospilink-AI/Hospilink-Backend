@@ -281,6 +281,15 @@ class TicketService {
         if (isAdjudicated && !raisedAgainst) {
             raisedAgainst = await this._resolveSubjectCounterparty(subjectType, subjectId, linkedContext, user);
         }
+        // Neither resolver above found a counterparty (e.g. account.rating_challenge
+        // raised with no linked duty/review) — fail with a clear message here
+        // rather than letting Ticket.js's own schema validator reject the save
+        // with a raw "raisedAgainst is required for ADJUDICATED tickets" error.
+        if (isAdjudicated && !raisedAgainst) {
+            throw new UnprocessableEntityError(
+                "We couldn't automatically determine who this complaint is against. Please contact support directly for this type of issue."
+            );
+        }
 
         const priority = await this._computePriority({
             domain, category, subjectType, resolutionClass, linkedContext, raisedBy: { user: userId }
@@ -397,7 +406,7 @@ class TicketService {
     // handling admins as { _id, name }. Parties never get these.
     async _withPeopleForAdmin(ticket) {
         const ids = [ticket.raisedBy?.user, ticket.raisedAgainst?.user, ticket.assignedTo, ticket.decidedBy].filter(Boolean);
-        const users = await User.find({ _id: { $in: ids } }).select('name').lean();
+        const users = await User.find({ _id: { $in: ids } }).select('name role').lean();
         const userById = new Map(users.map(u => [u._id.toString(), u]));
 
         const withProfile = async (party) => {
@@ -416,7 +425,7 @@ class TicketService {
         };
         const adminRef = (id) => {
             const admin = id && userById.get(id.toString());
-            return admin ? { _id: admin._id, name: admin.name } : id;
+            return admin ? { _id: admin._id, name: admin.name, role: admin.role } : id;
         };
 
         const [raisedBy, raisedAgainst] = await Promise.all([withProfile(ticket.raisedBy), withProfile(ticket.raisedAgainst)]);
