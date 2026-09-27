@@ -1,6 +1,7 @@
 const Ticket = require('../models/Ticket');
 const Duty = require('../models/Duty');
 const JobApplication = require('../models/JobApplication');
+const JobVacancy = require('../models/JobVacancy');
 const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
 const { hasCapability } = require('../config/adminPermissions.config');
@@ -220,6 +221,9 @@ class TicketService {
             if (category === 'jobs.interview_no_show') {
                 shouldOpenNoShowDispute = await this._assertNoShowTicketAllowed(application, user);
             }
+        }
+        if (isAdjudicated && !raisedAgainst) {
+            raisedAgainst = await this._resolveSubjectCounterparty(subjectType, subjectId, linkedContext, user);
         }
 
         const priority = await this._computePriority({
@@ -976,6 +980,40 @@ class TicketService {
             return { userId: application.user, role: 'staff' };
         }
         throw new ForbiddenError('You can only raise this for an interview you are part of.');
+    }
+
+    // Other party for DUTY/PAYMENT/APPLICATION/VACANCY tickets when the client
+    // didn't send one. Left unset if the caller isn't a party to the subject.
+    async _resolveSubjectCounterparty(subjectType, subjectId, linkedContext, user) {
+        const userId = user._id || user.id;
+
+        if (subjectType === 'APPLICATION') {
+            return linkedContext.application
+                ? this._resolveInterviewCounterparty(linkedContext.application, user)
+                : undefined;
+        }
+
+        if (subjectType === 'DUTY' || subjectType === 'PAYMENT') {
+            const duty = linkedContext.duty || await Duty.findById(subjectId).select('hospital assignedTo').lean();
+            if (!duty) return undefined;
+
+            const profile = user.role === 'staff'
+                ? await MedicalStaff.findOne({ user: userId }).select('_id').lean()
+                : await Hospital.findOne({ user: userId }).select('_id').lean();
+            const partyId = user.role === 'staff' ? duty.assignedTo : duty.hospital;
+            if (!profile || !partyId || profile._id.toString() !== partyId.toString()) return undefined;
+
+            const chatbotIntakeService = require('./chatbotIntake.service');
+            return (await chatbotIntakeService._resolveDutyCounterparty(duty, user.role)) || undefined;
+        }
+
+        if (subjectType === 'VACANCY' && user.role === 'staff') {
+            const vacancy = await JobVacancy.findById(subjectId).select('hospitalId').lean();
+            const hospital = vacancy && await Hospital.findById(vacancy.hospitalId).select('user').lean();
+            return hospital ? { userId: hospital.user, role: 'hospital' } : undefined;
+        }
+
+        return undefined;
     }
 
     // Migration note: replaces the old
