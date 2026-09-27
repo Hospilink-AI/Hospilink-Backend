@@ -56,7 +56,7 @@ class JobApplicationService {
         if (!medicalStaff) {
             await notificationEmitter.emitProfileRequiredForApplication(userId, vacancy);
             throw new UnprocessableEntityError(
-                'Complete your profile before applying for a permanent job. You can apply using just your resume.',
+                'Complete your profile before applying for a vacancy. You can apply using just your resume.',
                 APPLICATION_ERROR_CODES.PROFILE_REQUIRED
             );
         }
@@ -68,7 +68,7 @@ class JobApplicationService {
             throw new UnprocessableEntityError(
                 wasRejected
                     ? 'Your uploaded resume was rejected. Please upload a new resume before applying.'
-                    : 'Upload your resume to apply for permanent job openings.',
+                    : 'Upload your resume to apply for vacancies.',
                 APPLICATION_ERROR_CODES.RESUME_REQUIRED
             );
         }

@@ -429,7 +429,7 @@ class InterviewSchedulingService {
     async respondToOffer(applicationId, userId, accept) {
         const application = await jobApplicationService._loadOwnApplicantApplication(applicationId, userId);
         if (application.status !== 'offered') {
-            throw new UnprocessableEntityError(`Cannot respond to a job offer from status ${application.status}`);
+            throw new UnprocessableEntityError(`Cannot respond to an offer from status ${application.status}`);
         }
 
         if (accept) {
@@ -443,7 +443,7 @@ class InterviewSchedulingService {
             application.status = 'withdrawn';
             application.withdrawnAt = new Date();
             application.withdrawReason = 'no_longer_interested';
-            application.pushHistory('withdrawn', userId, 'Declined job offer');
+            application.pushHistory('withdrawn', userId, 'Declined offer');
             await application.save();
             await notificationEmitter.emitApplicationWithdrawn(application);
         }
