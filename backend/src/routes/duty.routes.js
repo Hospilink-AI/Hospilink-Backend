@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const dutyController = require('../controllers/duty.controller');
 const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
-const { requireHospitalVerification, requireStaffVerificationandisAvailable} = require('../middleware/accountsVerification.middleware');
+const { requireHospitalVerification, requireStaffVerificationandisAvailable, requireVerifiedStaffOnly} = require('../middleware/accountsVerification.middleware');
 const {
     validateDutyStatusHistory,
     validateDutyCreation,
@@ -109,7 +109,7 @@ router.post(
     dutyController.getDutyStatusHistory
 );
 
-router.get('/completed-duties', authorize('staff'), requireStaffVerificationandisAvailable, validatePagination, dutyController.getCompletedDuties);
+router.get('/completed-duties', authorize('staff'), requireVerifiedStaffOnly, validatePagination, dutyController.getCompletedDuties);
 
 router.patch(
     '/duties/:id',
