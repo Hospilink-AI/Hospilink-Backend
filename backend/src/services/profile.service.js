@@ -1413,7 +1413,7 @@ class ProfileService {
                     role: staff.jobRole,
                     formattedRole: formatRoleForDisplay(staff.jobRole),
                     phone: staff.phoneNumber,
-                    rating: staff.averageRating || 0,
+                    rating: staff.totalRatings ? staff.averageRating : null,
                     effectiveRating: effectiveRatings[index].ratingShown,
                     isAvailable: staff.isAvailable,
                     verificationStatus: staff.verificationStatus,
