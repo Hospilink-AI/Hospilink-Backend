@@ -3,6 +3,7 @@ const Duty = require('../models/Duty');
 const { getCurrentIST } = require('../utils/helpers');
 const redisClient = require('../config/redis');
 const geocodingService = require('./geocoding.service');
+const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const {
     ValidationError,
     NotFoundError,
@@ -60,9 +61,19 @@ class DashboardService {
             growthTrend = 'up';
         }
 
+        // .select() above deliberately excludes `user` to keep the query
+        // lean — userId is already in scope as this function's own
+        // parameter, same value, so a fresh fetch isn't needed.
+        const { ratingShown, breakdown } = await ratingAlgorithmService.getEffectiveRating(
+            { user: userId, averageRating: medicalStaff.averageRating, totalRatings: medicalStaff.totalRatings },
+            'hospital_to_staff'
+        );
+
         return {
             averageRating: parseFloat((medicalStaff.averageRating || 0).toFixed(1)),
             totalRatings: medicalStaff.totalRatings || 0,
+            effectiveRating: ratingShown,
+            ratingBreakdown: breakdown,
             growth: {
                 percent: Math.abs(growthPercent),
                 trend: growthTrend,

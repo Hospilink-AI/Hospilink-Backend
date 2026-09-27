@@ -205,7 +205,19 @@ const hospitalSchema = new mongoose.Schema({
     updatedAt: {
         type: Date,
         default: Date.now
-    }
+    },
+
+    // Provenance for the CORRECT_PROFILE_FIELD dispute-resolution action —
+    // see ticketConsequence.service.js. Appended to, never rewritten.
+    correctionHistory: [{
+        field: { type: String, required: true },
+        previousValue: mongoose.Schema.Types.Mixed,
+        newValue: mongoose.Schema.Types.Mixed,
+        correctedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+        correctedAt: { type: Date, default: Date.now },
+        ticketId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ticket' },
+        reason: String
+    }]
 }, {
     timestamps: true
 });

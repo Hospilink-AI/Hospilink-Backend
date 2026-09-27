@@ -2,7 +2,28 @@ const validator = require('validator');
 const { body, validationResult } = require('express-validator');
 const { ValidationError } = require('./error.middleware');
 const { getCurrentIST, toIST } = require('../utils/helpers');
-const { INDIAN_STATES } = require('../utils/constants');
+const { INDIAN_STATES, ALLOWED_ROLES } = require('../utils/constants');
+const { DOCX_MIME_TYPE } = require('./upload.middleware');
+const {
+    STATUSES: JOB_APPLICATION_STATUSES, REJECTION_REASONS, RECRUITER_CHANGE_REASONS,
+    CANDIDATE_CHANGE_REASONS, WITHDRAW_REASONS, SLOT_DURATIONS, REASON_TEXT_MAX_LENGTH
+} = require('../utils/jobApplication.constants');
+const {
+    CATEGORIES: TICKET_CATEGORIES, SUBJECT_TYPES: TICKET_SUBJECT_TYPES, PARTY_ROLES: TICKET_PARTY_ROLES,
+    PRIORITIES: TICKET_PRIORITIES, RESOLUTION_OUTCOMES: TICKET_RESOLUTION_OUTCOMES,
+    RESOLUTION_ACTIONS: TICKET_RESOLUTION_ACTIONS, DOMAINS: TICKET_DOMAINS
+} = require('../utils/ticket.constants');
+const mongoose = require('mongoose');
+
+
+const RESUME_ALLOWED_MIME_TYPES = [
+    'application/pdf',
+    DOCX_MIME_TYPE,
+    'image/jpeg',
+    'image/jpg',
+    'image/png'
+];
+const RESUME_FORMAT_ERROR_MESSAGE = 'Resume must be PDF, DOCX, JPG, JPEG, or PNG format';
 
 
 const validateSignup = (req, res, next) => {
@@ -41,9 +62,9 @@ const validateSignup = (req, res, next) => {
 
     // Role validation — 'admin' is intentionally excluded; admin accounts are created
     // directly in the database and cannot be self-registered via this endpoint.
-    const validRoles = ['hospital', 'candidate', 'staff'];
+    const validRoles = ['hospital', 'staff'];
     if (!role || !validRoles.includes(role)) {
-        errors.push('Valid role is required. Allowed: hospital, candidate, staff');
+        errors.push('Valid role is required. Allowed: hospital, staff');
     }
 
     if (errors.length > 0) {
@@ -506,8 +527,8 @@ const validateDocumentUpload = (req, res, next) => {
             message: "Live picture must be JPG or PNG image"
         },
         "resume-experience": {
-            allowed: ["application/pdf"],
-            message: "Resume must be PDF format"
+            allowed: RESUME_ALLOWED_MIME_TYPES,
+            message: RESUME_FORMAT_ERROR_MESSAGE
         },
         // Default rule for certificates and ID documents
         "default": {
@@ -543,6 +564,31 @@ const validateDocumentUpload = (req, res, next) => {
             success: false,
             message: 'Document upload validation failed',
             errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Single-file resume upload for the resume-first "apply for a job" staging
+// flow (profile.routes.js's POST /resume-stage) — separate from
+// validateDocumentUpload above since this endpoint takes exactly one file
+// with a fixed field name, not an arbitrary set of documentType-keyed files.
+// Mirrors validateDocumentUpload's fileTypeRules['resume-experience'] rule.
+const validateResumeStageUpload = (req, res, next) => {
+    if (!req.file) {
+        return res.status(400).json({
+            success: false,
+            message: 'Resume file is required'
+        });
+    }
+
+    if (!RESUME_ALLOWED_MIME_TYPES.includes(req.file.mimetype)) {
+        return res.status(400).json({
+            success: false,
+            message: RESUME_FORMAT_ERROR_MESSAGE
         });
     }
 
@@ -1107,7 +1153,390 @@ const validateDutyEdit = (req, res, next) => {
             errors: errors
         });
     }
-    
+
+    next();
+};
+
+
+
+// Validation for job vacancy creation (shared by hospital and admin-on-behalf-of-hospital flows)
+const validateJobVacancyCreation = (req, res, next) => {
+    const { title, specialty, experience, education, skills, location, salary, description } = req.body;
+    const errors = [];
+
+    if (!title || typeof title !== 'string' || !title.trim()) {
+        errors.push('title is required');
+    } else if (title.trim().length > 200) {
+        errors.push('title cannot exceed 200 characters');
+    }
+
+    if (!specialty || typeof specialty !== 'string' || !specialty.trim()) {
+        errors.push('specialty is required');
+    } else if (!ALLOWED_ROLES.includes(specialty.trim())) {
+        errors.push(`specialty must be one of: ${ALLOWED_ROLES.join(', ')}`);
+    }
+
+    if (!description || typeof description !== 'string' || !description.trim()) {
+        errors.push('description is required');
+    } else if (description.trim().length > 3000) {
+        errors.push('description cannot exceed 3000 characters');
+    }
+
+    if (experience !== undefined && typeof experience !== 'string') {
+        errors.push('experience must be a string');
+    }
+
+    if (education !== undefined && typeof education !== 'string') {
+        errors.push('education must be a string');
+    }
+
+    if (skills !== undefined && (!Array.isArray(skills) || !skills.every(s => typeof s === 'string'))) {
+        errors.push('skills must be an array of strings');
+    }
+
+    if (location !== undefined && typeof location !== 'string') {
+        errors.push('location must be a string');
+    }
+
+    if (salary !== undefined && typeof salary !== 'string') {
+        errors.push('salary must be a string');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for job vacancy edits — partial patch over an allowed field whitelist
+const validateJobVacancyEdit = (req, res, next) => {
+    const errors = [];
+    const allowedFields = ['title', 'specialty', 'experience', 'education', 'skills', 'location', 'salary', 'description'];
+
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Allowed: ${allowedFields.join(', ')}`);
+    }
+
+    if (receivedFields.length === 0) {
+        errors.push('At least one field must be provided to update');
+    }
+
+    if (req.body.title !== undefined && (typeof req.body.title !== 'string' || !req.body.title.trim())) {
+        errors.push('title must be a non-empty string');
+    }
+
+    if (req.body.specialty !== undefined && (typeof req.body.specialty !== 'string' || !ALLOWED_ROLES.includes(req.body.specialty.trim()))) {
+        errors.push(`specialty must be one of: ${ALLOWED_ROLES.join(', ')}`);
+    }
+
+    if (req.body.description !== undefined && (typeof req.body.description !== 'string' || !req.body.description.trim())) {
+        errors.push('description must be a non-empty string');
+    }
+
+    if (req.body.skills !== undefined && (!Array.isArray(req.body.skills) || !req.body.skills.every(s => typeof s === 'string'))) {
+        errors.push('skills must be an array of strings');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
+// ─── Job application — apply / review pipeline ──────────────────────────────
+
+// Generic reviewer transitions only (applied->under_review->shortlisted->rejected,
+// plus offered->rejected). Whether THIS specific transition is legal from the
+// application's CURRENT status is checked in jobApplication.service.js via
+// canTransitionGeneric — this only validates shape.
+const validateJobApplicationStatusUpdate = (req, res, next) => {
+    const { status, reason, reasonText } = req.body;
+    const errors = [];
+
+    const allowedFields = ['status', 'reason', 'reasonText'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed: ${allowedFields.join(', ')}`);
+    }
+
+    const allowedStatuses = ['under_review', 'shortlisted', 'rejected'];
+    if (!status || !allowedStatuses.includes(status)) {
+        errors.push(`status is required and must be one of: ${allowedStatuses.join(', ')}`);
+    }
+
+    if (status === 'rejected' && (!reason || !REJECTION_REASONS.includes(reason))) {
+        errors.push(`reason is required when rejecting and must be one of: ${REJECTION_REASONS.join(', ')}`);
+    }
+
+    if (reasonText !== undefined && (typeof reasonText !== 'string' || reasonText.length > REASON_TEXT_MAX_LENGTH)) {
+        errors.push(`reasonText must be a string under ${REASON_TEXT_MAX_LENGTH} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateJobApplicationWithdraw = (req, res, next) => {
+    const { reason, reasonText } = req.body;
+    const errors = [];
+
+    const allowedFields = ['reason', 'reasonText'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed: ${allowedFields.join(', ')}`);
+    }
+
+    if (!reason || !WITHDRAW_REASONS.includes(reason)) {
+        errors.push(`reason is required and must be one of: ${WITHDRAW_REASONS.join(', ')}`);
+    }
+
+    if (reasonText !== undefined && (typeof reasonText !== 'string' || reasonText.length > REASON_TEXT_MAX_LENGTH)) {
+        errors.push(`reasonText must be a string under ${REASON_TEXT_MAX_LENGTH} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateJobApplicationListQuery = (req, res, next) => {
+    const { status } = req.query;
+    if (status && !JOB_APPLICATION_STATUSES.includes(status)) {
+        return res.status(400).json({
+            success: false,
+            message: `status must be one of: ${JOB_APPLICATION_STATUSES.join(', ')}`
+        });
+    }
+    next();
+};
+
+// ─── Job application — interview scheduling ─────────────────────────────────
+
+const validateInterviewOfferSlots = (req, res, next) => {
+    const { slots, durationMinutes } = req.body;
+    const errors = [];
+
+    const allowedFields = ['slots', 'durationMinutes'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed: ${allowedFields.join(', ')}`);
+    }
+
+    if (durationMinutes !== undefined && !SLOT_DURATIONS.includes(durationMinutes)) {
+        errors.push(`durationMinutes must be one of: ${SLOT_DURATIONS.join(', ')}`);
+    }
+
+    if (!Array.isArray(slots) || slots.length === 0) {
+        errors.push('slots is required and must be a non-empty array of { start, end }');
+    } else {
+        slots.forEach((slot, i) => {
+            if (!slot || !slot.start || !slot.end || isNaN(Date.parse(slot.start)) || isNaN(Date.parse(slot.end))) {
+                errors.push(`slots[${i}] must have valid ISO start and end dates`);
+            }
+        });
+    }
+    // Count/boundary/window rules (3-8 slots, 15-min boundaries, 24h-21d
+    // window) are enforced in interviewScheduling.service.js#offerSlots
+    // against the live, admin-editable SystemConfig values — not duplicated
+    // here against a value that could drift out of sync.
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateInterviewSlotSelect = (req, res, next) => {
+    const { picks } = req.body;
+    const errors = [];
+
+    if (!Array.isArray(picks) || picks.length === 0) {
+        errors.push('picks is required and must be a non-empty array of { start, end }');
+    } else {
+        picks.forEach((slot, i) => {
+            if (!slot || !slot.start || !slot.end || isNaN(Date.parse(slot.start)) || isNaN(Date.parse(slot.end))) {
+                errors.push(`picks[${i}] must have valid ISO start and end dates`);
+            }
+        });
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateInterviewConfirm = (req, res, next) => {
+    const { slotStart, slotEnd, meetingLink, interviewerName, interviewerDesignation } = req.body;
+    const errors = [];
+
+    if (!slotStart || isNaN(Date.parse(slotStart))) errors.push('slotStart is required and must be a valid ISO date');
+    if (!slotEnd || isNaN(Date.parse(slotEnd))) errors.push('slotEnd is required and must be a valid ISO date');
+
+    if (!meetingLink || typeof meetingLink !== 'string' || !/^https:\/\/.+/.test(meetingLink.trim())) {
+        errors.push('meetingLink is required and must be a well-formed https:// URL');
+    }
+    if (!interviewerName || typeof interviewerName !== 'string' || !interviewerName.trim()) {
+        errors.push('interviewerName is required');
+    }
+    if (!interviewerDesignation || typeof interviewerDesignation !== 'string' || !interviewerDesignation.trim()) {
+        errors.push('interviewerDesignation is required');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateInterviewMeetingLink = (req, res, next) => {
+    const { meetingLink, interviewerName, interviewerDesignation } = req.body;
+    const errors = [];
+
+    if (!meetingLink || typeof meetingLink !== 'string' || !/^https:\/\/.+/.test(meetingLink.trim())) {
+        errors.push('meetingLink is required and must be a well-formed https:// URL');
+    }
+    if (interviewerName !== undefined && (typeof interviewerName !== 'string' || !interviewerName.trim())) {
+        errors.push('interviewerName must be a non-empty string');
+    }
+    if (interviewerDesignation !== undefined && (typeof interviewerDesignation !== 'string' || !interviewerDesignation.trim())) {
+        errors.push('interviewerDesignation must be a non-empty string');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+// Shared by cancel-offer, reschedule (recruiter reasons), cancel-interview and
+// reschedule-request (candidate reasons) — which list applies depends on
+// req.user.role, checked here since both routes share this one validator.
+const validateInterviewChangeReason = (req, res, next) => {
+    const { reason, reasonText } = req.body;
+    const errors = [];
+
+    const allowedReasons = req.user?.role === 'hospital' ? RECRUITER_CHANGE_REASONS : CANDIDATE_CHANGE_REASONS;
+    if (!reason || !allowedReasons.includes(reason)) {
+        errors.push(`reason is required and must be one of: ${allowedReasons.join(', ')}`);
+    }
+    if (reasonText !== undefined && (typeof reasonText !== 'string' || reasonText.length > REASON_TEXT_MAX_LENGTH)) {
+        errors.push(`reasonText must be a string under ${REASON_TEXT_MAX_LENGTH} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateInterviewReschedule = (req, res, next) => {
+    // Same slot-array shape as offer-slots, plus the same reason requirement
+    // as a cancel — reschedule is both actions in one call.
+    validateInterviewOfferSlots(req, res, (err) => {
+        if (err) return next(err);
+        validateInterviewChangeReason(req, res, next);
+    });
+};
+
+const validateInterviewOutcome = (req, res, next) => {
+    const { result, reason, reasonText } = req.body;
+    const errors = [];
+
+    const allowedResults = ['offer', 'reject'];
+    if (!result || !allowedResults.includes(result)) {
+        errors.push(`result is required and must be one of: ${allowedResults.join(', ')}`);
+    }
+    if (result === 'reject' && (!reason || !REJECTION_REASONS.includes(reason))) {
+        errors.push(`reason is required when result is reject and must be one of: ${REJECTION_REASONS.join(', ')}`);
+    }
+    if (reasonText !== undefined && (typeof reasonText !== 'string' || reasonText.length > REASON_TEXT_MAX_LENGTH)) {
+        errors.push(`reasonText must be a string under ${REASON_TEXT_MAX_LENGTH} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateNoShowMark = (req, res, next) => {
+    const { reoffer, newSlots, durationMinutes } = req.body;
+    const errors = [];
+
+    if (typeof reoffer !== 'boolean') {
+        errors.push('reoffer is required and must be a boolean');
+    }
+    if (reoffer === true) {
+        if (!Array.isArray(newSlots) || newSlots.length === 0) {
+            errors.push('newSlots is required when reoffer is true, and must be a non-empty array of { start, end }');
+        }
+        if (durationMinutes !== undefined && !SLOT_DURATIONS.includes(durationMinutes)) {
+            errors.push(`durationMinutes must be one of: ${SLOT_DURATIONS.join(', ')}`);
+        }
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    next();
+};
+
+const validateOfferResponse = (req, res, next) => {
+    const { accept } = req.body;
+    if (typeof accept !== 'boolean') {
+        return res.status(400).json({ success: false, message: 'accept is required and must be a boolean' });
+    }
+    next();
+};
+
+const validateInterviewConfigUpdate = (req, res, next) => {
+    const { key, value, effectiveFrom } = req.body;
+    const errors = [];
+
+    if (!key || typeof key !== 'string' || !key.trim()) {
+        errors.push('key is required');
+    }
+    if (value === undefined) {
+        errors.push('value is required');
+    }
+    if (effectiveFrom !== undefined && isNaN(Date.parse(effectiveFrom))) {
+        errors.push('effectiveFrom must be a valid ISO date when provided');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
     next();
 };
 
@@ -1790,6 +2219,507 @@ const validateVerifyPhoneOTP = (req, res, next) => {
 };
 
 
+// Validate ticket creation (POST /api/tickets — IN_APP_FORM path)
+//
+// Whether raisedAgainst is actually required is NOT decided here — that
+// depends on the category's resolutionClass, which needs an async
+// SystemConfig lookup (ticketCategoryConfig.service), and every other
+// validator in this file is deliberately synchronous. That check stays on
+// the Ticket schema's own conditional validator (spec §04: "enforced on
+// save, not by convention"), which surfaces as a clean 400 either way via
+// error.middleware's handleValidationErrorDB. This validator only checks
+// shape.
+const TICKET_FREE_TEXT_LIMIT = 1000; // spec §16: fixed, not admin-editable
+
+const validateTicketCreation = (req, res, next) => {
+    if (!req.body || Object.keys(req.body).length === 0) {
+        return res.status(400).json({ success: false, message: 'Request body is required' });
+    }
+
+    const { category, subjectType, subjectId, raisedAgainst, text } = req.body;
+    const errors = [];
+
+    const allowedFields = ['category', 'subjectType', 'subjectId', 'raisedAgainst', 'text', 'evidence'];
+    const unexpectedFields = Object.keys(req.body).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (!category || !TICKET_CATEGORIES.includes(category)) {
+        errors.push(`category is required and must be one of the recognised categories`);
+    }
+
+    if (subjectType !== undefined && !TICKET_SUBJECT_TYPES.includes(subjectType)) {
+        errors.push(`subjectType must be one of: ${TICKET_SUBJECT_TYPES.join(', ')}`);
+    }
+
+    const needsSubject = subjectType !== undefined && subjectType !== 'NONE';
+    if (needsSubject && (!subjectId || !mongoose.Types.ObjectId.isValid(subjectId))) {
+        errors.push('subjectId is required and must be a valid ID when subjectType is not NONE');
+    }
+
+    if (raisedAgainst !== undefined && raisedAgainst !== null) {
+        if (typeof raisedAgainst !== 'object' || !raisedAgainst.userId || !raisedAgainst.role) {
+            errors.push('raisedAgainst, when provided, must include userId and role');
+        } else {
+            if (!mongoose.Types.ObjectId.isValid(raisedAgainst.userId)) {
+                errors.push('raisedAgainst.userId must be a valid ID');
+            }
+            if (!TICKET_PARTY_ROLES.includes(raisedAgainst.role)) {
+                errors.push(`raisedAgainst.role must be one of: ${TICKET_PARTY_ROLES.join(', ')}`);
+            }
+        }
+    }
+
+    if (!text || typeof text !== 'string' || !text.trim()) {
+        errors.push('text is required');
+    } else if (text.length > TICKET_FREE_TEXT_LIMIT) {
+        errors.push(`text cannot exceed ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    req.validatedBody = {
+        category,
+        subjectType: subjectType || 'NONE',
+        subjectId: subjectId || null,
+        raisedAgainst: raisedAgainst || null,
+        text: text.trim()
+    };
+
+    next();
+};
+
+
+// Validate admin reassigning a ticket to another admin
+const validateTicketReassign = (req, res, next) => {
+    const { to, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['to', 'reason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (!to || !mongoose.Types.ObjectId.isValid(to)) {
+        errors.push('to is required and must be a valid admin ID');
+    }
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        errors.push('reason is required');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { to, reason: reason.trim() };
+    next();
+};
+
+// Validate admin requesting more information from the raiser
+const validateTicketRequestInfo = (req, res, next) => {
+    const { message } = req.body;
+    const errors = [];
+
+    const allowedFields = ['message'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (!message || typeof message !== 'string' || !message.trim()) {
+        errors.push('message is required');
+    } else if (message.length > TICKET_FREE_TEXT_LIMIT) {
+        errors.push(`message cannot exceed ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { message: message.trim() };
+    next();
+};
+
+// Validate a raiser/respondent sending a chat message (Day 3 live chat).
+// Runs after multer, same ordering as validateMagicBytes on the sibling
+// /:id/evidence route, so req.body.text is already populated. Files are
+// optional here (text-only messages are fine) — files.length is checked
+// in ticketChat.service#sendMessage, not here, since this validator has no
+// visibility into req.files either way.
+const validateTicketChatMessage = (req, res, next) => {
+    const { text } = req.body;
+    const errors = [];
+
+    const allowedFields = ['text'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (text !== undefined && (typeof text !== 'string' || text.length > TICKET_FREE_TEXT_LIMIT)) {
+        errors.push(`text must be a string of at most ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { text: text && text.trim() ? text.trim() : undefined };
+    next();
+};
+
+// Same as above, plus the admin must say which party's thread this goes to.
+const validateAdminTicketChatMessage = (req, res, next) => {
+    const { text, party } = req.body;
+    const errors = [];
+
+    const allowedFields = ['text', 'party'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (text !== undefined && (typeof text !== 'string' || text.length > TICKET_FREE_TEXT_LIMIT)) {
+        errors.push(`text must be a string of at most ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+    if (party !== undefined && !['raiser', 'respondent'].includes(party)) {
+        errors.push('party must be either raiser or respondent');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { text: text && text.trim() ? text.trim() : undefined, party };
+    next();
+};
+
+// Validate a chatbot intake turn. Runs after multer (same ordering as the
+// ticket-chat routes), so req.body.text/conversationId/selectedButton are
+// already populated from the multipart form fields.
+const CHATBOT_LANGUAGES = ['en', 'hi', 'mr'];
+
+const validateChatbotMessage = (req, res, next) => {
+    const { text, conversationId, selectedButton, language } = req.body;
+    const errors = [];
+
+    const allowedFields = ['text', 'conversationId', 'selectedButton', 'language'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (text !== undefined && (typeof text !== 'string' || text.length > TICKET_FREE_TEXT_LIMIT)) {
+        errors.push(`text must be a string of at most ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+    if (conversationId !== undefined && !mongoose.Types.ObjectId.isValid(conversationId)) {
+        errors.push('conversationId must be a valid id');
+    }
+    if (selectedButton !== undefined && typeof selectedButton !== 'string') {
+        errors.push('selectedButton must be a string');
+    }
+    // Only meaningful when starting a new conversation — ignored otherwise
+    // (see chatbotIntake.service#sendMessage) — still type/enum-checked here.
+    if (language !== undefined && !CHATBOT_LANGUAGES.includes(language)) {
+        errors.push(`language must be one of: ${CHATBOT_LANGUAGES.join(', ')}`);
+    }
+    const hasFiles = req.files && req.files.length > 0;
+    if (!text?.trim() && !selectedButton && !hasFiles) {
+        errors.push('A message needs text, a selected button, or at least one file.');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = {
+        text: text && text.trim() ? text.trim() : undefined,
+        conversationId: conversationId || undefined,
+        selectedButton: selectedButton || undefined,
+        language: language || undefined
+    };
+    next();
+};
+
+// Validate an admin creating/updating a knowledge base article (chatbot
+// intake Phase 4).
+const KB_CATEGORIES = [...TICKET_DOMAINS, 'general'];
+const validateKnowledgeBaseArticle = (req, res, next) => {
+    const { question, answer, category, keywords } = req.body;
+    const errors = [];
+
+    const allowedFields = ['question', 'answer', 'category', 'keywords'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (question !== undefined && (typeof question !== 'string' || !question.trim() || question.length > 500)) {
+        errors.push('question must be a non-empty string of at most 500 characters');
+    }
+    if (answer !== undefined && (typeof answer !== 'string' || !answer.trim() || answer.length > 2000)) {
+        errors.push('answer must be a non-empty string of at most 2000 characters');
+    }
+    if (category !== undefined && !KB_CATEGORIES.includes(category)) {
+        errors.push(`category must be one of: ${KB_CATEGORIES.join(', ')}`);
+    }
+    if (keywords !== undefined && (!Array.isArray(keywords) || !keywords.every(k => typeof k === 'string'))) {
+        errors.push('keywords must be an array of strings');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = {
+        question: question?.trim(),
+        answer: answer?.trim(),
+        category,
+        keywords
+    };
+    next();
+};
+
+// Validate admin recategorising a ticket
+const validateTicketRecategorize = (req, res, next) => {
+    const { category, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['category', 'reason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (!category || !TICKET_CATEGORIES.includes(category)) {
+        errors.push('category is required and must be one of the recognised categories');
+    }
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        errors.push('reason is required');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { category, reason: reason.trim() };
+    next();
+};
+
+// Validate admin overriding a ticket's computed priority
+const validateTicketPriorityOverride = (req, res, next) => {
+    const { value, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['value', 'reason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (!value || !TICKET_PRIORITIES.includes(value)) {
+        errors.push(`value is required and must be one of: ${TICKET_PRIORITIES.join(', ')}`);
+    }
+    // Whether a reason is actually required depends on whether this raises
+    // or lowers the ticket's current priority — that needs the ticket
+    // itself, so the conditional check lives in ticket.service#priorityOverride.
+    // Here we only type-check it when present.
+    if (reason !== undefined && (typeof reason !== 'string' || !reason.trim())) {
+        errors.push('reason must be a non-empty string when provided');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { value, reason: reason ? reason.trim() : undefined };
+    next();
+};
+
+// Validate a raiser withdrawing their own ticket
+const validateTicketWithdraw = (req, res, next) => {
+    const { reason } = req.body || {};
+    const allowedFields = ['reason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (reason !== undefined && typeof reason !== 'string') {
+        return res.status(400).json({ success: false, message: 'reason must be a string' });
+    }
+    req.validatedBody = { reason: reason ? reason.trim() : null };
+    next();
+};
+
+
+// Validate a respondent's answer to a claim
+const validateTicketRespond = (req, res, next) => {
+    const { text } = req.body || {};
+    const allowedFields = ['text'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (!text || typeof text !== 'string' || !text.trim()) {
+        return res.status(400).json({ success: false, message: 'text is required' });
+    }
+    if (text.length > TICKET_FREE_TEXT_LIMIT) {
+        return res.status(400).json({ success: false, message: `text cannot exceed ${TICKET_FREE_TEXT_LIMIT} characters` });
+    }
+    req.validatedBody = { text: text.trim() };
+    next();
+};
+
+
+// Validate an admin's proposed decision on a ticket
+const validateTicketDecision = (req, res, next) => {
+    const { resolutionOutcome, resolutionActions, note, evidenceReliedOn } = req.body || {};
+    const errors = [];
+
+    const allowedFields = ['resolutionOutcome', 'resolutionActions', 'note', 'evidenceReliedOn'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    // Only rules out a garbage value — whether this outcome is legal for
+    // THIS ticket's resolutionClass needs the ticket loaded, so that check
+    // stays in ticket.service#decide (same async-dependency reason
+    // validateTicketCreation defers raisedAgainst's conditional requirement).
+    if (!resolutionOutcome || !TICKET_RESOLUTION_OUTCOMES.includes(resolutionOutcome)) {
+        errors.push(`resolutionOutcome is required and must be one of: ${TICKET_RESOLUTION_OUTCOMES.join(', ')}`);
+    }
+
+    if (!Array.isArray(resolutionActions) || resolutionActions.length === 0) {
+        errors.push('resolutionActions is required and must be a non-empty array');
+    } else {
+        resolutionActions.forEach((entry, i) => {
+            if (!entry || typeof entry !== 'object' || !TICKET_RESOLUTION_ACTIONS.includes(entry.action)) {
+                errors.push(`resolutionActions[${i}].action must be one of the recognised actions`);
+            }
+            if (entry && entry.details !== undefined && typeof entry.details !== 'object') {
+                errors.push(`resolutionActions[${i}].details must be an object when provided`);
+            }
+        });
+    }
+
+    if (note !== undefined && typeof note !== 'string') {
+        errors.push('note must be a string');
+    }
+    if (evidenceReliedOn !== undefined) {
+        if (!Array.isArray(evidenceReliedOn) || evidenceReliedOn.some(id => !mongoose.Types.ObjectId.isValid(id))) {
+            errors.push('evidenceReliedOn must be an array of valid IDs');
+        }
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+
+    req.validatedBody = {
+        resolutionOutcome,
+        resolutionActions: resolutionActions.map(a => ({ action: a.action, details: a.details || {} })),
+        note: note || null,
+        evidenceReliedOn: evidenceReliedOn || []
+    };
+    next();
+};
+
+// Validate a second admin returning a decision for review
+const validateTicketReturnForReview = (req, res, next) => {
+    const { reason } = req.body || {};
+    const allowedFields = ['reason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        return res.status(400).json({ success: false, message: 'reason is required' });
+    }
+    req.validatedBody = { reason: reason.trim() };
+    next();
+};
+
+
+// Validate a party appealing a decided ticket
+const validateTicketAppeal = (req, res, next) => {
+    const { reasonText } = req.body || {};
+    const allowedFields = ['reasonText'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (!reasonText || typeof reasonText !== 'string' || !reasonText.trim()) {
+        return res.status(400).json({ success: false, message: 'reasonText is required' });
+    }
+    if (reasonText.length > TICKET_FREE_TEXT_LIMIT) {
+        return res.status(400).json({ success: false, message: `reasonText cannot exceed ${TICKET_FREE_TEXT_LIMIT} characters` });
+    }
+    req.validatedBody = { reasonText: reasonText.trim() };
+    next();
+};
+
+
+// Validate an admin deciding a suspension proposal
+const validateSuspensionDecision = (req, res, next) => {
+    const { decision, decisionReason } = req.body || {};
+    const errors = [];
+    const allowedFields = ['decision', 'decisionReason'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    const allowed = ['suspend', 'no_action'];
+    if (!decision || !allowed.includes(decision)) {
+        errors.push(`decision is required and must be one of: ${allowed.join(', ')}`);
+    }
+    if (!decisionReason || typeof decisionReason !== 'string' || !decisionReason.trim()) {
+        errors.push('decisionReason is required');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { decision, decisionReason: decisionReason.trim() };
+    next();
+};
+
+// Validate a party responding to a suspension proposal
+const validateSuspensionResponse = (req, res, next) => {
+    const { text } = req.body || {};
+    const allowedFields = ['text'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (!text || typeof text !== 'string' || !text.trim()) {
+        return res.status(400).json({ success: false, message: 'text is required' });
+    }
+    req.validatedBody = { text: text.trim() };
+    next();
+};
+
+
+const FEEDBACK_AREAS = ['onboarding', 'duty_flow', 'otp', 'notifications', 'payments', 'jobs', 'app_performance', 'other'];
+const FEEDBACK_SENTIMENTS = ['POSITIVE', 'NEUTRAL', 'NEGATIVE', 'SEVERE_NEGATIVE'];
+
+// Validate platform feedback submission
+const validateFeedbackSubmission = (req, res, next) => {
+    const { text, area } = req.body || {};
+    const errors = [];
+    const allowedFields = ['text', 'area'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+
+    if (!text || typeof text !== 'string' || !text.trim()) {
+        errors.push('text is required');
+    } else if (text.length > TICKET_FREE_TEXT_LIMIT) {
+        errors.push(`text cannot exceed ${TICKET_FREE_TEXT_LIMIT} characters`);
+    }
+    if (area !== undefined && !FEEDBACK_AREAS.includes(area)) {
+        errors.push(`area must be one of: ${FEEDBACK_AREAS.join(', ')}`);
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    req.validatedBody = { text: text.trim(), area: area || 'other' };
+    next();
+};
+
+// Validate an admin overriding platform feedback's sentiment
+const validateSentimentOverride = (req, res, next) => {
+    const { sentiment } = req.body || {};
+    const allowedFields = ['sentiment'];
+    const unexpectedFields = Object.keys(req.body || {}).filter(f => !allowedFields.includes(f));
+    if (unexpectedFields.length > 0) {
+        return res.status(400).json({ success: false, message: `Unexpected fields: ${unexpectedFields.join(', ')}` });
+    }
+    if (!sentiment || !FEEDBACK_SENTIMENTS.includes(sentiment)) {
+        return res.status(400).json({ success: false, message: `sentiment is required and must be one of: ${FEEDBACK_SENTIMENTS.join(', ')}` });
+    }
+    req.validatedBody = { sentiment };
+    next();
+};
+
+
 module.exports = {
     validateSignup,
     validateOTP,
@@ -1801,6 +2731,7 @@ module.exports = {
     validateHospitalProfile,
     validateDutyStatusHistory,
     validateDocumentUpload,
+    validateResumeStageUpload,
     validateProfileUpdate,
     validateStaffAvailability,
     validateDutyCreation,
@@ -1813,7 +2744,22 @@ module.exports = {
     validateResendOtp,
     validateDutyCancellation,
     validateDutyEdit,
+    validateJobVacancyCreation,
+    validateJobVacancyEdit,
     validatePagination,
+    validateJobApplicationStatusUpdate,
+    validateJobApplicationWithdraw,
+    validateJobApplicationListQuery,
+    validateInterviewOfferSlots,
+    validateInterviewSlotSelect,
+    validateInterviewConfirm,
+    validateInterviewMeetingLink,
+    validateInterviewChangeReason,
+    validateInterviewReschedule,
+    validateInterviewOutcome,
+    validateNoShowMark,
+    validateOfferResponse,
+    validateInterviewConfigUpdate,
     validateReviewSubmission,
     validateStaffIdParam,
     validateNotificationId,
@@ -1830,5 +2776,23 @@ module.exports = {
     validateHospitalActiveDutiesQuery,
     validateHospitalDutyRouteMap,
     validateSendPhoneOTP,
-    validateVerifyPhoneOTP
+    validateVerifyPhoneOTP,
+    validateTicketCreation,
+    validateTicketReassign,
+    validateTicketRequestInfo,
+    validateTicketChatMessage,
+    validateAdminTicketChatMessage,
+    validateChatbotMessage,
+    validateKnowledgeBaseArticle,
+    validateTicketRecategorize,
+    validateTicketPriorityOverride,
+    validateTicketWithdraw,
+    validateTicketRespond,
+    validateTicketDecision,
+    validateTicketReturnForReview,
+    validateTicketAppeal,
+    validateSuspensionDecision,
+    validateSuspensionResponse,
+    validateFeedbackSubmission,
+    validateSentimentOverride
 };

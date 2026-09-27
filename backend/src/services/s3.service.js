@@ -63,6 +63,28 @@ exports.deleteFromS3 = async (key) => {
 };
 
 
+// Download an object's bytes directly — used by resumeRedaction.service.js,
+// which needs the actual file content to render/redact, not just a link to it.
+exports.getObjectBuffer = async (key) => {
+    try {
+        const command = new GetObjectCommand({
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: key
+        });
+        const response = await s3.send(command);
+
+        const chunks = [];
+        for await (const chunk of response.Body) {
+            chunks.push(chunk);
+        }
+        return Buffer.concat(chunks);
+    } catch (error) {
+        console.error("S3 Get Object Error:", error);
+        throw new Error("Storage service error");
+    }
+};
+
+
 // Generate PreSigned URL (15 minutes)
 exports.generatePreSignedURL = async (key) => {
     try {

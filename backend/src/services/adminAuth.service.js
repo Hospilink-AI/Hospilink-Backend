@@ -4,11 +4,14 @@ const OTPService = require('./otp.service');
 const EmailService = require('./email.service');
 const redisClient = require('../config/redis');
 const logger = require('../utils/logger');
-const { 
-    NotFoundError, 
+const {
+    NotFoundError,
     UnauthorizedError,
-    ValidationError 
+    ForbiddenError,
+    ValidationError
 } = require('../middleware/error.middleware');
+
+const DEACTIVATED_ADMIN_MESSAGE = 'This admin account has been deactivated. Please contact your super admin.';
 const deviceInfoService = require('./deviceInfo.service');
 const cacheService = require('./cache.service');
 
@@ -18,15 +21,18 @@ class AdminAuthService {
         try {
             // Parallel execution of independent operations
             const [admin, rateLimitResult] = await Promise.all([
-                // Find admin user with password
-                User.findOne({ 
-                    email: email.toLowerCase(), 
-                    role: 'admin' 
+                // Find admin user with password — deliberately NOT filtering by isActive here,
+                // so a deactivated admin's password still gets checked below. This lets us tell
+                // them *why* they're blocked without revealing deactivation status to someone
+                // who doesn't actually know the password.
+                User.findOne({
+                    email: email.toLowerCase(),
+                    role: 'admin'
                 }).select('+password'),
                 // Check rate limiting in parallel
                 this._checkRateLimit(email).catch(() => true) // Don't block on rate limit errors
             ]);
-            
+
             if (!admin) {
                 throw new UnauthorizedError('Invalid email or password.');
             }
@@ -35,6 +41,11 @@ class AdminAuthService {
             const isPasswordValid = await admin.comparePassword(password);
             if (!isPasswordValid) {
                 throw new UnauthorizedError('Invalid email or password.');
+            }
+
+            // Only reached with a correct password — safe to reveal deactivation status now
+            if (admin.isActive === false) {
+                throw new ForbiddenError(DEACTIVATED_ADMIN_MESSAGE);
             }
 
             // Generate OTP
@@ -119,14 +130,20 @@ class AdminAuthService {
                 );
             }
 
-            // Find admin user first 
-            const admin = await User.findOne({ 
-                email: emailLower, 
-                role: 'admin' 
+            // Find admin user first
+            const admin = await User.findOne({
+                email: emailLower,
+                role: 'admin'
             });
-            
+
             if (!admin) {
                 throw new NotFoundError('Admin not found');
+            }
+
+            // Covers the case where the admin was deactivated *after* signin() sent the OTP but
+            // before it was verified — don't hand out a token in that window.
+            if (admin.isActive === false) {
+                throw new ForbiddenError(DEACTIVATED_ADMIN_MESSAGE);
             }
 
             // Check Redis first (fast path)
@@ -166,7 +183,7 @@ class AdminAuthService {
 
             // Generate JWT token
             const token = require('jsonwebtoken').sign(
-                { id: admin._id, role: admin.role },
+                { id: admin._id, role: admin.role, adminSubRole: admin.adminSubRole },
                 process.env.JWT_SECRET,
                 { expiresIn: process.env.JWT_EXPIRES_IN }
             );
@@ -239,7 +256,8 @@ class AdminAuthService {
                     id: admin._id,
                     name: admin.name,
                     email: admin.email,
-                    role: admin.role
+                    role: admin.role,
+                    adminSubRole: admin.adminSubRole
                 }
             };
         } catch (error) {
@@ -265,6 +283,10 @@ class AdminAuthService {
             
             if (!admin) {
                 throw new NotFoundError('Admin not found');
+            }
+
+            if (admin.isActive === false) {
+                throw new ForbiddenError(DEACTIVATED_ADMIN_MESSAGE);
             }
 
             // Generate new OTP

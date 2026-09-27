@@ -13,9 +13,13 @@ const adminRoutes = require("./routes/admin.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
 const documentRoutes = require("./routes/document.routes");
 const dutyRoutes = require("./routes/duty.routes");
+const jobVacancyRoutes = require("./routes/jobVacancy.routes");
+const jobApplicationRoutes = require("./routes/jobApplication.routes");
+const jobVacancyPublicRoutes = require("./routes/jobVacancyPublic.routes");
 const hospitalDashboardRoutes = require("./routes/hospitalDashboard.routes");
 const notificationRoutes = require("./routes/notification.routes");
 const profileRoutes = require("./routes/profile.routes");
+const ticketRoutes = require("./routes/ticket.routes");
 const logger = require("./utils/logger");
 // Only run interval-based cron in persistent environments (local dev)
 // On Vercel, cron jobs are handled via api/cron/* endpoints + vercel.json schedules
@@ -106,6 +110,13 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/reviews", reviewRoutes);
+app.use("/api/tickets", ticketRoutes);
+app.use("/api/admin/tickets", require("./routes/adminTicket.routes"));
+app.use("/api/chatbot", require("./routes/chatbot.routes"));
+app.use("/api/admin/knowledge-base", require("./routes/adminKnowledgeBase.routes"));
+app.use("/api/account", require("./routes/accountStanding.routes"));
+app.use("/api/support/feedback", require("./routes/feedback.routes"));
+app.use("/api/admin/feedback", require("./routes/adminFeedback.routes"));
 
 
 // Document Management Routes
@@ -114,6 +125,9 @@ app.use("/api/webhook", require("./routes/webhook.route"));
 
 // Admin routes
 app.use("/api/admin", adminRoutes);
+// Must stay AFTER adminRoutes: this router starts with router.use(protect), so mounting it
+// first would 401 the public /api/admin/signin* routes before adminRoutes can serve them.
+app.use("/api/admin", require("./routes/adminPattern.routes"));
 
 // Hospital dashboard routes
 app.use("/api/hospital-dashboard", hospitalDashboardRoutes);
@@ -121,8 +135,16 @@ app.use("/api/hospital-dashboard", hospitalDashboardRoutes);
 // Activity Log routes (admin only)
 app.use("/api/admin/activity-logs", require("./routes/activityLog.routes"));
 
+// Public job vacancy routes
+app.use("/api", jobVacancyPublicRoutes);
+
 // General API routes (should be last to avoid matching Agent routes)
 app.use("/api", dutyRoutes);
+// Mounted before jobVacancyRoutes — defensive ordering so a future
+// '/vacancies/...' route added to either router can never accidentally
+// shadow the other (see jobApplication.routes.js's routing comment).
+app.use("/api", jobApplicationRoutes);
+app.use("/api", jobVacancyRoutes);
 
 // 404 handler - FIXED: Use a function instead of *
 app.use((req, res, next) => {
@@ -150,6 +172,8 @@ app.use((err, req, res, next) => {
   res.status(statusCode).json({
     success: false,
     message: message,
+    
+    ...(err.isOperational && err.code && { code: err.code }),
     ...(process.env.NODE_ENV !== "production" && { stack: err.stack }),
     requestId: req.requestId,
   });

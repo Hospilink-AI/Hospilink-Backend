@@ -2,11 +2,15 @@ const logger = require('../utils/logger');
 
 // Custom Error Classes for better error handling
 class AppError extends Error {
-    constructor(message, statusCode) {
+    // `code` is an optional stable, machine-readable identifier (e.g.
+    // 'PROFILE_REQUIRED_FOR_APPLICATION') so clients can branch on it instead
+    // of string-matching `message`.
+    constructor(message, statusCode, code) {
         super(message);
         this.statusCode = statusCode;
         this.status = `${statusCode}`.startsWith('4') ? 'fail' : 'error';
         this.isOperational = true;
+        if (code) this.code = code;
 
         Error.captureStackTrace(this, this.constructor);
     }
@@ -55,8 +59,8 @@ class RateLimitError extends AppError {
 }
 
 class UnprocessableEntityError extends AppError {
-    constructor(message = 'Unprocessable entity') {
-        super(message, 422);
+    constructor(message = 'Unprocessable entity', code) {
+        super(message, 422, code);
         this.name = 'UnprocessableEntityError';
     }
 }

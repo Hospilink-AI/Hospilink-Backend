@@ -14,6 +14,7 @@ const logger = require('../utils/logger');
 const cacheService = require('../services/cache.service');
 const { generateActiveDutiesPDF } = require('../utils/pdf.puppeteer');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
+const { redactBulkDutyFinancials } = require('../utils/adminResponseFilters');
 
 
 
@@ -93,8 +94,82 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
     }
 
     const result = await adminService.createDutyForHospital(hospital_id, req.body);
-    
+
     res.status(201).json(result);
+});
+
+
+// Create a job vacancy on behalf of a hospital
+// POST /api/admin/vacancy
+exports.createVacancyForHospital = asyncHandler(async (req, res) => {
+    const { hospital_id } = req.body;
+
+    if (!hospital_id) {
+        return res.status(400).json({ success: false, message: 'hospital_id is required' });
+    }
+
+    const vacancy = await adminService.createVacancyForHospital(hospital_id, req.user.id, req.body);
+
+    res.status(201).json({
+        success: true,
+        vacancy,
+        message: 'Vacancy posted successfully'
+    });
+});
+
+
+// List every vacancy across every hospital (oversight/audit view)
+// GET /api/admin/vacancies
+exports.listAllVacancies = asyncHandler(async (req, res) => {
+    const { hospitalId, specialty, location, activeOnly, page = 1, limit = 10 } = req.query;
+
+    const result = await adminService.listAllVacancies(
+        { hospitalId, specialty, location, activeOnly: activeOnly === 'true' },
+        { page: parseInt(page), limit: parseInt(limit) }
+    );
+
+    res.status(200).json({
+        success: true,
+        count: result.vacancies.length,
+        data: result.vacancies,
+        pagination: result.pagination
+    });
+});
+
+// GET /api/admin/vacancy-applications
+exports.listAllVacancyApplications = asyncHandler(async (req, res) => {
+    const { hospitalId, vacancyId, status, page = 1, limit = 10 } = req.query;
+
+    const result = await adminService.listAllVacancyApplications(
+        { hospitalId, vacancyId, status },
+        { page: parseInt(page), limit: parseInt(limit) }
+    );
+
+    res.status(200).json({
+        success: true,
+        count: result.applications.length,
+        data: result.applications,
+        pagination: result.pagination
+    });
+});
+
+// GET /api/admin/vacancy-applications/:applicationId
+exports.getVacancyApplicationDetail = asyncHandler(async (req, res) => {
+    const application = await adminService.getVacancyApplicationDetail(req.params.applicationId, req.user);
+    res.status(200).json({ success: true, application });
+});
+
+// GET /api/admin/interview-config
+exports.getInterviewConfig = asyncHandler(async (req, res) => {
+    const config = await adminService.getInterviewConfig();
+    res.status(200).json({ success: true, config });
+});
+
+// PATCH /api/admin/interview-config
+exports.updateInterviewConfig = asyncHandler(async (req, res) => {
+    const { key, value, effectiveFrom } = req.body;
+    const row = await adminService.updateInterviewConfig(key, value, effectiveFrom, req.user.id);
+    res.status(200).json({ success: true, config: row, message: `${key} updated` });
 });
 
 
@@ -253,7 +328,8 @@ exports.getAdminProfile = asyncHandler(async (req, res) => {
             id: user._id,
             name: user.name,
             email: user.email,
-            role: user.role
+            role: user.role,
+            adminSubRole: user.adminSubRole
         }
     });
 });
@@ -330,7 +406,7 @@ exports.getActiveDuties = asyncHandler(async (req, res) => {
 
     res.status(200).json({
         success: true,
-        data: result.duties,
+        data: redactBulkDutyFinancials(result.duties, req.user.adminSubRole),
         pagination: result.pagination,
         filters: result.filters,
         summary: result.summary
@@ -360,7 +436,7 @@ exports.exportActiveDuties = asyncHandler(async (req, res) => {
         limit: 10000
     });
 
-    const duties = result.duties || [];
+    const duties = redactBulkDutyFinancials(result.duties || [], req.user.adminSubRole);
 
     if (duties.length === 0) {
         return res.status(404).json({
@@ -552,7 +628,7 @@ exports.getDutyHistory = asyncHandler(async (req, res) => {
 
     res.status(200).json({
         success: true,
-        data: result.duties,
+        data: redactBulkDutyFinancials(result.duties, req.user.adminSubRole),
         pagination: result.pagination,
         filters: result.filters
     });
@@ -568,7 +644,7 @@ exports.getEmergencyDashboard = asyncHandler(async (req, res) => {
 
     res.status(200).json({
         success: true,
-        data: result.duties,
+        data: redactBulkDutyFinancials(result.duties, req.user.adminSubRole),
         pagination: result.pagination
     });
 });

@@ -1,10 +1,9 @@
 const pdfParse = require("pdf-parse");
-
 const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
-
 const { createCanvas } = require("canvas");
-
 const vision = require("@google-cloud/vision");
+const logger = require('../utils/logger');
+
 
 const client =
     new vision.ImageAnnotatorClient({

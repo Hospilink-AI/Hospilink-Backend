@@ -3,7 +3,7 @@ const router = express.Router();
 const notificationController = require("../controllers/notification.controller");
 const reviewController = require("../controllers/review.controller");
 const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
-const { validateReviewSubmission, validateStaffIdParam } = require("../middleware/validation.middleware");
+const { validateReviewSubmission, validateStaffIdParam, validateObjectId } = require("../middleware/validation.middleware");
 
 // Hospital submits review for staff, or staff submits review for hospital (reviewType derived from req.user.role)
 router.post(
@@ -22,6 +22,15 @@ router.get(
     checkSuspension,
     validateStaffIdParam,
     reviewController.getStaffReviews
+);
+
+// Get hospital reviews
+router.get(
+    "/hospital/:hospitalId",
+    protect,
+    checkSuspension,
+    validateObjectId('hospitalId'),
+    reviewController.getHospitalReviews
 );
 
 // Review Notification

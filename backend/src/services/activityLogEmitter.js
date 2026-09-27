@@ -120,6 +120,54 @@ class ActivityLogEmitter {
     }
 
 
+    // Emit ticket (Disputes & Support) activity
+    async emitTicketActivity(action, ticket, actor, details = {}, req = null) {
+        try {
+            if (!ticket || !actor || !action) {
+                console.error('emitTicketActivity: missing ticket, actor or action');
+                return null;
+            }
+
+            const ticketId = ticket._id?.toString() || ticket.id?.toString() || null;
+
+            const targetData = {
+                type: 'ticket',
+                id: ticketId,
+                name: ticket.ticketId || (ticketId ? `Ticket #${ticketId.slice(-6)}` : 'Ticket')
+            };
+
+            const activityDetails = {
+                ticketId: ticketId,
+                category: ticket.category,
+                status: ticket.status,
+                queue: ticket.queue,
+                ...details
+            };
+
+            const options = {
+                location: details.location || null
+            };
+
+            if ((actor.role === 'staff' || actor.role === 'hospital') && actor.userId) {
+                const location = await resolveUserLocation(actor.userId, actor.role);
+                if (location) options.location = location;
+            }
+
+            return await activityLogService.logActivity(
+                actor,
+                action,
+                targetData,
+                activityDetails,
+                req,
+                options
+            );
+        } catch (error) {
+            console.error('Error emitting ticket activity:', error);
+            return null;
+        }
+    }
+
+
     // Emit user activity
     async emitUserActivity(action, user, actor, details = {}, req = null) {
         try {
