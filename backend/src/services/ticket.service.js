@@ -1,4 +1,5 @@
 const Ticket = require('../models/Ticket');
+const TicketConversation = require('../models/TicketConversation');
 const Duty = require('../models/Duty');
 const JobApplication = require('../models/JobApplication');
 const JobVacancy = require('../models/JobVacancy');
@@ -561,6 +562,49 @@ class TicketService {
         ]);
 
         return { tickets, pagination: getPaginationMeta(total, page, limit) };
+    }
+
+    // Admin case file: the bot chat the ticket came from, null if none.
+    async getConversationForAdmin(ticketId) {
+        const ticket = await Ticket.findById(ticketId).select('_id').lean();
+        if (!ticket) throw new NotFoundError('Ticket not found');
+
+        const conversation = await TicketConversation.findOne({ ticket: ticket._id })
+            .select('language botCategory botConfidence messages')
+            .lean();
+        if (!conversation) return null;
+
+        return {
+            language: conversation.language,
+            botCategory: conversation.botCategory || null,
+            botConfidence: conversation.botConfidence ?? null,
+            messages: (conversation.messages || []).map(m => ({
+                sender: m.sender,
+                text: m.text || m.selectedButton || null,
+                at: m.at
+            }))
+        };
+    }
+
+    // spec US-D3.2: up to 20 other tickets between the same two people, either way round.
+    async getCounterpartyHistory(ticketId) {
+        const ticket = await Ticket.findById(ticketId).select('raisedBy raisedAgainst').lean();
+        if (!ticket) throw new NotFoundError('Ticket not found');
+        if (!ticket.raisedAgainst?.user) return [];
+
+        const a = ticket.raisedBy.user;
+        const b = ticket.raisedAgainst.user;
+        return Ticket.find({
+            _id: { $ne: ticket._id },
+            $or: [
+                { 'raisedBy.user': a, 'raisedAgainst.user': b },
+                { 'raisedBy.user': b, 'raisedAgainst.user': a }
+            ]
+        })
+            .select('_id ticketId category status resolutionOutcome createdAt')
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .lean();
     }
 
     // Conditional write — no claim-then-check race window, same pattern as
