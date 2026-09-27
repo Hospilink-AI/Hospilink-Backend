@@ -28,6 +28,14 @@ router.get('/against-me', authorize('staff', 'hospital'), validatePagination, ti
 
 router.get('/:id', authorize('staff', 'hospital', 'admin'), validateObjectId('id'), ticketController.getById);
 
+router.get(
+    '/:id/evidence/:evidenceId',
+    authorize('staff', 'hospital', 'admin'),
+    validateObjectId('id'),
+    validateObjectId('evidenceId'),
+    ticketController.getEvidenceUrl
+);
+
 router.patch(
     '/:id/withdraw',
     authorize('staff', 'hospital'),

@@ -1,7 +1,10 @@
 const Ticket = require('../models/Ticket');
 const Duty = require('../models/Duty');
 const JobApplication = require('../models/JobApplication');
+const JobVacancy = require('../models/JobVacancy');
 const MedicalStaff = require('../models/MedicalStaff');
+const Hospital = require('../models/Hospital');
+const User = require('../models/User');
 const { hasCapability } = require('../config/adminPermissions.config');
 const { NotFoundError, ForbiddenError, ConflictError, UnprocessableEntityError } = require('../middleware/error.middleware');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
@@ -54,12 +57,19 @@ class TicketService {
                 return application ? { application } : {};
             }
             // PAYMENT resolves to the same Duty document (Duty.paymentMethod
-            // / totalPayment) — no separate Payment collection.
+            // / totalPayment) — no separate Payment collection. hospital/
+            // assignedTo are included alongside the payment fields so
+            // _resolveCounterparty can reuse this same fetch for a payment
+            // dispute's counterparty, same as it does for DUTY.
             if (subjectType === 'PAYMENT') {
                 const duty = await Duty.findById(subjectId)
-                    .select('paymentMethod isPaid totalPayment offeredRate')
+                    .select('paymentMethod isPaid totalPayment offeredRate hospital assignedTo')
                     .lean();
                 return duty ? { payment: duty } : {};
+            }
+            if (subjectType === 'VACANCY') {
+                const vacancy = await JobVacancy.findById(subjectId).select('hospitalId').lean();
+                return vacancy ? { vacancy } : {};
             }
         } catch (err) {
             // Context is a convenience, not a correctness requirement —
@@ -67,6 +77,53 @@ class TicketService {
             return {};
         }
         return {};
+    }
+
+    // ADJUDICATED tickets need raisedAgainst.user — a User id — but every
+    // subject document the app hands us only carries profile ids (a Duty's
+    // hospital/assignedTo, a JobApplication's hospitalId/staff, a
+    // JobVacancy's hospitalId). This is the one place that translation
+    // happens, for every subject type that has a natural "other party" —
+    // used by createTicket so the plain form gets the same automatic
+    // resolution chatbotIntake.service.js#_resolveDutyCounterparty already
+    // gives the chatbot for duties, instead of requiring the caller to
+    // already know a User id it was never given. Returns null when there's
+    // no subject-derived counterparty (ACCOUNT/NONE-subject categories like
+    // account.rating_challenge) — those still need an explicit raisedAgainst,
+    // or a product decision on what "the platform" as a respondent means.
+    async _resolveCounterparty(subjectType, linkedContext, raiserRole) {
+        // DUTY and PAYMENT both resolve to a Duty document with the same
+        // hospital/assignedTo shape — one shared lookup for both.
+        const dutyDoc = subjectType === 'DUTY' ? linkedContext.duty
+            : subjectType === 'PAYMENT' ? linkedContext.payment
+            : null;
+        if (dutyDoc) {
+            if (raiserRole === 'staff') {
+                const hospital = await Hospital.findById(dutyDoc.hospital).select('user').lean();
+                return hospital ? { userId: hospital.user, role: 'hospital' } : null;
+            }
+            const staff = await MedicalStaff.findById(dutyDoc.assignedTo).select('user').lean();
+            return staff ? { userId: staff.user, role: 'staff' } : null;
+        }
+
+        if ((subjectType === 'APPLICATION' || subjectType === 'INTERVIEW') && linkedContext.application) {
+            if (raiserRole === 'staff') {
+                const hospital = await Hospital.findById(linkedContext.application.hospitalId).select('user').lean();
+                return hospital ? { userId: hospital.user, role: 'hospital' } : null;
+            }
+            const staff = await MedicalStaff.findById(linkedContext.application.staff).select('user').lean();
+            return staff ? { userId: staff.user, role: 'staff' } : null;
+        }
+
+        if (subjectType === 'VACANCY' && linkedContext.vacancy) {
+            // A vacancy has exactly one associated hospital and no assigned
+            // staff member — the counterparty is always that hospital,
+            // regardless of the raiser's own role.
+            const hospital = await Hospital.findById(linkedContext.vacancy.hospitalId).select('user').lean();
+            return hospital ? { userId: hospital.user, role: 'hospital' } : null;
+        }
+
+        return null;
     }
 
     // Priority-derived operational targets (slaFirstReplyBy/slaDecideBy) plus
@@ -207,6 +264,24 @@ class TicketService {
         const { resolutionClass } = await ticketCategoryConfigService.getByCategory(category);
         const isAdjudicated = resolutionClass === 'ADJUDICATED';
 
+        // The caller (chatbot, or a future client that already has it) may
+        // already supply raisedAgainst — trust it and skip re-deriving.
+        // Otherwise, for ADJUDICATED categories with a subject that has a
+        // natural counterparty (DUTY/PAYMENT/APPLICATION/INTERVIEW/VACANCY),
+        // resolve it here so the plain form works the same way the chatbot
+        // already does for duties. A category with no such subject (e.g.
+        // account.rating_challenge raised with no linked duty) still can't
+        // be resolved automatically — fails clearly rather than silently
+        // saving an ADJUDICATED ticket the model itself would reject.
+        if (isAdjudicated && !raisedAgainst) {
+            raisedAgainst = await this._resolveCounterparty(subjectType, linkedContext, userRole);
+            if (!raisedAgainst) {
+                throw new UnprocessableEntityError(
+                    "We couldn't automatically determine who this complaint is against. Please contact support directly for this type of issue."
+                );
+            }
+        }
+
         const priority = await this._computePriority({
             domain, category, subjectType, resolutionClass, linkedContext, raisedBy: { user: userId }
         });
@@ -321,6 +396,42 @@ class TicketService {
         };
     }
 
+    // Admin-only enrichment — raiser/respondent must keep seeing bare ids
+    // (they never learn a real identity beyond what the ticket itself
+    // already tells them), same restraint this whole module applies
+    // everywhere else. One batched User lookup, not one query per field.
+    async _enrichForAdmin(ticket) {
+        const userIds = [
+            ticket.raisedBy?.user,
+            ticket.raisedAgainst?.user,
+            ticket.assignedTo,
+            ticket.decidedBy,
+            ticket.approvedBy
+        ].filter(Boolean).map(id => id.toString());
+
+        if (userIds.length === 0) return ticket;
+
+        const users = await User.find({ _id: { $in: userIds } }).select('name role').lean();
+        const byId = new Map(users.map(u => [u._id.toString(), u]));
+
+        const withName = (id) => {
+            if (!id) return null;
+            const u = byId.get(id.toString());
+            return { _id: id, name: u?.name || null, role: u?.role || null };
+        };
+
+        return {
+            ...ticket,
+            raisedBy: { ...ticket.raisedBy, name: byId.get(ticket.raisedBy.user.toString())?.name || null },
+            raisedAgainst: ticket.raisedAgainst
+                ? { ...ticket.raisedAgainst, name: byId.get(ticket.raisedAgainst.user.toString())?.name || null }
+                : ticket.raisedAgainst,
+            assignedTo: withName(ticket.assignedTo),
+            decidedBy: withName(ticket.decidedBy),
+            approvedBy: withName(ticket.approvedBy)
+        };
+    }
+
     _relationToTicket(ticket, user) {
         const userId = (user._id || user.id).toString();
         if (ticket.raisedBy.user.toString() === userId) return 'raiser';
@@ -342,9 +453,41 @@ class TicketService {
         const relation = this._relationToTicket(ticket, user);
         if (relation === 'raiser') return this._shapeForRaiser(ticket);
         if (relation === 'respondent') return this._shapeForRespondent(ticket);
-        if (relation === 'admin') return ticket;
+        if (relation === 'admin') return this._enrichForAdmin(ticket);
 
         throw new ForbiddenError("You don't have permission to view this ticket.");
+    }
+
+    // getById's response only ever carried a file's name/type — nothing
+    // returned a way to actually open one. Same visibility rule as
+    // _shapeForRaiser/_shapeForRespondent (spec §08.03: visible to whoever
+    // supplied it and to admins, never the counterparty) — a NotFoundError
+    // for a file that exists but isn't yours to see, not Forbidden, so a
+    // raiser can't distinguish "no such evidence" from "that's the
+    // respondent's" by the error alone.
+    async getEvidenceUrl(ticketId, evidenceId, user) {
+        const ticket = await Ticket.findById(ticketId).lean();
+        if (!ticket) {
+            throw new NotFoundError('Ticket not found');
+        }
+
+        const relation = this._relationToTicket(ticket, user);
+        if (!relation) {
+            throw new ForbiddenError("You don't have permission to view this ticket.");
+        }
+
+        const item = (ticket.evidence || []).find(e => e._id.toString() === evidenceId);
+        const visible = item && (
+            relation === 'admin' ||
+            (relation === 'raiser' && item.suppliedBy !== 'respondent') ||
+            (relation === 'respondent' && item.suppliedBy !== 'raiser')
+        );
+        if (!visible) {
+            throw new NotFoundError('Evidence not found');
+        }
+
+        const url = await s3Service.generatePreSignedURL(item.s3Key);
+        return { url, originalFileName: item.originalFileName, mimeType: item.mimeType };
     }
 
     // spec §08.03: images and PDF, 5 files, 10 MB each, from either party.
@@ -458,7 +601,13 @@ class TicketService {
         const { page, limit, skip } = getPaginationParams(pagination.page, pagination.limit);
 
         const allowedQueues = this._allowedQueuesFor(admin.adminSubRole);
-        const query = { status: { $nin: ['NEW', 'TRIAGE'] } };
+        // TRIAGE stays excluded from the default view — those tickets have
+        // their own dedicated screen (listTriage/GET /triage) because their
+        // category (and therefore queue) may not be settled yet. NEW has no
+        // such alternative and is exactly what a work queue exists to
+        // surface — claim() only ever works on NEW/TRIAGE, so excluding NEW
+        // here meant the default queue could never show anything claimable.
+        const query = { status: { $nin: ['TRIAGE'] } };
         query.queue = filters.queue
             ? (allowedQueues.includes(filters.queue) ? filters.queue : '__none__')
             : { $in: allowedQueues };

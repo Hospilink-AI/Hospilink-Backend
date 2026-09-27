@@ -25,7 +25,7 @@ const ticketConversationSchema = new mongoose.Schema({
     // Stored separately from Ticket.botCategory/botConfidence so the gap
     // between the two is visible even for chats that never became a
     // ticket — "the only honest measure of whether the bot works" per §06.09.
-    botCategory: { type: String, enum: CATEGORIES, default: null },
+    botCategory: { type: String, enum: CATEGORIES },
     botConfidence: { type: Number, min: 0, max: 1, default: null },
 
     ticket: { type: mongoose.Schema.Types.ObjectId, ref: 'Ticket', default: null },
