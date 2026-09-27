@@ -247,7 +247,10 @@ class PatternEngineService {
     // a shadow record.
     async listForParty(user) {
         const userId = user._id || user.id;
-        return PatternFlag.find({ party: userId, status: { $ne: 'voided' } }).sort({ createdAt: -1 }).lean();
+        return PatternFlag.find({ party: userId, status: { $ne: 'voided' } })
+            .populate('casesRelied', '_id ticketId category createdAt resolutionOutcome')
+            .sort({ createdAt: -1 })
+            .lean();
     }
 }
 
