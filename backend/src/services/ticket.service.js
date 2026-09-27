@@ -234,7 +234,7 @@ class TicketService {
             raisedBy: { user: userId, role: userRole },
             raisedAgainst: raisedAgainst ? { user: raisedAgainst.userId, role: raisedAgainst.role } : undefined,
             source,
-            botCategory: botCategory || null,
+            botCategory: botCategory || undefined,
             botConfidence: botConfidence ?? null,
             priority,
             slaAcknowledgeBy,
@@ -1277,7 +1277,7 @@ class TicketService {
             throw new ForbiddenError('The approver must be a different admin from whoever proposed the decision.');
         }
 
-        ticket.resolutionOutcome = null;
+        ticket.resolutionOutcome = undefined;
         ticket.resolutionActions = [];
         ticket.actionTakenStatement = null;
         ticket.decidedBy = null;
