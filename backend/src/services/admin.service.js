@@ -2430,6 +2430,43 @@ class AdminService {
         });
     }
 
+    
+
+    // GET /api/admin/auto-relist/config — same shape as getInterviewConfig,
+    // scoped to just the 'autoRelist.*' keys (SystemConfig is one shared
+    // store; this filters rather than duplicating the read logic).
+    async getAutoRelistConfig() {
+        const keys = SystemConfigService.defaultKeys.filter(key => key.startsWith('autoRelist.'));
+        const [effective, historyEntries] = await Promise.all([
+            SystemConfigService.getManyEffective(keys),
+            Promise.all(keys.map(key => SystemConfigService.getHistory(key)))
+        ]);
+        return keys.map((key, i) => ({ key, value: effective[key], history: historyEntries[i] }));
+    }
+
+
+
+    // PATCH /api/admin/auto-relist/config — Super Admin only (capability
+    // 'autoRelist.config.manage' is granted to no other sub-role). Rejects
+    // any key outside the autoRelist.* namespace even though it's
+    // technically a known SystemConfig key — this endpoint is not a
+    // backdoor into every other domain's settings.
+    async updateAutoRelistConfig(key, value, effectiveFrom, adminUserId) {
+        if (!key.startsWith('autoRelist.') || !SystemConfigService.isKnownKey(key)) {
+            throw new UnprocessableEntityError(`Unknown auto-relist config key: ${key}`);
+        }
+        const invalid = await SystemConfigService.validateUpdate(key, value);
+        if (invalid) {
+            throw new UnprocessableEntityError(invalid);
+        }
+        return SystemConfigService.setValue(key, value, {
+            effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : undefined,
+            createdBy: adminUserId
+        });
+    }
+
+
+
     // ─── Account suspension ────────────────────────────────────────────────────
 
     // PATCH /api/admin/hospitals/:hospitalId/suspend

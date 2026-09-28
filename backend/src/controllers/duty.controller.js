@@ -688,6 +688,53 @@ exports.editDuty = asyncHandler(async (req, res) => {
 
 
 
+exports.setAutoRelistEnabled = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const { enabled } = req.body;
+
+    const duty = await DutyService.setAutoRelistEnabled(id, userId, enabled);
+
+    res.status(200).json({
+        success: true,
+        message: `Auto-relist ${enabled ? 'enabled' : 'disabled'} for this duty`,
+        data: {
+            dutyId: duty._id,
+            autoRelist: {
+                enabled: duty.autoRelist.enabled,
+                relistCount: duty.autoRelist.relistCount,
+                rateBoostApplied: duty.autoRelist.rateBoostApplied
+            }
+        }
+    });
+});
+
+
+
+exports.getFindingCoverPanel = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const duties = await DutyService.getFindingCoverPanel(userId);
+
+    res.status(200).json({
+        success: true,
+        duties
+    });
+});
+
+
+
+exports.getAutoRelistMonthToDate = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const summary = await DutyService.getAutoRelistMonthToDate(userId);
+
+    res.status(200).json({
+        success: true,
+        ...summary
+    });
+});
+
+
+
 exports.getDutyDetail = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;

@@ -14,6 +14,7 @@ const {
     validateResendOtp,
     validateDutyCancellation,
     validateDutyEdit,
+    validateAutoRelistToggle,
     validatePagination,
     validateObjectId,
     validateStatementQuery,
@@ -119,6 +120,15 @@ router.patch(
     dutyController.editDuty
 );
 
+router.patch(
+    '/duties/:id/auto-relist',
+    authorize('hospital'),
+    requireHospitalVerification,
+    validateObjectId('id'),
+    validateAutoRelistToggle,
+    dutyController.setAutoRelistEnabled
+);
+
 router.get(
     '/duties/statement',
     authorize('staff'),
@@ -133,11 +143,15 @@ router.get('/duties/active-duties', authorize('hospital'), requireHospitalVerifi
  
 router.get('/duties/duty-route-map/:dutyId', authorize('hospital'), requireHospitalVerification, validateHospitalDutyRouteMap, dutyController.getHospitalDutyRouteMap);
 
+
+router.get('/duties/auto-relist/finding-cover', authorize('hospital'), requireHospitalVerification, dutyController.getFindingCoverPanel);
+router.get('/duties/auto-relist/month-to-date', authorize('hospital'), requireHospitalVerification, dutyController.getAutoRelistMonthToDate);
+
 router.get('/duties/:id', validateObjectId('id'), authorize('staff', 'hospital', 'admin'), dutyController.getDutyDetail);
 
 router.post('/duties/:id/route', authorize('staff'), requireStaffVerificationandisAvailable, dutyController.getDutyRoute);
 
-router.patch('/duties/:id/cancel', authorize('hospital'), requireHospitalVerification, validateDutyCancellation, dutyController.cancelDuty);
+router.patch('/duties/:id/cancel', authorize('hospital', 'staff'), requireHospitalVerification, requireVerifiedStaffOnly, validateDutyCancellation, dutyController.cancelDuty);
 
 
 module.exports = router;

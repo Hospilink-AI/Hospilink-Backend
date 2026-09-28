@@ -1,13 +1,3 @@
-// Guardrails for admin edits to SystemConfig values. The store itself
-// (models/SystemConfig.js) is schema-less — `value` is Mixed — so without
-// these an admin typo (a string where a number belongs, a min above a max) is
-// saved as-is, every server check that reads it misbehaves, and, now that
-// staff and hospitals read the interview keys via GET /api/interview/config,
-// every client screen does too.
-//
-// The bounds are sanity guardrails that catch typos (300 slots per offer),
-// not business policy — widen them here if the business genuinely needs more.
-
 const { SLOT_DURATIONS } = require('./jobApplication.constants');
 
 const integer = (min, max) => ({ kind: 'integer', min, max });
@@ -35,7 +25,22 @@ const RULES = {
     'interview.noShowScoreFloor': number(0, 1),
     'ticket.botConfidenceThresholdEn': number(0, 1),
     'ticket.botConfidenceThresholdHiMr': number(0, 1),
-    'ticket.clawbackCapPercent': number(0, 100)
+    'ticket.clawbackCapPercent': number(0, 100),
+
+    // Auto-relist (staff-cancellation recovery). Bounds are sanity
+    // guardrails, same spirit as the interview ones above — not business
+    // policy. 'autoRelist.featureDefaultEnabled' has no explicit rule; it
+    // falls back to checkAgainstDefault's boolean check.
+    'autoRelist.lateCancellationBandMinutes': integer(15, 240),
+    'autoRelist.staffCancelCutoffMinutes': integer(5, 120),
+    'autoRelist.rateBoostFraction': number(0, 1),
+    'autoRelist.relistCap': integer(1, 10),
+    'autoRelist.repeatPushScheduleMinutes': { kind: 'ascendingIntegers', min: 1, max: 120, maxLength: 5 },
+    'autoRelist.notificationRadiusKm': integer(10, 200),
+    'autoRelist.staffWatchlistWindowDays': integer(1, 180),
+    'autoRelist.staffWatchlistThresholdCount': integer(1, 20),
+    'autoRelist.pairWatchlistThresholdCount': integer(1, 20),
+    'autoRelist.hospitalWatchlistMultiplier': number(1, 10)
 };
 
 // Rules that compare two keys. Checked against the *other* key's current
@@ -51,6 +56,11 @@ const CROSS_KEY_RULES = [
         keys: ['interview.schedulingWindowMinHours', 'interview.schedulingWindowMaxDays'],
         check: (minHours, maxDays) => minHours < maxDays * 24,
         message: 'interview.schedulingWindowMinHours must be shorter than interview.schedulingWindowMaxDays, or no slot could ever be valid'
+    },
+    {
+        keys: ['autoRelist.staffCancelCutoffMinutes', 'autoRelist.lateCancellationBandMinutes'],
+        check: (cutoff, band) => cutoff < band,
+        message: 'autoRelist.staffCancelCutoffMinutes must be shorter than autoRelist.lateCancellationBandMinutes, or the late-cancellation band would never apply'
     }
 ];
 
