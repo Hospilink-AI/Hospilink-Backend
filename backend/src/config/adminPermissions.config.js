@@ -28,7 +28,12 @@ const ADMIN_CAPABILITIES = {
         'ticket.approve',
         'pattern.view',
         'suspension.decide',
-        'feedback.view'
+        'feedback.view',
+
+        // Auto-relist
+        'autoRelist.analytics.view',
+        'autoRelist.history.view',
+        'autoRelist.manage'
     ],
     tech_support: [
         'hospital.view',
@@ -48,7 +53,14 @@ const ADMIN_CAPABILITIES = {
         // Spec update — Support now sees the feedback board, scoped in
         // feedback.service#listForAdmin to their own conversations only
         // (feedback that converted into a ticket assigned to them).
-        'feedback.view'
+        'feedback.view',
+
+        // Support can see why a duty's rate changed, but ONLY from inside
+        // an open ticket about that duty — enforced in the service, not
+        // here (same pattern as feedback.view's scoping). No aggregates,
+        // no watchlists: 'autoRelist.analytics.view'/'spend.view' are
+        // deliberately absent.
+        'autoRelist.history.view'
     ]
 };
 

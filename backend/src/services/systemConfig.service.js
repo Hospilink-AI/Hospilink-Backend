@@ -1,12 +1,23 @@
 const SystemConfig = require('../models/SystemConfig');
 const cacheService = require('./cache.service');
 const { validateValue, CROSS_KEY_RULES } = require('../utils/systemConfig.rules');
+const {
+    LATE_CANCELLATION_BAND_MINUTES,
+    STAFF_CANCEL_CUTOFF_MINUTES,
+    RATE_BOOST_FRACTION,
+    RELIST_CAP,
+    REPEAT_PUSH_SCHEDULE_MINUTES,
+    RELIST_NOTIFICATION_RADIUS_KM,
+    STAFF_WATCHLIST_WINDOW_DAYS,
+    STAFF_WATCHLIST_THRESHOLD_COUNT,
+    PAIR_WATCHLIST_THRESHOLD_COUNT,
+    HOSPITAL_WATCHLIST_MULTIPLIER
+} = require('../utils/dutyCancellation.constants');
 
 // Hardcoded fallbacks — used only when a key has never been seeded into
-// SystemConfig (e.g. a fresh environment before `scripts/seedInterviewConfig.js`
-// has run). Every one of these mirrors a real seeded row so the interview
+// SystemConfig Every one of these mirrors a real seeded row so the interview
 // flow never goes down on a missing seed, it just runs on documented
-// defaults. Values match documents/JOB_APPLICATION_INTERVIEW_HIRING_PROCESS.pdf §14.
+// defaults. 
 const DEFAULTS = {
     'interview.slotDurationDefault': 30,
     'interview.slotsPerOfferMin': 3,
@@ -80,7 +91,28 @@ const DEFAULTS = {
     // Phase 3 — blind/simultaneous review reveal. A review stays visible
     // only to its own author until either the sibling review for the same
     // duty also exists, or this many days have passed.
-    'rating.blindRevealTimeoutDays': 14
+    'rating.blindRevealTimeoutDays': 14,
+
+    // Auto-relist (staff-cancellation recovery, documents/
+    // AUTO_RELIST_BUILD_STATUS_AND_API_REFERENCE.pdf §09). Values sourced
+    // from dutyCancellation.constants.js rather than retyped here, so that
+    // file stays the one place these numbers are literally written down —
+    // this map only registers them as admin-editable, it doesn't redefine
+    // them. Deliberately NOT here: rate rounding, urgency escalation step,
+    // the emergency escalation ceiling, and cancellation-exclusion
+    // permanence — those are marked "No" in the parameters table, i.e.
+    // architecture, not policy, and stay fixed constants.
+    'autoRelist.featureDefaultEnabled': true,
+    'autoRelist.lateCancellationBandMinutes': LATE_CANCELLATION_BAND_MINUTES,
+    'autoRelist.staffCancelCutoffMinutes': STAFF_CANCEL_CUTOFF_MINUTES,
+    'autoRelist.rateBoostFraction': RATE_BOOST_FRACTION,
+    'autoRelist.relistCap': RELIST_CAP,
+    'autoRelist.repeatPushScheduleMinutes': REPEAT_PUSH_SCHEDULE_MINUTES,
+    'autoRelist.notificationRadiusKm': RELIST_NOTIFICATION_RADIUS_KM,
+    'autoRelist.staffWatchlistWindowDays': STAFF_WATCHLIST_WINDOW_DAYS,
+    'autoRelist.staffWatchlistThresholdCount': STAFF_WATCHLIST_THRESHOLD_COUNT,
+    'autoRelist.pairWatchlistThresholdCount': PAIR_WATCHLIST_THRESHOLD_COUNT,
+    'autoRelist.hospitalWatchlistMultiplier': HOSPITAL_WATCHLIST_MULTIPLIER
 };
 
 const CACHE_TTL_SECONDS = 300;
