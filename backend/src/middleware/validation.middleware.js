@@ -13,10 +13,6 @@ const {
     PRIORITIES: TICKET_PRIORITIES, RESOLUTION_OUTCOMES: TICKET_RESOLUTION_OUTCOMES,
     RESOLUTION_ACTIONS: TICKET_RESOLUTION_ACTIONS, DOMAINS: TICKET_DOMAINS
 } = require('../utils/ticket.constants');
-const {
-    HOSPITAL_CANCEL_REASONS, STAFF_CANCEL_REASONS,
-    HOSPITAL_OTHER_REASON, STAFF_OTHER_REASON
-} = require('../utils/dutyCancellation.constants');
 const mongoose = require('mongoose');
 
 
@@ -1048,35 +1044,33 @@ const validateResendOtp = (req, res, next) => {
 
 
 
+// Validation for duty cancellation
 const validateDutyCancellation = (req, res, next) => {
     const { reason, reasonText } = req.body;
     const errors = [];
-    const role = req.user?.role;
-
+    
     // Check for unexpected fields
     const allowedFields = ['reason', 'reasonText'];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
-
+    
     if (unexpectedFields.length > 0) {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
     }
-
-    const validReasons = role === 'staff' ? STAFF_CANCEL_REASONS : HOSPITAL_CANCEL_REASONS;
-    const otherValue = role === 'staff' ? STAFF_OTHER_REASON : HOSPITAL_OTHER_REASON;
-
+    
+    const validReasons = ['no_longer_needed', 'found_alternative', 'emergency_resolved', 'budget_constraints', 'other'];
     if (!reason || !validReasons.includes(reason)) {
         errors.push(`Valid reason is required. Allowed: ${validReasons.join(', ')}`);
     }
-
-    if (reason === otherValue && (!reasonText || reasonText.trim().length === 0)) {
-        errors.push(`reasonText is required when reason is "${otherValue}"`);
+    
+    if (reason === 'other' && (!reasonText || reasonText.trim().length === 0)) {
+        errors.push('reasonText is required when reason is "other"');
     }
-
+    
     if (reasonText && reasonText.length > 500) {
         errors.push('reasonText cannot exceed 500 characters');
     }
-
+    
     if (errors.length > 0) {
         return res.status(400).json({
             success: false,
@@ -1084,35 +1078,7 @@ const validateDutyCancellation = (req, res, next) => {
             errors: errors
         });
     }
-
-    next();
-};
-
-
-
-// Validation for the auto-relist opt-in/opt-out toggle
-const validateAutoRelistToggle = (req, res, next) => {
-    const errors = [];
-    const allowedFields = ['enabled'];
-    const receivedFields = Object.keys(req.body);
-    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
-
-    if (unexpectedFields.length > 0) {
-        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
-    }
-
-    if (typeof req.body.enabled !== 'boolean') {
-        errors.push('enabled is required and must be a boolean');
-    }
-
-    if (errors.length > 0) {
-        return res.status(400).json({
-            success: false,
-            message: 'Validation failed',
-            errors
-        });
-    }
-
+    
     next();
 };
 
@@ -1123,7 +1089,7 @@ const validateDutyEdit = (req, res, next) => {
     const errors = [];
     const allowedFields = [
         'staff_role', 'date', 'end_date', 'start_time', 'end_time',
-        'urgency', 'description', 'offered_rate', 'is_overnight_duty', 'duty_sub_type'
+        'urgency', 'description', 'offered_rate', 'is_overnight_duty'
     ];
     
     const receivedFields = Object.keys(req.body);
@@ -1131,15 +1097,6 @@ const validateDutyEdit = (req, res, next) => {
     
     if (unexpectedFields.length > 0) {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Allowed: ${allowedFields.join(', ')}`);
-    }
-
-    // RMO sub-type: role checks against the saved duty happen in the service
-    if (req.body.duty_sub_type) {
-        if (!['ward', 'icu', 'casualty'].includes(req.body.duty_sub_type)) {
-            errors.push('duty_sub_type must be one of: ward, icu, casualty');
-        } else if (req.body.staff_role && req.body.staff_role !== 'rmo') {
-            errors.push('Sub-type is only allowed for RMO duties');
-        }
     }
     
     // Validate urgency if provided
@@ -1563,31 +1520,6 @@ const validateOfferResponse = (req, res, next) => {
 };
 
 const validateInterviewConfigUpdate = (req, res, next) => {
-    const { key, value, effectiveFrom } = req.body;
-    const errors = [];
-
-    if (!key || typeof key !== 'string' || !key.trim()) {
-        errors.push('key is required');
-    }
-    if (value === undefined) {
-        errors.push('value is required');
-    }
-    if (effectiveFrom !== undefined && isNaN(Date.parse(effectiveFrom))) {
-        errors.push('effectiveFrom must be a valid ISO date when provided');
-    }
-
-    if (errors.length > 0) {
-        return res.status(400).json({ success: false, message: 'Validation failed', errors });
-    }
-
-    next();
-};
-
-
-// Same shape as validateInterviewConfigUpdate — kept as its own function
-// (rather than reused under a name that says "interview") so the
-// auto-relist config route reads clearly on its own.
-const validateAutoRelistConfigUpdate = (req, res, next) => {
     const { key, value, effectiveFrom } = req.body;
     const errors = [];
 
@@ -2812,8 +2744,6 @@ module.exports = {
     validateResendOtp,
     validateDutyCancellation,
     validateDutyEdit,
-    validateAutoRelistToggle,
-    validateAutoRelistConfigUpdate,
     validateJobVacancyCreation,
     validateJobVacancyEdit,
     validatePagination,

@@ -24,7 +24,6 @@ const {
     validateAssignDuty,
     validateUnlockOtp,
     validateAdminOverrideStatus,
-    validateAdminAutoRelistToggle,
     validateAdminCreation,
     validateAdminRoleChange,
     validateRoleChangeOtp,
@@ -35,8 +34,7 @@ const {
     validateDutyCreation,
     validateJobVacancyCreation,
     validatePagination,
-    validateInterviewConfigUpdate,
-    validateAutoRelistConfigUpdate
+    validateInterviewConfigUpdate
 } = require('../middleware/validation.middleware');
 
 const {
@@ -105,18 +103,6 @@ router.get('/active-duties', requireCapability('duty.view'), validateActiveDutie
 
 router.get('/emergency-dashboard', requireCapability('duty.view'), adminController.getEmergencyDashboard);
 
-// Auto-relist health — admin RBAC table
-router.get('/auto-relist/tiles', requireCapability('autoRelist.analytics.view'), adminController.getAutoRelistTiles);
-router.get('/auto-relist/trend', requireCapability('autoRelist.analytics.view'), adminController.getAutoRelistTrend);
-router.get('/auto-relist/boost-spend', requireCapability('autoRelist.spend.view'), adminController.getAutoRelistBoostSpend);
-router.get('/auto-relist/cap-reached', requireCapability('autoRelist.analytics.view'), adminController.getAutoRelistCapReachedQueue);
-router.get('/auto-relist/staff-watchlist', requireCapability('autoRelist.analytics.view'), adminController.getAutoRelistStaffWatchlist);
-router.get('/auto-relist/pair-watchlist', requireCapability('autoRelist.analytics.view'), adminController.getAutoRelistPairWatchlist);
-router.get('/auto-relist/hospital-watchlist', requireCapability('autoRelist.analytics.view'), adminController.getAutoRelistHospitalWatchlist);
-router.get('/auto-relist/duties/:dutyId/history', requireCapability('autoRelist.history.view'), validateObjectId('dutyId'), adminController.getAutoRelistDutyHistory);
-router.get('/auto-relist/config', requireCapability('autoRelist.config.manage'), adminController.getAutoRelistConfig);
-router.patch('/auto-relist/config', requireCapability('autoRelist.config.manage'), validateAutoRelistConfigUpdate, adminController.updateAutoRelistConfig);
-
 router.get('/duty-route-map/:dutyId', requireCapability('duty.view'), validateDutyRouteMap, adminController.getDutyRouteMap);
 
 // Overnight duties and duty history
@@ -151,14 +137,6 @@ router.patch(
     validateObjectId('id'),
     validateAdminOverrideStatus,
     adminController.adminOverrideDutyStatus
-);
-
-router.patch(
-    '/duties/:id/auto-relist',
-    requireCapability('autoRelist.manage'),
-    validateObjectId('id'),
-    validateAdminAutoRelistToggle,
-    adminController.setDutyAutoRelistEnabled
 );
 
 

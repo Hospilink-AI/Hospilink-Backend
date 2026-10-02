@@ -41,8 +41,7 @@ exports.createDuty = asyncHandler(async (req, res) => {
         offered_rate,
         is_overnight_duty,
         staff_count,
-        duty_sub_type,
-        auto_relist_enabled
+        duty_sub_type
     } = req.body;
 
 
@@ -62,8 +61,7 @@ exports.createDuty = asyncHandler(async (req, res) => {
         description,
         offeredRate: offered_rate,
         isOvernightDuty: is_overnight_duty || false,
-        ...(staff_role === 'rmo' && { dutySubType: duty_sub_type }),
-        ...(typeof auto_relist_enabled === 'boolean' && { autoRelist: { enabled: auto_relist_enabled } })
+        ...(staff_role === 'rmo' && { dutySubType: duty_sub_type })
     };
 
 
@@ -622,7 +620,6 @@ exports.editDuty = asyncHandler(async (req, res) => {
     if (req.body.description !== undefined) updateData.description = req.body.description;
     if (req.body.offered_rate !== undefined) updateData.offeredRate = req.body.offered_rate;
     if (req.body.is_overnight_duty !== undefined) updateData.isOvernightDuty = req.body.is_overnight_duty;
-    if (req.body.duty_sub_type) updateData.dutySubType = req.body.duty_sub_type;
 
     const duty = await DutyService.editDuty(id, userId, updateData);
 
@@ -640,8 +637,7 @@ exports.editDuty = asyncHandler(async (req, res) => {
                 urgency: 'Urgency',
                 description: 'Description',
                 offeredRate: 'Offered Rate',
-                isOvernightDuty: 'Overnight Duty',
-                dutySubType: 'Sub-type'
+                isOvernightDuty: 'Overnight Duty'
             };
 
             for (const [field, label] of Object.entries(fieldMapping)) {
@@ -687,53 +683,6 @@ exports.editDuty = asyncHandler(async (req, res) => {
         success: true,
         message: 'Duty updated successfully',
         duty
-    });
-});
-
-
-
-exports.setAutoRelistEnabled = asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const userId = req.user.id;
-    const { enabled } = req.body;
-
-    const duty = await DutyService.setAutoRelistEnabled(id, userId, enabled);
-
-    res.status(200).json({
-        success: true,
-        message: `Auto-relist ${enabled ? 'enabled' : 'disabled'} for this duty`,
-        data: {
-            dutyId: duty._id,
-            autoRelist: {
-                enabled: duty.autoRelist.enabled,
-                relistCount: duty.autoRelist.relistCount,
-                rateBoostApplied: duty.autoRelist.rateBoostApplied
-            }
-        }
-    });
-});
-
-
-
-exports.getFindingCoverPanel = asyncHandler(async (req, res) => {
-    const userId = req.user.id;
-    const duties = await DutyService.getFindingCoverPanel(userId);
-
-    res.status(200).json({
-        success: true,
-        duties
-    });
-});
-
-
-
-exports.getAutoRelistMonthToDate = asyncHandler(async (req, res) => {
-    const userId = req.user.id;
-    const summary = await DutyService.getAutoRelistMonthToDate(userId);
-
-    res.status(200).json({
-        success: true,
-        ...summary
     });
 });
 

@@ -7,7 +7,6 @@ const EmailService = require('../services/email.service');
 const redisClient = require('../config/redis');
 const InterviewLifecycleService = require('../services/interviewLifecycle.service');
 const TicketService = require('../services/ticket.service');
-const autoRelistAnalyticsService = require('../services/autoRelistAnalytics.service');
 
 /**
  * Acquire a distributed Redis lock so only one ECS task runs a given cron job.
@@ -264,63 +263,7 @@ class CronJobs {
             'Ticket SLA sweeps job'
         );
 
-        // Auto-relist repeat push — run every 5 minutes. State-based
-        // (DutyService.sendAutoRelistRepeatPushes checks repeatPushCount
-        // vs. minutes-since-relist), so a 5-minute cadence is precise
-        // enough for "+15/+45 minutes" without needing 1-minute polling.
-        this.scheduleJob(
-            async () => {
-                const hasLock = await acquireCronLock('auto-relist-repeat-push', 4 * 60);
-                if (!hasLock) return;
-
-                try {
-                    const sentCount = await DutyService.sendAutoRelistRepeatPushes();
-                    if (sentCount > 0) {
-                        console.log(`Sent ${sentCount} auto-relist repeat push(es) at ${new Date().toLocaleString()}`);
-                    }
-                } catch (err) {
-                    console.error('Auto-relist repeat push job failed:', err);
-                }
-            },
-            5,
-            'Auto-relist repeat push job'
-        );
-
-        // Auto-relist daily rollup — the scheduler only supports intervals
-        // that divide evenly into a clock hour (see getMillisecondsUntilNext),
-        // so there's no native "once a day at midnight" mode. Runs hourly
-        // but only *acts* on the hour===0 tick, gated by a long-TTL Redis
-        // lock keyed by date so a restart near midnight can't cause a
-        // duplicate (or missed) rollup for the same day.
-        this.scheduleJob(
-            async () => {
-                const now = new Date();
-                if (now.getHours() !== 0) return;
-
-                const dateKey = now.toISOString().slice(0, 10);
-                const hasLock = await acquireCronLock(`autoRelist-daily-rollup:${dateKey}`, 23 * 60 * 60);
-                if (!hasLock) return;
-
-                const yesterday = new Date(now);
-                yesterday.setDate(yesterday.getDate() - 1);
-
-                try {
-                    const { hospitalsWritten } = await autoRelistAnalyticsService.computeDailyRollup(yesterday);
-                    console.log(`Auto-relist daily rollup computed for ${yesterday.toISOString().slice(0, 10)}: ${hospitalsWritten} hospital(s) + platform`);
-
-                    activityLogEmitter.emitSystemActivity(
-                        ACTIVITY_ACTIONS.CRON_JOB_EXECUTED,
-                        { jobName: 'Auto-relist daily rollup', date: dateKey, hospitalsWritten, timestamp: new Date().toISOString() }
-                    ).catch(err => console.error('Error logging auto-relist rollup job:', err));
-                } catch (err) {
-                    console.error('Auto-relist daily rollup failed:', err);
-                }
-            },
-            60,
-            'Auto-relist daily rollup'
-        );
-
-        console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min), Interview lifecycle (15 min), Ticket SLA sweeps (15 min), Auto-relist repeat push (5 min), Auto-relist rollup (hourly, acts at midnight)');
+        console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min), Interview lifecycle (15 min), Ticket SLA sweeps (15 min)');
 
         // Log cron job initialization after a short delay to ensure DB/Redis are ready
         setTimeout(() => {

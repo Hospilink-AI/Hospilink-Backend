@@ -28,8 +28,6 @@ const SMSService = require('./sms.service');
 const { isWithinGeofence, GEOFENCE_RADIUS_KM } = require('./geofence.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const reviewService = require('./review.service');
-const locationBasedStaffService = require('./locationBasedStaff.service');
-const systemConfigService = require('./systemConfig.service');
 const {
     AppError,
     ValidationError,
@@ -118,16 +116,9 @@ class DutyService {
             throw new ValidationError('Duty start time must be at least 15 minutes in the future. Cannot create duties for past or immediate times.');
         }
 
-        // "Feature default on new duties" (spec §09) — admin-editable via
-        // systemConfig; an explicit value on dutyData (once the frontend
-        // opt-out checkbox exists) always wins over the default.
-        const featureDefaultEnabled = await systemConfigService.getEffective('autoRelist.featureDefaultEnabled');
-        const autoRelistEnabled = dutyData.autoRelist?.enabled ?? featureDefaultEnabled;
-
         const duty = await Duty.create({
             ...dutyData,
             hospital: hospital._id,
-            autoRelist: { enabled: autoRelistEnabled },
             statusHistory: [{
                 status: 'available',
                 timestamp: getCurrentIST(),
@@ -408,16 +399,6 @@ class DutyService {
                     throw new ForbiddenError(`Role mismatch: This duty requires a ${duty.staffRole}, but your profile shows ${medicalStaff.jobRole}`);
                 }
 
-                // ── 3b. Auto-relist exclusion check ───────────────────────────
-                // A staff member who cancelled this duty earlier can never
-                // reclaim it, even by hitting this endpoint directly with the
-                // duty ID (bypassing the browse-list/detail-fetch guards).
-                const isExcludedFromRelist = (duty.autoRelist?.excludedStaff || [])
-                    .some(id => id.toString() === medicalStaff._id.toString());
-                if (isExcludedFromRelist) {
-                    throw new ForbiddenError('You previously cancelled this duty and cannot re-accept it.');
-                }
-
                 // ── 4. Status check ───────────────────────────────────────────
                 if (duty.status !== 'available') {
                     throw new ConflictError('Duty is no longer available');
@@ -455,14 +436,14 @@ class DutyService {
                     }
                 }
 
-                
+                // ── 7. Atomic claim ───────────────────────────────────────────
                 // findOneAndUpdate with status:'available' as the guard.
                 // Inside a transaction this is both atomic AND isolated —
                 // concurrent transactions trying the same duty will block
                 // until this one commits, then find status='assigned' and abort.
                 const assignedAt = getCurrentIST();
                 claimedDuty = await Duty.findOneAndUpdate(
-                    { _id: dutyId, status: 'available', 'autoRelist.excludedStaff': { $ne: medicalStaff._id } },
+                    { _id: dutyId, status: 'available' },
                     {
                         $set: {
                             status: 'assigned',
@@ -492,20 +473,6 @@ class DutyService {
                 path: 'assignedTo',
                 populate: { path: 'user', select: 'name email' }
             });
-
-            // Backfill the pair-watchlist data point (spec §07): whoever
-            // just accepted this relisted duty, on its most recent relist
-            // history entry. Read assignedTo._id, not assignedTo directly —
-            // it's populated by now, so the bare field is a MedicalStaff
-            // document, not the ObjectId this needs. Best-effort: a failure
-            // here must never fail the accept itself.
-            if (claimedDuty.autoRelist?.history?.length > 0) {
-                const lastIndex = claimedDuty.autoRelist.history.length - 1;
-                Duty.updateOne(
-                    { _id: dutyId },
-                    { $set: { [`autoRelist.history.${lastIndex}.acceptedBy`]: claimedDuty.assignedTo._id } }
-                ).catch(err => console.error('Failed to backfill autoRelist history acceptedBy:', err));
-            }
 
             return claimedDuty;
 
@@ -1189,7 +1156,7 @@ class DutyService {
         // Validate and update allowed fields
         const allowedFields = [
             'staffRole', 'date', 'endDate', 'startTime', 'endTime',
-            'urgency', 'description', 'offeredRate', 'isOvernightDuty', 'dutySubType'
+            'urgency', 'description', 'offeredRate', 'isOvernightDuty'
         ];
 
         const updates = {};
@@ -1197,18 +1164,6 @@ class DutyService {
             if (updateData[field] !== undefined) {
                 updates[field] = updateData[field];
             }
-        }
-
-        // RMO sub-type: required for rmo, not allowed for other roles (same as creation)
-        const effectiveRole = updates.staffRole || duty.staffRole;
-        if (effectiveRole === 'rmo') {
-            if (!updates.dutySubType && !duty.dutySubType) {
-                throw new ValidationError('Sub-type is required for RMO duties');
-            }
-        } else if (updates.dutySubType) {
-            throw new ValidationError('Sub-type is only allowed for RMO duties');
-        } else if (duty.dutySubType) {
-            updates.dutySubType = undefined;
         }
 
         // Validate the new start time is at least 15 minutes in the future.
@@ -1240,140 +1195,6 @@ class DutyService {
         });
 
         return duty;
-    }
-
-
-
-    // "stays editable while the duty is available or assigned...
-    // turning it off later does not undo a rise already applied" — a status
-    // check, not the 30-minute canEditDuty() time-window used for regular
-    // field edits, so this is deliberately its own method rather than routed
-    // through editDuty().
-    async setAutoRelistEnabled(dutyId, userId, enabled) {
-        const hospital = await Hospital.findOne({ user: userId });
-        if (!hospital) {
-            throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
-        }
-
-        const duty = await Duty.findById(dutyId);
-        if (!duty) {
-            throw new NotFoundError('Duty not found');
-        }
-
-        if (duty.hospital.toString() !== hospital._id.toString()) {
-            throw new ForbiddenError('You can only edit your own duties');
-        }
-
-        if (!['available', 'assigned'].includes(duty.status)) {
-            throw new ValidationError('Auto-relist can only be changed while the duty is available or assigned');
-        }
-
-        duty.autoRelist = duty.autoRelist || {};
-        duty.autoRelist.enabled = enabled;
-        await duty.save();
-
-        return duty;
-    }
-
-
-
-    // "Finding cover" panel — this hospital's relisted duties,
-    // soonest start first, with the plain-words `state` the spec calls for
-    // (never internal terms like relistCount/status directly).
-    async getFindingCoverPanel(hospitalUserId) {
-        const hospital = await Hospital.findOne({ user: hospitalUserId });
-        if (!hospital) {
-            throw new NotFoundError('Hospital profile not found');
-        }
-
-        const relistCap = await systemConfigService.getEffective('autoRelist.relistCap');
-
-        const duties = await Duty.find({
-            hospital: hospital._id,
-            'autoRelist.relistCount': { $gt: 0 },
-            status: { $in: ['available', 'assigned', 'expired'] }
-        })
-            .select('staffRole date startTime endTime status urgency offeredRate autoRelist')
-            .sort({ date: 1, startTime: 1 })
-            .lean();
-
-        return duties.map(duty => {
-            const relist = duty.autoRelist || {};
-            const history = relist.history || [];
-            const lastEntry = history[history.length - 1] || null;
-
-            let state;
-            if (duty.status === 'expired') {
-                state = 'not_covered';
-            } else if (duty.status === 'assigned') {
-                state = 'covered';
-            } else if ((relist.relistCount || 0) >= relistCap) {
-                state = 'needs_your_input';
-            } else {
-                state = 'finding_cover';
-            }
-
-            return {
-                dutyId: duty._id,
-                staffRole: duty.staffRole,
-                date: duty.date,
-                startTime: duty.startTime,
-                endTime: duty.endTime,
-                relistCount: relist.relistCount || 0,
-                lastCancelledAt: lastEntry?.timestamp || null,
-                reason: lastEntry?.reason || null,
-                reasonText: lastEntry?.reasonText || null,
-                urgency: duty.urgency,
-                originalUrgency: lastEntry?.urgencyBefore || null,
-                rate: duty.offeredRate,
-                originalRate: relist.originalOfferedRate ?? null,
-                rateBoosted: !!relist.rateBoostApplied,
-                state
-            };
-        });
-    }
-
-
-
-    // Spec §07 hospital month-to-date line: duties relisted / re-filled /
-    // extra amount actually paid. "Actually paid" means the boosted
-    // duty was taken, not merely offered — an expired boosted duty costs
-    // the hospital nothing, so it's excluded from extraPaid.
-    async getAutoRelistMonthToDate(hospitalUserId) {
-        const hospital = await Hospital.findOne({ user: hospitalUserId });
-        if (!hospital) {
-            throw new NotFoundError('Hospital profile not found');
-        }
-
-        const now = getCurrentIST();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-        const duties = await Duty.find({
-            hospital: hospital._id,
-            'autoRelist.history.timestamp': { $gte: monthStart }
-        }).select('status offeredRate autoRelist').lean();
-
-        let dutiesRelisted = 0;
-        let dutiesRefilled = 0;
-        let extraPaid = 0;
-
-        for (const duty of duties) {
-            const relist = duty.autoRelist || {};
-            const hasRelistThisMonth = (relist.history || [])
-                .some(h => new Date(h.timestamp) >= monthStart);
-            if (!hasRelistThisMonth) continue;
-
-            dutiesRelisted += 1;
-
-            const wasRefilled = ['assigned', 'in-progress', 'enroute', 'pending-confirmation', 'completed'].includes(duty.status);
-            if (wasRefilled) dutiesRefilled += 1;
-
-            if (wasRefilled && relist.rateBoostApplied && relist.originalOfferedRate != null) {
-                extraPaid += (duty.offeredRate - relist.originalOfferedRate);
-            }
-        }
-
-        return { dutiesRelisted, dutiesRefilled, extraPaid };
     }
 
 
@@ -1420,14 +1241,9 @@ class DutyService {
                 throw new NotFoundError('Medical staff profile not found');
             }
 
-            // Staff can view available duties OR duties assigned to them.
-            // A staff member excluded from this duty (they cancelled it
-            // earlier — see autoRelist.excludedStaff) can't view it as
-            // "available" either, even though the duty itself still is.
+            // Staff can view available duties OR duties assigned to them
             const isAssigned = duty.assignedTo && duty.assignedTo._id.toString() === medicalStaff._id.toString();
-            const isExcludedFromRelist = (duty.autoRelist?.excludedStaff || [])
-                .some(id => id.toString() === medicalStaff._id.toString());
-            const isAvailable = duty.status === 'available' && !isExcludedFromRelist;
+            const isAvailable = duty.status === 'available';
 
             // Also check that duty is not expired
             const isExpired = duty.status === 'expired';
@@ -2127,97 +1943,6 @@ class DutyService {
         }
 
         return notified;
-    }
-
-    /**
-     * a 2nd notification at +15 min and a 3rd at +45
-     * min for a still-unfilled relisted duty, stopping at the staff
-     * cancellation cutoff (past that point it's a no-show concern, not a
-     * fill-it-faster one). State-based (repeatPushCount vs. minutes-since-
-     * last-relist) rather than a narrow createdAt window, since this sweep
-     * doesn't need 1-minute precision the way the 15-min-unassigned check
-     * does — being a few minutes late off a 5-minute sweep is fine for
-     * "urgent rather than annoying."
-     */
-    async sendAutoRelistRepeatPushes() {
-        const now = getCurrentIST();
-
-        // Resolved once per sweep tick, not per duty — systemConfigService
-        // caches for 5 minutes anyway, but there's no reason to re-fetch
-        // inside the loop below.
-        const cfg = await systemConfigService.getManyEffective([
-            'autoRelist.staffCancelCutoffMinutes',
-            'autoRelist.notificationRadiusKm',
-            'autoRelist.repeatPushScheduleMinutes'
-        ]);
-        const staffCancelCutoffMinutes = cfg['autoRelist.staffCancelCutoffMinutes'];
-        const notificationRadiusKm = cfg['autoRelist.notificationRadiusKm'];
-        const repeatPushScheduleMinutes = cfg['autoRelist.repeatPushScheduleMinutes'];
-
-        const candidates = await Duty.find({
-            status: 'available',
-            'autoRelist.enabled': { $ne: false },
-            'autoRelist.relistCount': { $gt: 0 },
-            'autoRelist.repeatPushCount': { $lt: repeatPushScheduleMinutes.length }
-        })
-            .populate('hospital', 'hospitalLegalName coordinates')
-            .select('staffRole date startTime endTime urgency offeredRate autoRelist hospital');
-
-        let sentCount = 0;
-
-        for (const duty of candidates) {
-            try {
-                const istDutyDate = toIST(new Date(duty.date));
-                const [h, m] = duty.startTime.split(':');
-                const dutyStart = new Date(istDutyDate);
-                dutyStart.setHours(parseInt(h), parseInt(m), 0, 0);
-                const minutesUntilStart = (dutyStart.getTime() - now.getTime()) / (60 * 1000);
-
-                // Inside the cutoff — stop pushing; this is a no-show concern now.
-                if (minutesUntilStart < staffCancelCutoffMinutes) continue;
-
-                const history = duty.autoRelist.history || [];
-                const lastEntry = history[history.length - 1];
-                if (!lastEntry) continue;
-
-                const minutesSinceRelist = (now.getTime() - new Date(lastEntry.timestamp).getTime()) / (60 * 1000);
-
-                let targetPushCount = 0;
-                for (let i = 0; i < repeatPushScheduleMinutes.length; i++) {
-                    if (minutesSinceRelist >= repeatPushScheduleMinutes[i]) targetPushCount = i + 1;
-                }
-
-                if (targetPushCount <= duty.autoRelist.repeatPushCount) continue;
-
-                const hospitalCoords = duty.hospital?.coordinates?.coordinates;
-                if (!hospitalCoords?.latitude || !hospitalCoords?.longitude) continue;
-
-                const excludedIds = new Set((duty.autoRelist.excludedStaff || []).map(id => id.toString()));
-                const matchingStaff = await locationBasedStaffService.getNearbyStaffByRole(
-                    { latitude: hospitalCoords.latitude, longitude: hospitalCoords.longitude },
-                    duty.staffRole,
-                    100,
-                    notificationRadiusKm
-                );
-                const staffUserIds = matchingStaff
-                    .filter(s => s.user && s.user._id && !excludedIds.has(s._id.toString()))
-                    .map(s => s.user._id.toString());
-
-                if (staffUserIds.length > 0) {
-                    await notificationEmitter.emitDutyRelistRepeatPush(duty, staffUserIds, {
-                        boosted: !!duty.autoRelist.rateBoostApplied,
-                        pushNumber: targetPushCount + 1
-                    });
-                }
-
-                await Duty.updateOne({ _id: duty._id }, { $set: { 'autoRelist.repeatPushCount': targetPushCount } });
-                sentCount++;
-            } catch (err) {
-                console.error(`Error sending auto-relist repeat push for duty ${duty._id}:`, err);
-            }
-        }
-
-        return sentCount;
     }
 
     /**
