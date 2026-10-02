@@ -886,6 +886,97 @@ exports.unlockDutyOtp = asyncHandler(async (req, res) => {
 
 
 
+// Admin edits a duty on the hospital's behalf - PATCH /api/admin/duties/:id
+exports.editDutyForHospital = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    // Get the duty before update to track changes
+    const dutyBeforeUpdate = await Duty.findById(id).populate('assignedTo');
+
+    // Same mapping as the hospital edit
+    const updateData = {};
+    if (req.body.staff_role) updateData.staffRole = req.body.staff_role;
+    if (req.body.date) updateData.date = req.body.date;
+    if (req.body.end_date) updateData.endDate = req.body.end_date;
+    if (req.body.start_time) updateData.startTime = req.body.start_time;
+    if (req.body.end_time) updateData.endTime = req.body.end_time;
+    if (req.body.urgency) updateData.urgency = req.body.urgency;
+    if (req.body.description !== undefined) updateData.description = req.body.description;
+    if (req.body.offered_rate !== undefined) updateData.offeredRate = req.body.offered_rate;
+    if (req.body.is_overnight_duty !== undefined) updateData.isOvernightDuty = req.body.is_overnight_duty;
+    if (req.body.duty_sub_type) updateData.dutySubType = req.body.duty_sub_type;
+
+    const duty = await DutyService.editDuty(id, req.user.id, updateData, { asAdmin: true });
+
+    try {
+        const changes = [];
+        const fieldMapping = {
+            staffRole: 'Staff Role',
+            date: 'Date',
+            endDate: 'End Date',
+            startTime: 'Start Time',
+            endTime: 'End Time',
+            urgency: 'Urgency',
+            description: 'Description',
+            offeredRate: 'Offered Rate',
+            isOvernightDuty: 'Overnight Duty',
+            dutySubType: 'Sub-type'
+        };
+
+        for (const [field, label] of Object.entries(fieldMapping)) {
+            if (updateData[field] !== undefined && dutyBeforeUpdate[field] !== updateData[field]) {
+                changes.push({
+                    field: label,
+                    oldValue: dutyBeforeUpdate[field],
+                    newValue: updateData[field]
+                });
+            }
+        }
+
+        if (changes.length > 0) {
+            const actor = {
+                userId: req.user._id || req.user.id,
+                name: req.user.name,
+                role: 'admin',
+                email: req.user.email
+            };
+            activityLogEmitter.emitDutyActivity(
+                ACTIVITY_ACTIONS.DUTY_EDITED,
+                duty,
+                actor,
+                { changes },
+                req
+            ).catch(err => logger.error('Error logging admin duty edit:', err));
+
+            const hospitalUserId = duty.hospital?.user?._id?.toString();
+            if (hospitalUserId) {
+                await notificationEmitter.emitDutyEdited(
+                    duty,
+                    changes,
+                    hospitalUserId,
+                    'The HospiLink team updated your duty.'
+                );
+            }
+
+            if (dutyBeforeUpdate.assignedTo) {
+                const staffUserId = dutyBeforeUpdate.assignedTo.user.toString();
+                await notificationEmitter.emitDutyEdited(duty, changes, staffUserId);
+            }
+        }
+    } catch (error) {
+        logger.error('Error emitting admin duty edited notification: ' + error.message);
+    }
+
+    res.status(200).json({
+        success: true,
+        message: 'Duty updated successfully',
+        duty
+    });
+});
+
+
+
+
 // Admin turns auto-relist on/off for a hospital's duty - PATCH /api/admin/duties/:id/auto-relist
 exports.setDutyAutoRelistEnabled = asyncHandler(async (req, res) => {
     const { id } = req.params;

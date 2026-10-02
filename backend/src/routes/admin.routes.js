@@ -33,6 +33,7 @@ const {
 
 const {
     validateDutyCreation,
+    validateDutyEdit,
     validateJobVacancyCreation,
     validatePagination,
     validateInterviewConfigUpdate,
@@ -159,6 +160,14 @@ router.patch(
     validateObjectId('id'),
     validateAdminAutoRelistToggle,
     adminController.setDutyAutoRelistEnabled
+);
+
+router.patch(
+    '/duties/:id',
+    requireCapability('duty.manage'),
+    validateObjectId('id'),
+    validateDutyEdit,
+    adminController.editDutyForHospital
 );
 
 

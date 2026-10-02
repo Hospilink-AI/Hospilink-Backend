@@ -1143,11 +1143,15 @@ class DutyService {
     }
 
 
-    async editDuty(dutyId, userId, updateData) {
+    // asAdmin: admin editing on the hospital's behalf, skips the ownership check
+    async editDuty(dutyId, userId, updateData, { asAdmin = false } = {}) {
         // Find the hospital profile for this user
-        const hospital = await Hospital.findOne({ user: userId });
-        if (!hospital) {
-            throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
+        let hospital;
+        if (!asAdmin) {
+            hospital = await Hospital.findOne({ user: userId });
+            if (!hospital) {
+                throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
+            }
         }
 
         const duty = await Duty.findById(dutyId);
@@ -1156,7 +1160,7 @@ class DutyService {
         }
 
         // Verify this duty belongs to the requesting hospital
-        if (duty.hospital.toString() !== hospital._id.toString()) {
+        if (!asAdmin && duty.hospital.toString() !== hospital._id.toString()) {
             throw new ForbiddenError('You can only edit your own duties');
         }
 
