@@ -2271,7 +2271,8 @@ class AdminService {
             offered_rate,
             is_overnight_duty,
             staff_count,
-            duty_sub_type
+            duty_sub_type,
+            auto_relist_enabled
         } = dutyPayload;
 
         // Fetch and validate hospital
@@ -2310,7 +2311,8 @@ class AdminService {
             description,
             offeredRate: offered_rate,
             isOvernightDuty: is_overnight_duty || false,
-            ...(staff_role === 'rmo' && { dutySubType: duty_sub_type })
+            ...(staff_role === 'rmo' && { dutySubType: duty_sub_type }),
+            ...(typeof auto_relist_enabled === 'boolean' && { autoRelist: { enabled: auto_relist_enabled } })
         };
 
         // Create multiple duties based on staff_count
