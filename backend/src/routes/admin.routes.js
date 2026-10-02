@@ -24,6 +24,7 @@ const {
     validateAssignDuty,
     validateUnlockOtp,
     validateAdminOverrideStatus,
+    validateAdminAutoRelistToggle,
     validateAdminCreation,
     validateAdminRoleChange,
     validateRoleChangeOtp,
@@ -150,6 +151,14 @@ router.patch(
     validateObjectId('id'),
     validateAdminOverrideStatus,
     adminController.adminOverrideDutyStatus
+);
+
+router.patch(
+    '/duties/:id/auto-relist',
+    requireCapability('autoRelist.manage'),
+    validateObjectId('id'),
+    validateAdminAutoRelistToggle,
+    adminController.setDutyAutoRelistEnabled
 );
 
 

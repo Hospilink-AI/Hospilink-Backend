@@ -881,3 +881,49 @@ exports.unlockDutyOtp = asyncHandler(async (req, res) => {
         duty
     });
 });
+
+
+
+
+// Admin turns auto-relist on/off for a hospital's duty - PATCH /api/admin/duties/:id/auto-relist
+exports.setDutyAutoRelistEnabled = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { enabled, reason } = req.body;
+
+    const duty = await adminService.setDutyAutoRelistEnabled(id, enabled);
+
+    const actor = {
+        userId: req.user._id || req.user.id,
+        name: req.user.name,
+        role: 'admin',
+        email: req.user.email
+    };
+    activityLogEmitter.emitDutyActivity(
+        ACTIVITY_ACTIONS.DUTY_EDITED,
+        duty,
+        actor,
+        { changes: [{ field: 'Auto-relist', newValue: enabled }], reason },
+        req
+    ).catch(err => logger.error('Error logging auto-relist change:', err));
+
+    Hospital.findById(duty.hospital).select('user').lean()
+        .then(hospital => {
+            if (hospital?.user) {
+                return notificationEmitter.emitAutoRelistChangedByAdmin(duty, hospital.user.toString(), enabled, reason);
+            }
+        })
+        .catch(err => logger.error('Error notifying hospital of auto-relist change:', err));
+
+    res.status(200).json({
+        success: true,
+        message: `Auto-relist ${enabled ? 'enabled' : 'disabled'} for this duty`,
+        data: {
+            dutyId: duty._id,
+            autoRelist: {
+                enabled: duty.autoRelist.enabled,
+                relistCount: duty.autoRelist.relistCount,
+                rateBoostApplied: duty.autoRelist.rateBoostApplied
+            }
+        }
+    });
+});

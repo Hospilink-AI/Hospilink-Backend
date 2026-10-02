@@ -915,6 +915,36 @@ class NotificationEmitter {
     }
 
 
+    // Admin turned auto-relist on/off for a hospital's duty
+    async emitAutoRelistChangedByAdmin(duty, hospitalUserId, enabled, reason) {
+        try {
+            const payload = {
+                type: 'DUTY_EDITED',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    offeredRate: duty.offeredRate
+                },
+                changes: [{ field: 'Auto-relist', newValue: enabled ? 'On' : 'Off' }],
+                reason,
+                message: `The HospiLink team turned auto-relist ${enabled ? 'on' : 'off'} for your ${duty.staffRole} duty. Reason: ${reason}`,
+                timestamp: new Date().toISOString()
+            };
+
+            const { unreadCount } = await notificationService.createNotificationWithCount(hospitalUserId, 'DUTY_EDITED', payload);
+
+            await notificationDelivery.deliverToUser(hospitalUserId, 'DUTY_EDITED', payload, unreadCount);
+
+            console.log(`Auto-relist change notification emitted to hospital ${hospitalUserId}`);
+        } catch (error) {
+            console.error('Error emitting auto-relist change notification:', error);
+        }
+    }
+
+
     // Deliberately does NOT include rating/review content — blind/
     // simultaneous reveal (Phase 3) gates that behind the read paths
     // (getDutyDetail, getCompletedDutiesForStaff, getStaffReviews); putting

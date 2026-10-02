@@ -1121,6 +1121,42 @@ const validateUnlockOtp = (req, res, next) => {
 
 
 
+// Validation for admin turning auto-relist on/off on a hospital's duty
+const validateAdminAutoRelistToggle = (req, res, next) => {
+    const { enabled, reason } = req.body;
+    const errors = [];
+
+    const allowedFields = ['enabled', 'reason'];
+    const receivedFields = Object.keys(req.body);
+    const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
+
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+
+    if (typeof enabled !== 'boolean') {
+        errors.push('enabled is required and must be a boolean');
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        errors.push('reason is required');
+    } else if (reason.length > 1000) {
+        errors.push('reason cannot exceed 1000 characters');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors
+        });
+    }
+
+    next();
+};
+
+
+
 // Validate admin account creation request
 const validateAdminCreation = (req, res, next) => {
     if (!req.body || Object.keys(req.body).length === 0) {
@@ -1340,6 +1376,7 @@ module.exports = {
     validateAssignDuty,
     validateAdminOverrideStatus,
     validateUnlockOtp,
+    validateAdminAutoRelistToggle,
     validateAdminCreation,
     validateAdminRoleChange,
     validateRoleChangeOtp,

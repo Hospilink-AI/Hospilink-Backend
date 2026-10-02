@@ -2866,6 +2866,26 @@ class AdminService {
 
         return updated;
     }
+
+
+
+    // Same rules as DutyService.setAutoRelistEnabled, without the hospital ownership check
+    async setDutyAutoRelistEnabled(dutyId, enabled) {
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (!['available', 'assigned'].includes(duty.status)) {
+            throw new ValidationError('Auto-relist can only be changed while the duty is available or assigned');
+        }
+
+        duty.autoRelist = duty.autoRelist || {};
+        duty.autoRelist.enabled = enabled;
+        await duty.save();
+
+        return duty;
+    }
 }
 
 module.exports = new AdminService();
