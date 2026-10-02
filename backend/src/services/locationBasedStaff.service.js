@@ -4,7 +4,6 @@ const Hospital = require('../models/Hospital');
 const geocodingService = require('./geocoding.service');
 const redisClient = require('../config/redis');
 const dashboardService = require('./dashboard.service');
-const { URGENCY_LEVELS } = require('../utils/dutyCancellation.constants');
 
 class LocationBasedStaffService {
     // Calculate bounding box for 50km radius
@@ -37,24 +36,20 @@ class LocationBasedStaffService {
 
 
 
-    // Get nearby staff by role with optimized query.
-    // radiusKm defaults to 50 (unchanged behavior for new-duty creation);
-    // the auto-relist broadcast calls this with a wider radius
-    // (RELIST_NOTIFICATION_RADIUS_KM) to reach staff who weren't in range
-    // the first time.
-    async getNearbyStaffByRole(hospitalCoords, requiredRole, limit = 100, radiusKm = 50) {
-        const cacheKey = `nearby_staff:${requiredRole}:${radiusKm}:${Math.round(hospitalCoords.latitude*1000)}:${Math.round(hospitalCoords.longitude*1000)}`;
-
+    // Get nearby staff by role with optimized query
+    async getNearbyStaffByRole(hospitalCoords, requiredRole, limit = 100) {
+        const cacheKey = `nearby_staff:${requiredRole}:${Math.round(hospitalCoords.latitude*1000)}:${Math.round(hospitalCoords.longitude*1000)}`;
+        
         try {
             const redis = await redisClient.getClientAsync();
             const cached = await redis.get(cacheKey);
-
+            
             if (cached) {
                 return JSON.parse(cached);
             }
 
-            const box = this.getBoundingBox(hospitalCoords.latitude, hospitalCoords.longitude, radiusKm);
-
+            const box = this.getBoundingBox(hospitalCoords.latitude, hospitalCoords.longitude);
+            
             const nearbyStaff = await MedicalStaff.find({
                 isAvailable: true,
                 jobRole: requiredRole,
@@ -76,8 +71,8 @@ class LocationBasedStaffService {
                         staff.coordinates.coordinates.latitude,
                         staff.coordinates.coordinates.longitude
                     );
-
-                    if (distanceResult.distance <= radiusKm) {
+                    
+                    if (distanceResult.distance <= 50) {
                         staffWithinRadius.push({
                             ...staff,
                             distance: distanceResult.distance,
@@ -130,10 +125,7 @@ class LocationBasedStaffService {
         const query = {
             status: 'available',
             staffRole: medicalStaff.jobRole,
-            date: { $gte: today },
-            // A staff member who cancelled this specific duty can never see
-            // or re-accept it again — see autoRelist.service.js guardrail #1.
-            'autoRelist.excludedStaff': { $ne: medicalStaff._id }
+            date: { $gte: today }
         };
 
         // Add additional filters
@@ -292,20 +284,8 @@ class LocationBasedStaffService {
             }
         }
 
-        // Sort: urgency first (high before low), relisted duties above
-        // same-urgency non-relisted ones, distance as the final tiebreaker
-        // ("sort position" — relisted duties rank above duties of
-        // the same urgency, behind only a genuinely higher urgency).
-        jobsWithDistance.sort((a, b) => {
-            const urgencyDiff = URGENCY_LEVELS.indexOf(b.urgency) - URGENCY_LEVELS.indexOf(a.urgency);
-            if (urgencyDiff !== 0) return urgencyDiff;
-
-            const aRelisted = (a.autoRelist?.relistCount || 0) > 0 ? 1 : 0;
-            const bRelisted = (b.autoRelist?.relistCount || 0) > 0 ? 1 : 0;
-            if (aRelisted !== bRelisted) return bRelisted - aRelisted;
-
-            return a.distance - b.distance;
-        });
+        // Sort by distance (closest first)
+        jobsWithDistance.sort((a, b) => a.distance - b.distance);
 
         console.log(`[AvailableJobs] Summary:`);
         console.log(`  DB fetched            : ${duties.length}`);

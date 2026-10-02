@@ -250,48 +250,6 @@ const dutySchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
-
-    
-    autoRelist: {
-        enabled: {
-            type: Boolean,
-            default: true
-        },
-        relistCount: {
-            type: Number,
-            default: 0
-        },
-        rateBoostApplied: {
-            type: Boolean,
-            default: false
-        },
-        
-        repeatPushCount: {
-            type: Number,
-            default: 0
-        },
-        originalOfferedRate: {
-            type: Number,
-            default: null
-        },
-        excludedStaff: [{
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'MedicalStaff'
-        }],
-        history: [{
-            timestamp: { type: Date, default: Date.now },
-            cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'MedicalStaff' },
-            acceptedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'MedicalStaff', default: null },
-            reason: String,
-            reasonText: String,
-            minutesBeforeStart: Number,
-            urgencyBefore: String,
-            urgencyAfter: String,
-            rateBefore: Number,
-            rateAfter: Number
-        }]
-    },
-
     createdAt: {
         type: Date,
         default: Date.now
@@ -558,9 +516,6 @@ dutySchema.index({ status: 1 });
 dutySchema.index({ createdAt: -1 });
 dutySchema.index({ totalPayment: 1 });
 dutySchema.index({ assignedTo: 1 });
-dutySchema.index({ 'autoRelist.excludedStaff': 1 });
-dutySchema.index({ 'autoRelist.relistCount': 1 });
-dutySchema.index({ 'autoRelist.history.cancelledBy': 1 });
 
 // Essential compound indexes for performance
 dutySchema.index({ hospital: 1, status: 1 });
