@@ -2107,12 +2107,16 @@ class AdminService {
 
 
     // GET /api/admin/duty-history - Get completed duty history with filters
-    async getDutyHistory({ date, startDate, endDate, hospitalName, page = 1, limit = 10 }) {
+    async getDutyHistory({ date, startDate, endDate, hospitalName, page = 1, limit = 10, relisted = false }) {
         try {
             // Build query - start with completed status only
             const query = {
                 status: 'completed'
             };
+
+            if (relisted) {
+                query['autoRelist.relistCount'] = { $gt: 0 };
+            }
             
             // Build date filter
             let dateFilter;
@@ -2161,7 +2165,8 @@ class AdminService {
                             date: date || null,
                             startDate: startDate || null,
                             endDate: endDate || null,
-                            hospitalName: hospitalName || null
+                            hospitalName: hospitalName || null,
+                            relisted
                         }
                     };
                 }
@@ -2246,7 +2251,8 @@ class AdminService {
                     date: date || null,
                     startDate: startDate || null,
                     endDate: endDate || null,
-                    hospitalName: hospitalName || null
+                    hospitalName: hospitalName || null,
+                    relisted
                 }
             };
         } catch (error) {

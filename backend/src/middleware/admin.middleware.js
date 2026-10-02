@@ -396,7 +396,7 @@ const validateDutyHistoryQuery = (req, res, next) => {
     }
 
     // Validate allowed query parameters only
-    const allowedParams = ['date', 'startDate', 'endDate', 'hospitalName', 'page', 'limit'];
+    const allowedParams = ['date', 'startDate', 'endDate', 'hospitalName', 'page', 'limit', 'relisted'];
     const receivedParams = Object.keys(req.query);
 
     // Check for unexpected parameters
@@ -408,7 +408,14 @@ const validateDutyHistoryQuery = (req, res, next) => {
         });
     }
 
-    const { date, startDate, endDate, hospitalName, page = 1, limit = 10 } = req.query;
+    const { date, startDate, endDate, hospitalName, page = 1, limit = 10, relisted } = req.query;
+
+    if (relisted !== undefined && !['true', 'false'].includes(relisted)) {
+        return res.status(400).json({
+            success: false,
+            message: 'relisted must be true or false'
+        });
+    }
 
     // Validate date format (DD-MM-YYYY)
     const dateRegex = /^\d{2}-\d{2}-\d{4}$/;
@@ -483,7 +490,8 @@ const validateDutyHistoryQuery = (req, res, next) => {
         endDate: endDate || null,
         hospitalName: hospitalName || null,
         page: pageNum,
-        limit: limitNum
+        limit: limitNum,
+        relisted: relisted === 'true'
     };
 
     next();

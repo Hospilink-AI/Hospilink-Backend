@@ -616,7 +616,7 @@ exports.getOvernightDuties = asyncHandler(async (req, res) => {
 
 // GET /api/admin/duty-history - Get completed duty history with filters
 exports.getDutyHistory = asyncHandler(async (req, res) => {
-    const { date, startDate, endDate, hospitalName, page, limit } = req.validatedQuery;
+    const { date, startDate, endDate, hospitalName, page, limit, relisted } = req.validatedQuery;
 
     const result = await adminService.getDutyHistory({
         date,
@@ -624,7 +624,8 @@ exports.getDutyHistory = asyncHandler(async (req, res) => {
         endDate,
         hospitalName,
         page,
-        limit
+        limit,
+        relisted
     });
 
     res.status(200).json({
