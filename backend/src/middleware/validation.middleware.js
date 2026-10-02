@@ -1123,7 +1123,7 @@ const validateDutyEdit = (req, res, next) => {
     const errors = [];
     const allowedFields = [
         'staff_role', 'date', 'end_date', 'start_time', 'end_time',
-        'urgency', 'description', 'offered_rate', 'is_overnight_duty'
+        'urgency', 'description', 'offered_rate', 'is_overnight_duty', 'duty_sub_type'
     ];
     
     const receivedFields = Object.keys(req.body);
@@ -1131,6 +1131,15 @@ const validateDutyEdit = (req, res, next) => {
     
     if (unexpectedFields.length > 0) {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Allowed: ${allowedFields.join(', ')}`);
+    }
+
+    // RMO sub-type: role checks against the saved duty happen in the service
+    if (req.body.duty_sub_type) {
+        if (!['ward', 'icu', 'casualty'].includes(req.body.duty_sub_type)) {
+            errors.push('duty_sub_type must be one of: ward, icu, casualty');
+        } else if (req.body.staff_role && req.body.staff_role !== 'rmo') {
+            errors.push('Sub-type is only allowed for RMO duties');
+        }
     }
     
     // Validate urgency if provided

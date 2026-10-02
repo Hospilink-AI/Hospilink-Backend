@@ -1189,7 +1189,7 @@ class DutyService {
         // Validate and update allowed fields
         const allowedFields = [
             'staffRole', 'date', 'endDate', 'startTime', 'endTime',
-            'urgency', 'description', 'offeredRate', 'isOvernightDuty'
+            'urgency', 'description', 'offeredRate', 'isOvernightDuty', 'dutySubType'
         ];
 
         const updates = {};
@@ -1197,6 +1197,18 @@ class DutyService {
             if (updateData[field] !== undefined) {
                 updates[field] = updateData[field];
             }
+        }
+
+        // RMO sub-type: required for rmo, not allowed for other roles (same as creation)
+        const effectiveRole = updates.staffRole || duty.staffRole;
+        if (effectiveRole === 'rmo') {
+            if (!updates.dutySubType && !duty.dutySubType) {
+                throw new ValidationError('Sub-type is required for RMO duties');
+            }
+        } else if (updates.dutySubType) {
+            throw new ValidationError('Sub-type is only allowed for RMO duties');
+        } else if (duty.dutySubType) {
+            updates.dutySubType = undefined;
         }
 
         // Validate the new start time is at least 15 minutes in the future.

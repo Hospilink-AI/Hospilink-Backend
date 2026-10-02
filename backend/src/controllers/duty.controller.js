@@ -622,6 +622,7 @@ exports.editDuty = asyncHandler(async (req, res) => {
     if (req.body.description !== undefined) updateData.description = req.body.description;
     if (req.body.offered_rate !== undefined) updateData.offeredRate = req.body.offered_rate;
     if (req.body.is_overnight_duty !== undefined) updateData.isOvernightDuty = req.body.is_overnight_duty;
+    if (req.body.duty_sub_type) updateData.dutySubType = req.body.duty_sub_type;
 
     const duty = await DutyService.editDuty(id, userId, updateData);
 
@@ -639,7 +640,8 @@ exports.editDuty = asyncHandler(async (req, res) => {
                 urgency: 'Urgency',
                 description: 'Description',
                 offeredRate: 'Offered Rate',
-                isOvernightDuty: 'Overnight Duty'
+                isOvernightDuty: 'Overnight Duty',
+                dutySubType: 'Sub-type'
             };
 
             for (const [field, label] of Object.entries(fieldMapping)) {
