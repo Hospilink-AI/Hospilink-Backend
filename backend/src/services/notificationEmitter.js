@@ -886,7 +886,7 @@ class NotificationEmitter {
      * @param {Object} changes - Object containing changed fields
      * @param {string} staffUserId - Staff user ID
      */
-    async emitDutyEdited(duty, changes, staffUserId) {
+    async emitDutyEdited(duty, changes, staffUserId, message) {
         try {
             const payload = {
                 type: 'DUTY_EDITED',
@@ -899,6 +899,7 @@ class NotificationEmitter {
                     offeredRate: duty.offeredRate
                 },
                 changes: changes,
+                ...(message && { message }),
                 timestamp: new Date().toISOString()
             };
 
