@@ -15,6 +15,7 @@ const cacheService = require('../services/cache.service');
 const { generateActiveDutiesPDF } = require('../utils/pdf.puppeteer');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const { redactBulkDutyFinancials } = require('../utils/adminResponseFilters');
+const autoRelistAnalyticsService = require('../services/autoRelistAnalytics.service');
 
 
 
@@ -615,7 +616,7 @@ exports.getOvernightDuties = asyncHandler(async (req, res) => {
 
 // GET /api/admin/duty-history - Get completed duty history with filters
 exports.getDutyHistory = asyncHandler(async (req, res) => {
-    const { date, startDate, endDate, hospitalName, page, limit } = req.validatedQuery;
+    const { date, startDate, endDate, hospitalName, page, limit, relisted } = req.validatedQuery;
 
     const result = await adminService.getDutyHistory({
         date,
@@ -623,7 +624,8 @@ exports.getDutyHistory = asyncHandler(async (req, res) => {
         endDate,
         hospitalName,
         page,
-        limit
+        limit,
+        relisted
     });
 
     res.status(200).json({
@@ -647,6 +649,88 @@ exports.getEmergencyDashboard = asyncHandler(async (req, res) => {
         data: redactBulkDutyFinancials(result.duties, req.user.adminSubRole),
         pagination: result.pagination
     });
+});
+
+
+// GET /api/admin/auto-relist/tiles — spec §07 Super Admin dashboard,
+// operational half (Super Admin + Ops; capability-gated in the route).
+exports.getAutoRelistTiles = asyncHandler(async (req, res) => {
+    const tiles = await autoRelistAnalyticsService.getOperationalTiles();
+    res.status(200).json({ success: true, ...tiles });
+});
+
+
+// GET /api/admin/auto-relist/trend — day-by-day series, backed by the
+// nightly rollup for every day except today (computed live).
+exports.getAutoRelistTrend = asyncHandler(async (req, res) => {
+    const days = req.query.days ? parseInt(req.query.days) : 30;
+    const series = await autoRelistAnalyticsService.getRelistTrend(days);
+    res.status(200).json({ success: true, series });
+});
+
+
+// GET /api/admin/auto-relist/boost-spend — Super Admin only, gated at the
+// route/capability level, not by hiding a UI component (spec §08).
+exports.getAutoRelistBoostSpend = asyncHandler(async (req, res) => {
+    const spend = await autoRelistAnalyticsService.getBoostSpend();
+    res.status(200).json({ success: true, ...spend });
+});
+
+
+// GET /api/admin/auto-relist/cap-reached — work queue, not a statistic.
+exports.getAutoRelistCapReachedQueue = asyncHandler(async (req, res) => {
+    const duties = await autoRelistAnalyticsService.getCapReachedQueue();
+    res.status(200).json({ success: true, duties });
+});
+
+
+// GET /api/admin/auto-relist/staff-watchlist
+exports.getAutoRelistStaffWatchlist = asyncHandler(async (req, res) => {
+    const staff = await autoRelistAnalyticsService.getStaffWatchlist();
+    res.status(200).json({ success: true, staff });
+});
+
+
+// GET /api/admin/auto-relist/pair-watchlist
+exports.getAutoRelistPairWatchlist = asyncHandler(async (req, res) => {
+    const pairs = await autoRelistAnalyticsService.getPairWatchlist();
+    res.status(200).json({ success: true, pairs });
+});
+
+
+// GET /api/admin/auto-relist/hospital-watchlist
+exports.getAutoRelistHospitalWatchlist = asyncHandler(async (req, res) => {
+    const hospitals = await autoRelistAnalyticsService.getHospitalWatchlist();
+    res.status(200).json({ success: true, hospitals });
+});
+
+
+// GET /api/admin/auto-relist/duties/:dutyId/history — Tech Support must
+// pass ?ticketId=; enforced (not just checked) in the service.
+exports.getAutoRelistDutyHistory = asyncHandler(async (req, res) => {
+    const { dutyId } = req.params;
+    const { ticketId } = req.query;
+
+    const history = await autoRelistAnalyticsService.getDutyRelistHistory(
+        dutyId, req.user.adminSubRole, ticketId
+    );
+
+    res.status(200).json({ success: true, ...history });
+});
+
+
+// GET /api/admin/auto-relist/config — Super Admin only
+exports.getAutoRelistConfig = asyncHandler(async (req, res) => {
+    const config = await adminService.getAutoRelistConfig();
+    res.status(200).json({ success: true, config });
+});
+
+
+// PATCH /api/admin/auto-relist/config — Super Admin only
+exports.updateAutoRelistConfig = asyncHandler(async (req, res) => {
+    const { key, value, effectiveFrom } = req.body;
+    const row = await adminService.updateAutoRelistConfig(key, value, effectiveFrom, req.user.id);
+    res.status(200).json({ success: true, config: row, message: `${key} updated` });
 });
 
 
@@ -796,5 +880,51 @@ exports.unlockDutyOtp = asyncHandler(async (req, res) => {
         success: true,
         message: `${otpType === 'start' ? 'Start' : 'End'} OTP unlocked.`,
         duty
+    });
+});
+
+
+
+
+// Admin turns auto-relist on/off for a hospital's duty - PATCH /api/admin/duties/:id/auto-relist
+exports.setDutyAutoRelistEnabled = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { enabled, reason } = req.body;
+
+    const duty = await adminService.setDutyAutoRelistEnabled(id, enabled);
+
+    const actor = {
+        userId: req.user._id || req.user.id,
+        name: req.user.name,
+        role: 'admin',
+        email: req.user.email
+    };
+    activityLogEmitter.emitDutyActivity(
+        ACTIVITY_ACTIONS.DUTY_EDITED,
+        duty,
+        actor,
+        { changes: [{ field: 'Auto-relist', newValue: enabled }], reason },
+        req
+    ).catch(err => logger.error('Error logging auto-relist change:', err));
+
+    Hospital.findById(duty.hospital).select('user').lean()
+        .then(hospital => {
+            if (hospital?.user) {
+                return notificationEmitter.emitAutoRelistChangedByAdmin(duty, hospital.user.toString(), enabled, reason);
+            }
+        })
+        .catch(err => logger.error('Error notifying hospital of auto-relist change:', err));
+
+    res.status(200).json({
+        success: true,
+        message: `Auto-relist ${enabled ? 'enabled' : 'disabled'} for this duty`,
+        data: {
+            dutyId: duty._id,
+            autoRelist: {
+                enabled: duty.autoRelist.enabled,
+                relistCount: duty.autoRelist.relistCount,
+                rateBoostApplied: duty.autoRelist.rateBoostApplied
+            }
+        }
     });
 });

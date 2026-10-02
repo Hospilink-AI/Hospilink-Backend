@@ -684,6 +684,203 @@ class NotificationEmitter {
     }
 
     /**
+     * Emit duty relisted notification — fired when a staff cancellation
+     * returns a duty to the board via the auto-relist engine. Notifies the
+     * hospital with the escalation/boost outcome, and broadcasts to a
+     * widened pool of eligible staff (the cancelling staff member is
+     * expected to already be excluded from matchingStaffUserIds upstream —
+     * see autoRelist.excludedStaff and the query guards that filter on it).
+     * @param {Object} duty - Duty object (post-relist, hospital populated)
+     * @param {string} hospitalUserId
+     * @param {string[]} matchingStaffUserIds - widened eligible staff
+     * @param {Object} relistOutcome - result of autoRelistService.applyRelist(...)
+     */
+    async emitDutyRelisted(duty, hospitalUserId, matchingStaffUserIds, relistOutcome) {
+        try {
+            const hospitalName = duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'Hospital';
+            const hospitalLocation = duty.hospital?.location || duty.hospital?.currentAddress || 'Hospital location';
+
+            const dutyDate = new Date(duty.date).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
+            });
+            const dutyTime = `${duty.startTime} - ${duty.endTime}`;
+
+            const { boosted, capReached, urgencyAfter, rateAfter, relistCount } = relistOutcome;
+
+            // --- Hospital notification: what changed as a result of the relist ---
+            try {
+                const hospitalMessage = capReached
+                    ? `Your ${duty.staffRole} duty on ${dutyDate} has now been cancelled and relisted ${relistCount} times — it needs your attention.`
+                    : boosted
+                        ? `Your ${duty.staffRole} duty on ${dutyDate} was cancelled by staff and is back on the board at a boosted rate of ₹${rateAfter} (urgency: ${urgencyAfter}).`
+                        : `Your ${duty.staffRole} duty on ${dutyDate} was cancelled by staff and is back on the board (urgency: ${urgencyAfter}).`;
+
+                const hospitalPayload = {
+                    type: 'DUTY_RELISTED',
+                    duty: {
+                        id: duty._id.toString(),
+                        staffRole: duty.staffRole,
+                        date: duty.date,
+                        startTime: duty.startTime,
+                        endTime: duty.endTime,
+                        offeredRate: duty.offeredRate,
+                        urgency: duty.urgency
+                    },
+                    relist: { boosted, capReached, relistCount, urgencyAfter, rateAfter },
+                    message: hospitalMessage,
+                    timestamp: new Date().toISOString()
+                };
+
+                const { unreadCount } = await notificationService.createNotificationWithCount(hospitalUserId, 'DUTY_RELISTED', hospitalPayload);
+                await notificationDelivery.deliverToUser(hospitalUserId, 'DUTY_RELISTED', hospitalPayload, unreadCount);
+            } catch (error) {
+                console.error(`Error creating relist notification for hospital ${hospitalUserId}:`, error);
+            }
+
+            // --- Widened staff broadcast ---
+            if (matchingStaffUserIds && matchingStaffUserIds.length > 0) {
+                try {
+                    const message = boosted
+                        ? `Relisted: ${duty.staffRole} at ${hospitalName}, ${dutyDate} ${dutyTime} — now ₹${rateAfter}/hr (late-cover rate). Tap to accept.`
+                        : `Relisted: ${duty.staffRole} at ${hospitalName}, ${dutyDate} ${dutyTime}. Tap to accept.`;
+
+                    const staffPayload = {
+                        type: 'DUTY_RELISTED',
+                        duty: {
+                            id: duty._id.toString(),
+                            staffRole: duty.staffRole,
+                            date: duty.date,
+                            startTime: duty.startTime,
+                            endTime: duty.endTime,
+                            offeredRate: duty.offeredRate,
+                            urgency: duty.urgency,
+                            location: hospitalLocation,
+                            relisted: true,
+                            rateBoosted: boosted
+                        },
+                        hospital: {
+                            id: duty.hospital?._id?.toString() || 'unknown',
+                            name: hospitalName
+                        },
+                        message,
+                        timestamp: new Date().toISOString()
+                    };
+
+                    await notificationService.createBulkNotifications(matchingStaffUserIds, 'DUTY_RELISTED', staffPayload);
+                    websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
+                    await notificationDelivery.deliverToUsers(matchingStaffUserIds, 'DUTY_RELISTED', staffPayload);
+
+                    const onlineStaffIds = matchingStaffUserIds.filter(staffUserId =>
+                        websocketManager.isUserOnline(staffUserId)
+                    );
+                    if (onlineStaffIds.length > 0) {
+                        await notificationService.markDeliveredForUsers(
+                            onlineStaffIds,
+                            'DUTY_RELISTED',
+                            duty._id.toString()
+                        );
+                    }
+
+                    console.log(`Duty relisted notification emitted to hospital and ${matchingStaffUserIds.length} staff members`);
+                } catch (error) {
+                    console.error('Error creating staff relist notifications:', error);
+                }
+            }
+        } catch (error) {
+            console.error('Error emitting duty relisted notification:', error);
+        }
+    }
+
+    /**
+     * Generic alert to every operations_manager admin — used for dispatch
+     * events (relist cap reached, staff/pair/hospital watchlist crossings),
+     * never for platform-wide events (those go to super_admin elsewhere) and
+     * never to the flagged staff member themselves. Resolves the admin
+     * audience itself so call sites don't each repeat the same User query.
+     * @param {string} type - Notification type (must exist in Notification.js's enum)
+     * @param {string} message
+     * @param {Object} [payloadExtra] - Extra fields merged into the payload
+     */
+    async emitOperationsAlert(type, message, payloadExtra = {}) {
+        try {
+            const admins = await User.find({ role: 'admin', adminSubRole: 'operations_manager' }).select('_id');
+            if (!admins.length) return;
+
+            const adminIds = admins.map(a => a._id.toString());
+            const payload = { type, message, timestamp: new Date().toISOString(), ...payloadExtra };
+
+            for (const adminId of adminIds) {
+                try {
+                    const { unreadCount } = await notificationService.createNotificationWithCount(adminId, type, payload);
+                    await notificationDelivery.deliverToUser(adminId, type, payload, unreadCount);
+                } catch (err) {
+                    console.error(`Error sending operations alert (${type}) to admin ${adminId}:`, err);
+                }
+            }
+
+            console.log(`Operations alert (${type}) sent to ${adminIds.length} operations_manager admin(s)`);
+        } catch (error) {
+            console.error('Error emitting operations alert:', error);
+        }
+    }
+
+    /**
+     * Repeat push (spec §05) — the 2nd and 3rd notification to the widened
+     * staff pool for a still-unfilled relisted duty, at +15/+45 minutes.
+     * Deliberately narrower than emitDutyRelisted: no hospital notice (they
+     * already got the relist notice once) and no urgency/rate info (nothing
+     * changed since the first push — this is a reminder, not a new event).
+     * @param {Object} duty
+     * @param {string[]} staffUserIds
+     * @param {Object} params
+     * @param {boolean} params.boosted
+     * @param {number} params.pushNumber - 2 or 3
+     */
+    async emitDutyRelistRepeatPush(duty, staffUserIds, { boosted, pushNumber }) {
+        try {
+            if (!staffUserIds || staffUserIds.length === 0) return;
+
+            const hospitalName = duty.hospital?.hospitalLegalName || 'a hospital';
+            const dutyDate = new Date(duty.date).toLocaleDateString('en-US', {
+                month: 'short', day: 'numeric', year: 'numeric'
+            });
+            const dutyTime = `${duty.startTime} - ${duty.endTime}`;
+
+            const message = boosted
+                ? `Still open: ${duty.staffRole} at ${hospitalName}, ${dutyDate} ${dutyTime} — ₹${duty.offeredRate}/hr (late-cover rate). Tap to accept.`
+                : `Still open: ${duty.staffRole} at ${hospitalName}, ${dutyDate} ${dutyTime}. Tap to accept.`;
+
+            const payload = {
+                type: 'DUTY_RELISTED',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    offeredRate: duty.offeredRate,
+                    urgency: duty.urgency,
+                    relisted: true,
+                    rateBoosted: !!boosted,
+                    pushNumber
+                },
+                message,
+                timestamp: new Date().toISOString()
+            };
+
+            await notificationService.createBulkNotifications(staffUserIds, 'DUTY_RELISTED', payload);
+            websocketManager.emitToStaffRole(duty.staffRole, 'notification', payload);
+            await notificationDelivery.deliverToUsers(staffUserIds, 'DUTY_RELISTED', payload);
+
+            console.log(`Duty relist repeat push #${pushNumber} sent to ${staffUserIds.length} staff for duty ${duty._id}`);
+        } catch (error) {
+            console.error('Error emitting duty relist repeat push:', error);
+        }
+    }
+
+    /**
      * Emit duty edited notification to assigned staff
      * @param {Object} duty - Duty object
      * @param {Object} changes - Object containing changed fields
@@ -714,6 +911,36 @@ class NotificationEmitter {
             console.log(`Duty edited notification emitted to staff ${staffUserId}`);
         } catch (error) {
             console.error('Error emitting duty edited notification:', error);
+        }
+    }
+
+
+    // Admin turned auto-relist on/off for a hospital's duty
+    async emitAutoRelistChangedByAdmin(duty, hospitalUserId, enabled, reason) {
+        try {
+            const payload = {
+                type: 'DUTY_EDITED',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    offeredRate: duty.offeredRate
+                },
+                changes: [{ field: 'Auto-relist', newValue: enabled ? 'On' : 'Off' }],
+                reason,
+                message: `The HospiLink team turned auto-relist ${enabled ? 'on' : 'off'} for your ${duty.staffRole} duty. Reason: ${reason}`,
+                timestamp: new Date().toISOString()
+            };
+
+            const { unreadCount } = await notificationService.createNotificationWithCount(hospitalUserId, 'DUTY_EDITED', payload);
+
+            await notificationDelivery.deliverToUser(hospitalUserId, 'DUTY_EDITED', payload, unreadCount);
+
+            console.log(`Auto-relist change notification emitted to hospital ${hospitalUserId}`);
+        } catch (error) {
+            console.error('Error emitting auto-relist change notification:', error);
         }
     }
 

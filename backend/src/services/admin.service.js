@@ -2107,12 +2107,16 @@ class AdminService {
 
 
     // GET /api/admin/duty-history - Get completed duty history with filters
-    async getDutyHistory({ date, startDate, endDate, hospitalName, page = 1, limit = 10 }) {
+    async getDutyHistory({ date, startDate, endDate, hospitalName, page = 1, limit = 10, relisted = false }) {
         try {
             // Build query - start with completed status only
             const query = {
                 status: 'completed'
             };
+
+            if (relisted) {
+                query['autoRelist.relistCount'] = { $gt: 0 };
+            }
             
             // Build date filter
             let dateFilter;
@@ -2161,7 +2165,8 @@ class AdminService {
                             date: date || null,
                             startDate: startDate || null,
                             endDate: endDate || null,
-                            hospitalName: hospitalName || null
+                            hospitalName: hospitalName || null,
+                            relisted
                         }
                     };
                 }
@@ -2246,7 +2251,8 @@ class AdminService {
                     date: date || null,
                     startDate: startDate || null,
                     endDate: endDate || null,
-                    hospitalName: hospitalName || null
+                    hospitalName: hospitalName || null,
+                    relisted
                 }
             };
         } catch (error) {
@@ -2271,7 +2277,8 @@ class AdminService {
             offered_rate,
             is_overnight_duty,
             staff_count,
-            duty_sub_type
+            duty_sub_type,
+            auto_relist_enabled
         } = dutyPayload;
 
         // Fetch and validate hospital
@@ -2310,7 +2317,8 @@ class AdminService {
             description,
             offeredRate: offered_rate,
             isOvernightDuty: is_overnight_duty || false,
-            ...(staff_role === 'rmo' && { dutySubType: duty_sub_type })
+            ...(staff_role === 'rmo' && { dutySubType: duty_sub_type }),
+            ...(typeof auto_relist_enabled === 'boolean' && { autoRelist: { enabled: auto_relist_enabled } })
         };
 
         // Create multiple duties based on staff_count
@@ -2429,6 +2437,43 @@ class AdminService {
             createdBy: adminUserId
         });
     }
+
+    
+
+    // GET /api/admin/auto-relist/config — same shape as getInterviewConfig,
+    // scoped to just the 'autoRelist.*' keys (SystemConfig is one shared
+    // store; this filters rather than duplicating the read logic).
+    async getAutoRelistConfig() {
+        const keys = SystemConfigService.defaultKeys.filter(key => key.startsWith('autoRelist.'));
+        const [effective, historyEntries] = await Promise.all([
+            SystemConfigService.getManyEffective(keys),
+            Promise.all(keys.map(key => SystemConfigService.getHistory(key)))
+        ]);
+        return keys.map((key, i) => ({ key, value: effective[key], history: historyEntries[i] }));
+    }
+
+
+
+    // PATCH /api/admin/auto-relist/config — Super Admin only (capability
+    // 'autoRelist.config.manage' is granted to no other sub-role). Rejects
+    // any key outside the autoRelist.* namespace even though it's
+    // technically a known SystemConfig key — this endpoint is not a
+    // backdoor into every other domain's settings.
+    async updateAutoRelistConfig(key, value, effectiveFrom, adminUserId) {
+        if (!key.startsWith('autoRelist.') || !SystemConfigService.isKnownKey(key)) {
+            throw new UnprocessableEntityError(`Unknown auto-relist config key: ${key}`);
+        }
+        const invalid = await SystemConfigService.validateUpdate(key, value);
+        if (invalid) {
+            throw new UnprocessableEntityError(invalid);
+        }
+        return SystemConfigService.setValue(key, value, {
+            effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : undefined,
+            createdBy: adminUserId
+        });
+    }
+
+
 
     // ─── Account suspension ────────────────────────────────────────────────────
 
@@ -2826,6 +2871,26 @@ class AdminService {
         }
 
         return updated;
+    }
+
+
+
+    // Same rules as DutyService.setAutoRelistEnabled, without the hospital ownership check
+    async setDutyAutoRelistEnabled(dutyId, enabled) {
+        const duty = await Duty.findById(dutyId);
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (!['available', 'assigned'].includes(duty.status)) {
+            throw new ValidationError('Auto-relist can only be changed while the duty is available or assigned');
+        }
+
+        duty.autoRelist = duty.autoRelist || {};
+        duty.autoRelist.enabled = enabled;
+        await duty.save();
+
+        return duty;
     }
 }
 
