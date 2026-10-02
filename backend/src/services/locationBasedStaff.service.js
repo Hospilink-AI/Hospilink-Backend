@@ -5,6 +5,7 @@ const geocodingService = require('./geocoding.service');
 const redisClient = require('../config/redis');
 const dashboardService = require('./dashboard.service');
 const { URGENCY_LEVELS } = require('../utils/dutyCancellation.constants');
+const { hasDutyStarted } = require('../utils/calendar.helper');
 
 class LocationBasedStaffService {
     // Calculate bounding box for 50km radius
@@ -160,25 +161,7 @@ class LocationBasedStaffService {
                 continue;
             }
 
-            const dutyDate = new Date(duty.date);
-            const dutyDateTime = new Date(dutyDate);
-
-            // Parse start time (format: "HH:MM" or "HH:MM AM/PM")
-            const startTimeParts = duty.startTime.match(/(\d+):(\d+)\s*(AM|PM)?/i);
-            if (startTimeParts) {
-                let hours = parseInt(startTimeParts[1]);
-                const minutes = parseInt(startTimeParts[2]);
-                const meridiem = startTimeParts[3];
-
-                if (meridiem) {
-                    if (meridiem.toUpperCase() === 'PM' && hours !== 12) hours += 12;
-                    else if (meridiem.toUpperCase() === 'AM' && hours === 12) hours = 0;
-                }
-
-                dutyDateTime.setHours(hours, minutes, 0, 0);
-            }
-
-            if (dutyDateTime <= currentTime) {
+            if (hasDutyStarted(duty, currentTime)) {
                 console.log(`[AvailableJobs] Skipping duty ${duty._id} — already started at ${duty.startTime} on ${duty.date}`);
                 continue;
             }
