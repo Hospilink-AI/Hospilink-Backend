@@ -18,7 +18,7 @@ const {
     HOSPITAL_OTHER_REASON, STAFF_OTHER_REASON
 } = require('../utils/dutyCancellation.constants');
 const mongoose = require('mongoose');
-const { isValidDateKey, daysBetweenKeys } = require('../utils/calendar.helper');
+const { isValidDateKey, daysBetweenKeys, istDateKey, addDaysToKey } = require('../utils/calendar.helper');
 const { parsePeriod } = require('../utils/analytics.helper');
 
 // Longest window one calendar counts call may cover
@@ -752,11 +752,11 @@ const validateStaffAvailability = (req, res, next) => {
 
 // Validation for nearby staff search
 const validateNearbyStaff = (req, res, next) => {
-    const { radius, role } = req.query;
+    const { radius, role, date } = req.query;
     const errors = [];
 
     // Check for unexpected fields
-    const allowedFields = ['radius', 'role'];
+    const allowedFields = ['radius', 'role', 'date'];
     const receivedFields = Object.keys(req.query);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
 
@@ -775,6 +775,11 @@ const validateNearbyStaff = (req, res, next) => {
     // Role validation (optional)
     if (role !== undefined && typeof role !== 'string') {
         errors.push('Role parameter must be a string');
+    }
+
+    // Date (optional): adds each doctor's declared availability for that day
+    if (date !== undefined && !isValidDateKey(date)) {
+        errors.push('date must be in YYYY-MM-DD format');
     }
 
     if (errors.length > 0) {
@@ -2363,6 +2368,77 @@ const validateAnalyticsExportQuery = (sections) => (req, res, next) => {
 
 
 
+// Doctor availability: optional hours must come as a from/to pair, in order
+const checkAvailabilityHours = (entry, label, errors) => {
+    const timePattern = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    const { from, to } = entry;
+    if (from === undefined && to === undefined) return;
+    if (!timePattern.test(from || '') || !timePattern.test(to || '')) {
+        errors.push(`${label}: from and to must both be given in HH:MM format`);
+    } else if (from >= to) {
+        errors.push(`${label}: from must be before to`);
+    }
+};
+
+// PUT /api/staff/availability/weekly — { weekly: [{ day: 0-6, from?, to? }] }
+const validateAvailabilityWeekly = (req, res, next) => {
+    const { weekly } = req.body;
+    const errors = [];
+
+    if (!Array.isArray(weekly) || weekly.length > 7) {
+        errors.push('weekly must be a list with at most one entry per day');
+    } else {
+        const seen = new Set();
+        weekly.forEach((entry, i) => {
+            if (!entry || !Number.isInteger(entry.day) || entry.day < 0 || entry.day > 6) {
+                errors.push(`weekly[${i}].day must be 0 (Sunday) to 6 (Saturday)`);
+                return;
+            }
+            if (seen.has(entry.day)) errors.push(`weekly[${i}]: day ${entry.day} is listed twice`);
+            seen.add(entry.day);
+            checkAvailabilityHours(entry, `weekly[${i}]`, errors);
+        });
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    next();
+};
+
+// PUT /api/staff/availability/dates — { dates: [{ date, status: free|busy|clear, from?, to? }] }
+const validateAvailabilityDates = (req, res, next) => {
+    const { dates } = req.body;
+    const errors = [];
+    const today = istDateKey(new Date());
+    const lastDay = addDaysToKey(today, 180);
+
+    if (!Array.isArray(dates) || dates.length === 0 || dates.length > 100) {
+        errors.push('dates must be a list of 1 to 100 days');
+    } else {
+        dates.forEach((entry, i) => {
+            if (!entry || !isValidDateKey(entry.date)) {
+                errors.push(`dates[${i}].date must be in YYYY-MM-DD format`);
+                return;
+            }
+            if (entry.date < today || entry.date > lastDay) {
+                errors.push(`dates[${i}].date must be between today and 180 days ahead`);
+            }
+            if (!['free', 'busy', 'clear'].includes(entry.status)) {
+                errors.push(`dates[${i}].status must be free, busy or clear`);
+            }
+            if (entry.status === 'free') checkAvailabilityHours(entry, `dates[${i}]`, errors);
+        });
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    next();
+};
+
+
+
 // Validation for the invite picker: the duty's role, optionally its shift
 const validateInviteCandidatesQuery = (req, res, next) => {
     const allowedParams = ['role', 'date', 'start_time', 'end_time'];
@@ -3072,6 +3148,8 @@ module.exports = {
     validateAnalyticsQuery,
     validateAnalyticsExportQuery,
     validateInviteCandidatesQuery,
+    validateAvailabilityWeekly,
+    validateAvailabilityDates,
     validateHospitalDutyRouteMap,
     validateSendPhoneOTP,
     validateVerifyPhoneOTP,
