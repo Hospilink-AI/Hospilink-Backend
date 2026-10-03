@@ -40,7 +40,15 @@ const RULES = {
     'autoRelist.staffWatchlistWindowDays': integer(1, 180),
     'autoRelist.staffWatchlistThresholdCount': integer(1, 20),
     'autoRelist.pairWatchlistThresholdCount': integer(1, 20),
-    'autoRelist.hospitalWatchlistMultiplier': number(1, 10)
+    'autoRelist.hospitalWatchlistMultiplier': number(1, 10),
+
+    // Duty calendar
+    'calendar.weekStart': { kind: 'oneOf', values: ['monday', 'sunday'] },
+    'calendar.prefetchPeriods': integer(0, 3),
+    'calendar.countsCacheSeconds': integer(0, 600),
+    'calendar.bookingHorizonDays': integer(7, 365),
+    'calendar.historyDays': integer(7, 730),
+    'calendar.batchNotificationThreshold': integer(2, 50)
 };
 
 // Rules that compare two keys. Checked against the *other* key's current

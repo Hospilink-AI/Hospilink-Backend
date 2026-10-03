@@ -18,6 +18,10 @@ const {
     HOSPITAL_OTHER_REASON, STAFF_OTHER_REASON
 } = require('../utils/dutyCancellation.constants');
 const mongoose = require('mongoose');
+const { isValidDateKey, daysBetweenKeys } = require('../utils/calendar.helper');
+
+// Longest window one calendar counts call may cover
+const MAX_CALENDAR_WINDOW_DAYS = 100;
 
 
 const RESUME_ALLOWED_MIME_TYPES = [
@@ -2201,6 +2205,101 @@ const validateHospitalActiveDutiesQuery = (req, res, next) => {
 
 
 
+// Calendar date filters on the available-duties feed. Only checks its own
+// params so the other filters old app versions send still pass.
+const validateAvailableDutiesQuery = (req, res, next) => {
+    const { date, from, to } = req.query;
+    const errors = [];
+
+    for (const [name, value] of Object.entries({ date, from, to })) {
+        if (value !== undefined && !isValidDateKey(value)) {
+            errors.push(`${name} must be a date in YYYY-MM-DD format`);
+        }
+    }
+
+    if (date && (from || to)) {
+        errors.push('Use either date or from/to, not both');
+    }
+
+    if (errors.length === 0 && from && to && from > to) {
+        errors.push('from cannot be after to');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for the calendar counts window
+const validateCalendarCountsQuery = (req, res, next) => {
+    const { from, to } = req.query;
+    const errors = [];
+
+    const allowedParams = ['from', 'to'];
+    const unexpectedParams = Object.keys(req.query).filter(param => !allowedParams.includes(param));
+    if (unexpectedParams.length > 0) {
+        errors.push(`Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`);
+    }
+
+    if (!isValidDateKey(from)) errors.push('from is required in YYYY-MM-DD format');
+    if (!isValidDateKey(to)) errors.push('to is required in YYYY-MM-DD format');
+
+    if (errors.length === 0) {
+        if (from > to) {
+            errors.push('from cannot be after to');
+        } else if (daysBetweenKeys(from, to) >= MAX_CALENDAR_WINDOW_DAYS) {
+            errors.push(`The window cannot be longer than ${MAX_CALENDAR_WINDOW_DAYS} days`);
+        }
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors
+        });
+    }
+
+    next();
+};
+
+
+
+// Validation for the calendar day panel
+const validateCalendarDayQuery = (req, res, next) => {
+    const allowedParams = ['date'];
+    const unexpectedParams = Object.keys(req.query).filter(param => !allowedParams.includes(param));
+    const errors = [];
+
+    if (unexpectedParams.length > 0) {
+        errors.push(`Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`);
+    }
+
+    if (!isValidDateKey(req.query.date)) {
+        errors.push('date is required in YYYY-MM-DD format');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors
+        });
+    }
+
+    next();
+};
+
+
+
 
 // Validate duty route map parameters for hospital
 const validateHospitalDutyRouteMap = (req, res, next) => {
@@ -2844,6 +2943,9 @@ module.exports = {
     validateDashboardLocationPermission,
     validateDashboardLocationUpdate,
     validateHospitalActiveDutiesQuery,
+    validateAvailableDutiesQuery,
+    validateCalendarCountsQuery,
+    validateCalendarDayQuery,
     validateHospitalDutyRouteMap,
     validateSendPhoneOTP,
     validateVerifyPhoneOTP,

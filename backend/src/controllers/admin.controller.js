@@ -16,6 +16,7 @@ const { generateActiveDutiesPDF } = require('../utils/pdf.puppeteer');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const { redactBulkDutyFinancials } = require('../utils/adminResponseFilters');
 const autoRelistAnalyticsService = require('../services/autoRelistAnalytics.service');
+const dutyCalendarService = require('../services/dutyCalendar.service');
 
 
 
@@ -734,6 +735,21 @@ exports.updateAutoRelistConfig = asyncHandler(async (req, res) => {
 });
 
 
+// GET /api/admin/calendar/config — Super Admin only
+exports.getCalendarConfig = asyncHandler(async (req, res) => {
+    const config = await adminService.getCalendarConfig();
+    res.status(200).json({ success: true, config });
+});
+
+
+// PATCH /api/admin/calendar/config — Super Admin only
+exports.updateCalendarConfig = asyncHandler(async (req, res) => {
+    const { key, value, effectiveFrom } = req.body;
+    const row = await adminService.updateCalendarConfig(key, value, effectiveFrom, req.user.id);
+    res.status(200).json({ success: true, config: row, message: `${key} updated` });
+});
+
+
 // POST /api/admin/assign-duty
 exports.assignDutyToStaff = asyncHandler(async (req, res) => {
     const { hospital_id, duty_id, staff_id } = req.body;
@@ -907,6 +923,9 @@ exports.editDutyForHospital = asyncHandler(async (req, res) => {
     if (req.body.duty_sub_type) updateData.dutySubType = req.body.duty_sub_type;
 
     const duty = await DutyService.editDuty(id, req.user.id, updateData, { asAdmin: true });
+    if (duty.hospital?.user?._id) {
+        dutyCalendarService.invalidateCounts(duty.hospital.user._id.toString());
+    }
 
     try {
         const changes = [];

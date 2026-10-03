@@ -19,7 +19,10 @@ const {
     validateObjectId,
     validateStatementQuery,
     validateHospitalDutyRouteMap,
-    validateHospitalActiveDutiesQuery
+    validateHospitalActiveDutiesQuery,
+    validateAvailableDutiesQuery,
+    validateCalendarCountsQuery,
+    validateCalendarDayQuery
 } = require('../middleware/validation.middleware');
 
 // Apply protection to all duty routes
@@ -38,7 +41,21 @@ router.get('/duties-published', authorize('hospital'), requireHospitalVerificati
 
 router.get('/duties/history', authorize('hospital'), requireHospitalVerification, validatePagination, dutyController.getDutyHistory);
 
-router.get('/duties/available', authorize('staff'), requireStaffVerificationandisAvailable, dutyController.getAvailableJobsWithDistance);
+router.get('/duties/available', authorize('staff'), requireStaffVerificationandisAvailable, validateAvailableDutiesQuery, dutyController.getAvailableJobsWithDistance);
+
+// Duty calendar (hospital and staff). Staff only need to be verified, not
+// available, so a doctor can check their roster while off.
+const requireCalendarVerification = (req, res, next) => (
+    req.user.role === 'hospital'
+        ? requireHospitalVerification(req, res, next)
+        : requireVerifiedStaffOnly(req, res, next)
+);
+
+router.get('/duties/calendar-counts', authorize('staff', 'hospital'), requireCalendarVerification, validateCalendarCountsQuery, dutyController.getCalendarCounts);
+
+router.get('/duties/calendar-day', authorize('staff', 'hospital'), requireCalendarVerification, validateCalendarDayQuery, dutyController.getCalendarDay);
+
+router.get('/duties/:id/fill-progress', authorize('hospital'), requireHospitalVerification, validateObjectId('id'), dutyController.getFillProgress);
 
 router.get('/duties/my-upcoming', authorize('staff'), requireStaffVerificationandisAvailable, dutyController.getMyUpcomingDuties);
 

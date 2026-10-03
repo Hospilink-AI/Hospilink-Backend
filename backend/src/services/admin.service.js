@@ -2329,6 +2329,7 @@ class AdminService {
             const result = await DutyService.createDuty(dutyData, hospital.user._id);
             createdDuties.push(result.duty);
         }
+        require('./dutyCalendar.service').invalidateCounts(hospital.user._id.toString());
 
         // Notify matching staff + hospital (same as hospital flow)
         try {
@@ -2344,9 +2345,23 @@ class AdminService {
 
             const hospitalUserId = hospital.user._id.toString();
 
-            // Send notifications for all created duties
-            for (const duty of createdDuties) {
-                await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, hospitalUserId);
+            Duty.updateMany(
+                { _id: { $in: createdDuties.map(d => d._id) } },
+                { $set: { notifiedCount: staffUserIds.length } }
+            ).catch(err => logger.error('Error saving notified count:', err));
+
+            // Several slots posted together go out as one notification naming the count
+            const batchThreshold = await SystemConfigService.getEffective('calendar.batchNotificationThreshold');
+            if (createdDuties.length >= batchThreshold) {
+                await notificationEmitter.emitDutyCreated(createdDuties[0], hospital, staffUserIds, hospitalUserId, {
+                    count: createdDuties.length,
+                    dutyIds: createdDuties.map(d => d._id.toString())
+                });
+            } else {
+                // Send notifications for all created duties
+                for (const duty of createdDuties) {
+                    await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, hospitalUserId);
+                }
             }
 
             // Notify all admins if this is an emergency duty
@@ -2462,6 +2477,37 @@ class AdminService {
     async updateAutoRelistConfig(key, value, effectiveFrom, adminUserId) {
         if (!key.startsWith('autoRelist.') || !SystemConfigService.isKnownKey(key)) {
             throw new UnprocessableEntityError(`Unknown auto-relist config key: ${key}`);
+        }
+        const invalid = await SystemConfigService.validateUpdate(key, value);
+        if (invalid) {
+            throw new UnprocessableEntityError(invalid);
+        }
+        return SystemConfigService.setValue(key, value, {
+            effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : undefined,
+            createdBy: adminUserId
+        });
+    }
+
+
+
+    // GET /api/admin/calendar/config — same shape as getAutoRelistConfig,
+    // scoped to the 'calendar.*' keys
+    async getCalendarConfig() {
+        const keys = SystemConfigService.defaultKeys.filter(key => key.startsWith('calendar.'));
+        const [effective, historyEntries] = await Promise.all([
+            SystemConfigService.getManyEffective(keys),
+            Promise.all(keys.map(key => SystemConfigService.getHistory(key)))
+        ]);
+        return keys.map((key, i) => ({ key, value: effective[key], history: historyEntries[i] }));
+    }
+
+
+
+    // PATCH /api/admin/calendar/config — Super Admin only ('calendar.config.manage'
+    // is granted to no other sub-role). Only calendar.* keys.
+    async updateCalendarConfig(key, value, effectiveFrom, adminUserId) {
+        if (!key.startsWith('calendar.') || !SystemConfigService.isKnownKey(key)) {
+            throw new UnprocessableEntityError(`Unknown calendar config key: ${key}`);
         }
         const invalid = await SystemConfigService.validateUpdate(key, value);
         if (invalid) {
