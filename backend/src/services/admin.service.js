@@ -896,6 +896,7 @@ class AdminService {
 
         const previousStatus = hospital.verificationStatus;
         hospital.verificationStatus = 'verified';
+        hospital.verifiedAt = new Date();
         hospital.rejectionReason = null; // clear reason if coming from rejected
         await hospital.save();
 
@@ -1439,6 +1440,7 @@ class AdminService {
 
         const previousStatus = staff.verificationStatus;
         staff.verificationStatus = 'verified';
+        staff.verifiedAt = new Date();
         staff.rejectionReason = null; // clear reason if coming from rejected
         staff.isAvailable = staff.isProfileComplete === true;
         await staff.save();

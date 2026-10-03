@@ -170,6 +170,9 @@ const hospitalSchema = new mongoose.Schema({
         default: 'pending',
         index: true
     },
+    verifiedAt: {
+        type: Date
+    },
     rejectionReason: {
         type: String,
         trim: true,
