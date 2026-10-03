@@ -2581,7 +2581,7 @@ class DutyService {
 
     /**
      * Auto-escalate: flag unassigned duties starting within 1 hour for admin attention.
-     * Does NOT mutate urgency — uses unfilledCriticalNotified as the escalation flag.
+     * Does NOT mutate urgency — uses escalatedToCritical as the escalation flag.
      * Returns count and duty objects so the cron can notify admins.
      */
     async autoEscalateUnassignedDuties() {
@@ -2592,7 +2592,7 @@ class DutyService {
         const candidates = await Duty.find({
             status: 'available',
             assignedTo: null,
-            unfilledCriticalNotified: false
+            escalatedToCritical: { $ne: true }
         }).populate('hospital', 'hospitalLegalName name user');
 
         const toEscalate = [];
@@ -2614,7 +2614,7 @@ class DutyService {
         // Only mark as notified — urgency stays untouched
         await Duty.updateMany(
             { _id: { $in: ids } },
-            { $set: { unfilledCriticalNotified: true, unfilledCriticalNotifiedAt: new Date() } }
+            { $set: { escalatedToCritical: true, escalatedToCriticalAt: new Date() } }
         );
 
         return { count: toEscalate.length, duties: toEscalate };
@@ -2631,7 +2631,8 @@ class DutyService {
             status: { $in: ['available', 'assigned', 'enroute', 'in-progress'] },
             $or: [
                 { urgency: { $in: ['emergency', 'high'] } },
-                { unfilledCriticalNotified: true }   // auto-escalated unassigned duties
+                { escalatedToCritical: true },       // auto-escalated unassigned duties
+                { unfilledCriticalNotified: true }   // escalated before the separate flag, or past the 30-minute alert
             ]
         };
 
