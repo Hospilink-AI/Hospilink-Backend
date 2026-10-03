@@ -48,7 +48,12 @@ const RULES = {
     'calendar.countsCacheSeconds': integer(0, 600),
     'calendar.bookingHorizonDays': integer(7, 365),
     'calendar.historyDays': integer(7, 730),
-    'calendar.batchNotificationThreshold': integer(2, 50)
+    'calendar.batchNotificationThreshold': integer(2, 50),
+
+    // Admin analytics
+    'analytics.liveCacheSeconds': integer(0, 3600),
+    'analytics.projectedCommissionPercent': number(0, 50),
+    'analytics.revenueSource': { kind: 'oneOf', values: ['projected', 'ledger'] }
 };
 
 // Rules that compare two keys. Checked against the *other* key's current
