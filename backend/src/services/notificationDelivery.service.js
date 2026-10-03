@@ -13,6 +13,7 @@ const FCM_TITLES = {
     DUTY_CREATED: 'Duty Created',
     EMERGENCY_REQUEST_ACKNOWLEDGED: 'Emergency Request Sent',
     NEW_DUTY_OFFER: 'New Duty Available',
+    DUTY_INVITE: 'Duty Invitation',
     EMERGENCY_DUTY_REQUEST: '🚨 Emergency Duty',
     DUTY_CONFIRMED: 'Duty Confirmed',
     STAFF_ASSIGNED: 'Staff Assigned',

@@ -17,6 +17,7 @@ const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const { redactBulkDutyFinancials } = require('../utils/adminResponseFilters');
 const autoRelistAnalyticsService = require('../services/autoRelistAnalytics.service');
 const dutyCalendarService = require('../services/dutyCalendar.service');
+const dutyInviteService = require('../services/dutyInvite.service');
 
 
 
@@ -305,6 +306,9 @@ exports.getNearbyAvailableStaff = asyncHandler(async (req, res) => {
         radius,
         role
     );
+
+    // Favourite / worked-with-you flags for picking doctors to invite
+    await dutyInviteService.annotate(result.data?.hospital?.id, result.data?.staff);
 
     res.status(200).json({
         success: true,

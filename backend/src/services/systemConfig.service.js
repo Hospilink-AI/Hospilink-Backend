@@ -135,7 +135,9 @@ const DEFAULTS = {
     'offer.startRadiusKm': 30,
     'offer.stepKm': 5,
     'offer.stepMinutes': 60,
-    'offer.maxRadiusKm': 75
+    'offer.maxRadiusKm': 75,
+    // Invited doctors get this long before the duty opens to others (when the hospital allows it)
+    'offer.inviteWindowMinutes': 30
 };
 
 const CACHE_TTL_SECONDS = 300;

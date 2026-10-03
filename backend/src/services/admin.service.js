@@ -2280,8 +2280,13 @@ class AdminService {
             is_overnight_duty,
             staff_count,
             duty_sub_type,
-            auto_relist_enabled
+            auto_relist_enabled,
+            invite_staff_ids,
+            open_after_invite
         } = dutyPayload;
+
+        // Doctors invited by name are checked before anything is created
+        const invitees = await require('./dutyInvite.service').resolveInvitees(invite_staff_ids, staff_role);
 
         // Fetch and validate hospital
         const hospital = await Hospital.findById(hospitalId)
@@ -2337,7 +2342,12 @@ class AdminService {
         try {
             // Same staged offer as a hospital post; without it, every
             // available staff member of the role (the old behaviour)
-            let staffUserIds = await require('./dutyOffer.service').startOffer(createdDuties, hospital);
+            const offerStart = await require('./dutyOffer.service').startOffer(
+                createdDuties,
+                hospital,
+                invitees.length ? { staff: invitees, openAfterInvite: open_after_invite !== false } : null
+            );
+            let staffUserIds = offerStart?.userIds;
             if (!staffUserIds) {
                 const matchingStaff = await MedicalStaff.find({
                     jobRole: staff_role,
@@ -2359,15 +2369,25 @@ class AdminService {
 
             // Several slots posted together go out as one notification naming the count
             const batchThreshold = await SystemConfigService.getEffective('calendar.batchNotificationThreshold');
+            // Invited doctors get a named invite instead of the general offer
+            const offerUserIds = offerStart?.invited ? [] : staffUserIds;
+            if (offerStart?.invited) {
+                await notificationEmitter.emitDutyInvite(createdDuties[0], staffUserIds, hospital.hospitalLegalName, {
+                    count: createdDuties.length,
+                    dutyIds: createdDuties.map(d => d._id.toString()),
+                    openAfterInvite: createdDuties[0].offer.openAfterInvite,
+                    inviteExpiresAt: createdDuties[0].offer.nextActionAt
+                });
+            }
             if (createdDuties.length >= batchThreshold) {
-                await notificationEmitter.emitDutyCreated(createdDuties[0], hospital, staffUserIds, hospitalUserId, {
+                await notificationEmitter.emitDutyCreated(createdDuties[0], hospital, offerUserIds, hospitalUserId, {
                     count: createdDuties.length,
                     dutyIds: createdDuties.map(d => d._id.toString())
                 });
             } else {
                 // Send notifications for all created duties
                 for (const duty of createdDuties) {
-                    await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, hospitalUserId);
+                    await notificationEmitter.emitDutyCreated(duty, hospital, offerUserIds, hospitalUserId);
                 }
             }
 

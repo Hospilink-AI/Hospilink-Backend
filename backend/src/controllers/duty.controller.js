@@ -20,6 +20,7 @@ const geocodingService = require('../services/geocoding.service');
 const CancellationService = require('../services/cancellation.service');
 const dutyCalendarService = require('../services/dutyCalendar.service');
 const dutyOfferService = require('../services/dutyOffer.service');
+const dutyInviteService = require('../services/dutyInvite.service');
 const systemConfigService = require('../services/systemConfig.service');                    
 
 // Extend logger with debug method
@@ -45,8 +46,13 @@ exports.createDuty = asyncHandler(async (req, res) => {
         is_overnight_duty,
         staff_count,
         duty_sub_type,
-        auto_relist_enabled
+        auto_relist_enabled,
+        invite_staff_ids,
+        open_after_invite
     } = req.body;
+
+    // Doctors invited by name are checked before anything is created
+    const invitees = await dutyInviteService.resolveInvitees(invite_staff_ids, staff_role);
 
 
     // Use hospital user ID from the authenticated user (JWT)
@@ -101,7 +107,12 @@ exports.createDuty = asyncHandler(async (req, res) => {
 
         // Staged offer (first ring, or the whole city for emergencies); the
         // old 50 km search only when staged offers are switched off
-        let staffUserIds = await dutyOfferService.startOffer(createdDuties, hospital);
+        const offerStart = await dutyOfferService.startOffer(
+            createdDuties,
+            hospital,
+            invitees.length ? { staff: invitees, openAfterInvite: open_after_invite !== false } : null
+        );
+        let staffUserIds = offerStart?.userIds;
         if (!staffUserIds) {
             const matchingStaff = await locationBasedStaffService.getNearbyStaffByRole(
                 hospitalCoords,
@@ -129,8 +140,18 @@ exports.createDuty = asyncHandler(async (req, res) => {
         // Several slots posted together go out as one notification naming the count
         const batchThreshold = await systemConfigService.getEffective('calendar.batchNotificationThreshold');
         const isBatch = createdDuties.length >= batchThreshold;
+        // Invited doctors get a named invite instead of the general offer
+        const offerUserIds = offerStart?.invited ? [] : staffUserIds;
+        if (offerStart?.invited) {
+            await notificationEmitter.emitDutyInvite(createdDuties[0], staffUserIds, hospital.hospitalLegalName, {
+                count: createdDuties.length,
+                dutyIds: createdDuties.map(d => d._id.toString()),
+                openAfterInvite: createdDuties[0].offer.openAfterInvite,
+                inviteExpiresAt: createdDuties[0].offer.nextActionAt
+            });
+        }
         if (isBatch) {
-            await notificationEmitter.emitDutyCreated(createdDuties[0], hospital, staffUserIds, userId, {
+            await notificationEmitter.emitDutyCreated(createdDuties[0], hospital, offerUserIds, userId, {
                 count: createdDuties.length,
                 dutyIds: createdDuties.map(d => d._id.toString())
             });
@@ -139,7 +160,7 @@ exports.createDuty = asyncHandler(async (req, res) => {
         // Emit notification to both hospital and matching staff for all created duties
         for (const duty of createdDuties) {
             if (!isBatch) {
-                await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, userId);
+                await notificationEmitter.emitDutyCreated(duty, hospital, offerUserIds, userId);
             }
             
             // Log duty creation activity

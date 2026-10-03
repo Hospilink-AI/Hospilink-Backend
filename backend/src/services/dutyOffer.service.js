@@ -6,7 +6,7 @@ const notificationEmitter = require('./notificationEmitter');
 const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
 
-const OFFER_KEYS = ['offer.featureEnabled', 'offer.startRadiusKm', 'offer.stepKm', 'offer.stepMinutes', 'offer.maxRadiusKm'];
+const OFFER_KEYS = ['offer.featureEnabled', 'offer.startRadiusKm', 'offer.stepKm', 'offer.stepMinutes', 'offer.maxRadiusKm', 'offer.inviteWindowMinutes'];
 const MINUTE_MS = 60 * 1000;
 
 // Staged duty offers. A normal duty is offered to doctors within
@@ -21,7 +21,8 @@ class DutyOfferService {
             startRadiusKm: cfg['offer.startRadiusKm'],
             stepKm: cfg['offer.stepKm'],
             stepMinutes: cfg['offer.stepMinutes'],
-            maxRadiusKm: cfg['offer.maxRadiusKm']
+            maxRadiusKm: cfg['offer.maxRadiusKm'],
+            inviteWindowMinutes: cfg['offer.inviteWindowMinutes']
         };
     }
 
@@ -32,40 +33,38 @@ class DutyOfferService {
 
 
     // Sets up the offer on newly created duties (all slots of one post share
-    // it) and returns the user ids to notify now. Returns null when staged
-    // offers are switched off, so the caller keeps the old behaviour.
-    async startOffer(duties, hospital) {
+    // it). Returns { userIds, invited }: the users to notify now and whether
+    // they are invitees (notified with DUTY_INVITE by the caller's emitter).
+    // Returns null when staged offers are switched off, so the caller keeps
+    // the old behaviour.
+    //   invite: { staff: [{ _id, user: { _id } }], openAfterInvite }
+    async startOffer(duties, hospital, invite = null) {
         const settings = await this.getSettings();
         if (!settings.enabled || !duties.length) return null;
 
         const first = duties[0];
         const now = new Date();
         const ids = duties.map(d => d._id);
-        const center = this._hospitalPoint(hospital);
+        const openTo = first.urgency === 'emergency' ? 'city' : 'radius';
 
         let offer;
         let recipients;
-        if (first.urgency === 'emergency') {
-            const city = staffLocator.normalizeCity(hospital.city);
-            recipients = await staffLocator.findInCity(hospital.city, first.staffRole);
+        if (invite?.staff?.length) {
+            recipients = invite.staff;
             offer = {
-                mode: 'city',
-                city,
-                history: [{ at: now, event: 'opened_to_city', notified: recipients.length }]
+                mode: 'invite',
+                invitedStaff: recipients.map(r => r._id),
+                openAfterInvite: invite.openAfterInvite !== false,
+                openTo,
+                nextActionAt: invite.openAfterInvite !== false
+                    ? new Date(now.getTime() + settings.inviteWindowMinutes * MINUTE_MS)
+                    : null,
+                history: [{ at: now, event: 'invite_sent', notified: recipients.length }]
             };
         } else {
-            recipients = center ? await staffLocator.findInRadius(center, first.staffRole, settings.startRadiusKm) : [];
-            offer = {
-                mode: 'radius',
-                radiusKm: settings.startRadiusKm,
-                maxRadiusKm: settings.maxRadiusKm,
-                stepKm: settings.stepKm,
-                stepMinutes: settings.stepMinutes,
-                nextActionAt: settings.startRadiusKm < settings.maxRadiusKm
-                    ? new Date(now.getTime() + settings.stepMinutes * MINUTE_MS)
-                    : null,
-                history: [{ at: now, event: 'opened', radiusKm: settings.startRadiusKm, notified: recipients.length }]
-            };
+            ({ offer, recipients } = await this._openOffer(openTo, hospital, first.staffRole, settings, now));
+            offer.history = [offer.historyEntry];
+            delete offer.historyEntry;
         }
 
         await Duty.updateMany(
@@ -74,7 +73,76 @@ class DutyOfferService {
         );
         for (const duty of duties) duty.offer = offer;
 
-        return recipients.map(r => String(r.user._id));
+        return { userIds: recipients.map(r => String(r.user._id)), invited: offer.mode === 'invite' };
+    }
+
+
+
+    // The offer fields and first recipients for a duty opening to the city
+    // (emergency) or the first ring
+    async _openOffer(openTo, hospital, role, settings, now, excludeStaffIds = []) {
+        if (openTo === 'city') {
+            const recipients = await staffLocator.findInCity(hospital.city, role, { excludeStaffIds });
+            return {
+                recipients,
+                offer: {
+                    mode: 'city',
+                    city: staffLocator.normalizeCity(hospital.city),
+                    nextActionAt: null,
+                    historyEntry: { at: now, event: 'opened_to_city', notified: recipients.length }
+                }
+            };
+        }
+
+        const center = this._hospitalPoint(hospital);
+        const recipients = center
+            ? await staffLocator.findInRadius(center, role, settings.startRadiusKm, { excludeStaffIds })
+            : [];
+        return {
+            recipients,
+            offer: {
+                mode: 'radius',
+                radiusKm: settings.startRadiusKm,
+                maxRadiusKm: settings.maxRadiusKm,
+                stepKm: settings.stepKm,
+                stepMinutes: settings.stepMinutes,
+                nextActionAt: settings.startRadiusKm < settings.maxRadiusKm
+                    ? new Date(now.getTime() + settings.stepMinutes * MINUTE_MS)
+                    : null,
+                historyEntry: { at: now, event: 'opened', radiusKm: settings.startRadiusKm, notified: recipients.length }
+            }
+        };
+    }
+
+
+
+    // Invite window over with nobody accepting: open to the city or first ring
+    async _openAfterInvite(duty) {
+        const settings = await this.getSettings();
+        const hospital = await Hospital.findById(duty.hospital).select('coordinates city user hospitalLegalName');
+        if (!hospital) return false;
+
+        const now = new Date();
+        const already = (duty.offer.notifiedStaff || []).map(String);
+        const { offer, recipients } = await this._openOffer(duty.offer.openTo || 'radius', hospital, duty.staffRole, settings, now, already);
+        const historyEntry = { ...offer.historyEntry, event: offer.mode === 'city' ? 'opened_to_city' : 'opened_to_radius' };
+        delete offer.historyEntry;
+
+        const updated = await Duty.findOneAndUpdate(
+            { _id: duty._id, status: 'available', 'offer.mode': 'invite' },
+            {
+                $set: Object.fromEntries(Object.entries(offer).map(([k, v]) => [`offer.${k}`, v])),
+                $addToSet: { 'offer.notifiedStaff': { $each: recipients.map(r => r._id) } },
+                $push: { 'offer.history': historyEntry }
+            },
+            { new: true }
+        );
+        if (!updated) return false;
+
+        if (recipients.length) {
+            await notificationEmitter.emitDutyOfferWidened(updated, recipients.map(r => String(r.user._id)), offer.radiusKm ?? null, hospital.hospitalLegalName);
+        }
+        return true;
     }
 
 
@@ -88,14 +156,17 @@ class DutyOfferService {
         try {
             const due = await Duty.find({
                 status: 'available',
-                'offer.mode': 'radius',
+                'offer.mode': { $in: ['radius', 'invite'] },
                 'offer.nextActionAt': { $lte: new Date() }
-            }).select('+offer.notifiedStaff staffRole date startTime urgency offeredRate hospital offer');
+            }).select('+offer.notifiedStaff staffRole date startTime endTime urgency offeredRate hospital offer');
 
             let widened = 0;
             for (const duty of due) {
                 try {
-                    if (await this._widen(duty)) widened++;
+                    const done = duty.offer.mode === 'invite'
+                        ? await this._openAfterInvite(duty)
+                        : await this._widen(duty);
+                    if (done) widened++;
                 } catch (error) {
                     logger.error(`Error widening offer for duty ${duty._id}:`, error);
                 }
