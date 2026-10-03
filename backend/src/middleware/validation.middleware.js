@@ -2274,20 +2274,20 @@ const validateCalendarCountsQuery = (req, res, next) => {
 
 
 
-// Validation for admin analytics sections: period plus optional filters
-const validateAnalyticsQuery = (req, res, next) => {
-    const allowedParams = ['from', 'to', 'granularity', 'staffRole', 'urgency', 'city'];
-    const unexpectedParams = Object.keys(req.query).filter(param => !allowedParams.includes(param));
+// Period and filters shared by every analytics request
+const checkAnalyticsQuery = (query, extraParams = []) => {
+    const allowedParams = ['from', 'to', 'granularity', 'staffRole', 'urgency', 'city', ...extraParams];
+    const unexpectedParams = Object.keys(query).filter(param => !allowedParams.includes(param));
     const errors = [];
 
     if (unexpectedParams.length > 0) {
         errors.push(`Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`);
     }
 
-    const period = parsePeriod(req.query);
+    const period = parsePeriod(query);
     if (period.error) errors.push(period.error);
 
-    const { staffRole, urgency, city } = req.query;
+    const { staffRole, urgency, city } = query;
     if (staffRole !== undefined && !ALLOWED_ROLES.includes(staffRole)) {
         errors.push('staffRole is not a valid role');
     }
@@ -2298,6 +2298,21 @@ const validateAnalyticsQuery = (req, res, next) => {
         errors.push('city must be a non-empty string up to 100 characters');
     }
 
+    return {
+        errors,
+        period,
+        filters: {
+            ...(staffRole && { staffRole }),
+            ...(urgency && { urgency }),
+            ...(city && { city: city.trim() })
+        }
+    };
+};
+
+// Validation for admin analytics sections: period plus optional filters
+const validateAnalyticsQuery = (req, res, next) => {
+    const { errors, period, filters } = checkAnalyticsQuery(req.query);
+
     if (errors.length > 0) {
         return res.status(400).json({
             success: false,
@@ -2306,14 +2321,31 @@ const validateAnalyticsQuery = (req, res, next) => {
         });
     }
 
-    req.analyticsQuery = {
-        period,
-        filters: {
-            ...(staffRole && { staffRole }),
-            ...(urgency && { urgency }),
-            ...(city && { city: city.trim() })
-        }
-    };
+    req.analyticsQuery = { period, filters };
+    next();
+};
+
+// Validation for analytics export: a section and a file format on top
+const validateAnalyticsExportQuery = (sections) => (req, res, next) => {
+    const { errors, period, filters } = checkAnalyticsQuery(req.query, ['section', 'format']);
+    const { section, format = 'csv' } = req.query;
+
+    if (!sections.includes(section)) {
+        errors.push(`section must be one of: ${sections.join(', ')}`);
+    }
+    if (!['csv', 'xlsx'].includes(format)) {
+        errors.push('format must be csv or xlsx');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors
+        });
+    }
+
+    req.analyticsQuery = { period, filters, section, format };
     next();
 };
 
@@ -2993,6 +3025,7 @@ module.exports = {
     validateCalendarCountsQuery,
     validateCalendarDayQuery,
     validateAnalyticsQuery,
+    validateAnalyticsExportQuery,
     validateHospitalDutyRouteMap,
     validateSendPhoneOTP,
     validateVerifyPhoneOTP,
