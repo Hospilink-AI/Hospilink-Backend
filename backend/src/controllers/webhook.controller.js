@@ -3,6 +3,11 @@ const Document = require("../models/Document");
 const cacheService = require('../services/cache.service');
 const logger = require('../utils/logger');
 const notificationEmitter = require('../services/notificationEmitter');
+const activityLogEmitter = require('../services/activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
+
+// IDfy result statuses that mean the Aadhaar check did not pass
+const IDFY_FAILED_STATUSES = ['failed', 'failure', 'error', 'rejected'];
 
 /**
  * Verify the webhook token embedded in the request URL query string.
@@ -52,19 +57,30 @@ exports.handleAadhaarWebhook = async (req, res) => {
         }
 
         // ── 3. Update document ────────────────────────────────────────────────
+        // A check IDfy reports as failed goes to manual review instead of
+        // being marked verified
+        const reportedStatus = String(data.status || '').toLowerCase();
+        const checkFailed = IDFY_FAILED_STATUSES.includes(reportedStatus);
+
         const result = await Document.updateOne(
             {
                 "documents.verificationMeta.referenceId": requestId,
                 "documents.documentType": "aadhaar-card"
             },
             {
-                $set: {
-                    "documents.$.verificationStatus": "auto-verified",
-                    "documents.$.verificationMeta.status": "completed",
-                    "documents.$.verificationMeta.rawResponse": data,
-                    "documents.$.verificationMeta.verifiedAt": new Date(),
-                    "documents.$.extractedData": data.parsed_details
-                }
+                $set: checkFailed
+                    ? {
+                        "documents.$.verificationStatus": "manual-pending-verification",
+                        "documents.$.verificationMeta.status": reportedStatus,
+                        "documents.$.verificationMeta.rawResponse": data
+                    }
+                    : {
+                        "documents.$.verificationStatus": "auto-verified",
+                        "documents.$.verificationMeta.status": "completed",
+                        "documents.$.verificationMeta.rawResponse": data,
+                        "documents.$.verificationMeta.verifiedAt": new Date(),
+                        "documents.$.extractedData": data.parsed_details
+                    }
             }
         );
 
@@ -77,7 +93,15 @@ exports.handleAadhaarWebhook = async (req, res) => {
 
                 if (docRecord) {
                     await cacheService.invalidateProfile(docRecord.userId.toString(), docRecord.userRole);
-                    await notificationEmitter.emitDocumentAutoVerified(docRecord.userId.toString(), 'aadhaar-card');
+                    if (!checkFailed) {
+                        await notificationEmitter.emitDocumentAutoVerified(docRecord.userId.toString(), 'aadhaar-card');
+                    }
+                    activityLogEmitter.emitDocumentActivity(
+                        checkFailed ? ACTIVITY_ACTIONS.DOCUMENT_UPLOADED : ACTIVITY_ACTIONS.DOCUMENT_VERIFIED,
+                        { documentId: requestId, documentType: 'aadhaar-card', verificationStatus: checkFailed ? 'manual-pending-verification' : 'auto-verified' },
+                        { userId: null, name: 'IDfy', role: 'system' },
+                        { provider: 'idfy', reportedStatus: reportedStatus || null, userId: docRecord.userId.toString() }
+                    ).catch(() => {});
                 }
             } catch (cacheErr) {
                 logger.error(`Failed to invalidate profile cache after Aadhaar webhook: ${cacheErr.message}`);

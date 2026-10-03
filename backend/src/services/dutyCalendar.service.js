@@ -446,10 +446,25 @@ class DutyCalendarService {
         ];
 
         // Staged offers: each ring it widened through (or the city for emergencies)
+        // Staged offers: invites sent, the invite window ending, and each ring
+        const OFFER_STEPS = {
+            invite_sent: 'invite_sent',
+            opened_to_radius: 'invite_opened_to_others',
+            opened_to_city: 'invite_opened_to_others',
+            expanded: 'offer_widened',
+            opened_fully: 'offer_opened_fully'
+        };
         for (const entry of duty.offer?.history || []) {
-            if (entry.event === 'expanded' || entry.event === 'opened_fully') {
-                steps.push({ key: entry.event === 'expanded' ? 'offer_widened' : 'offer_opened_fully', at: entry.at, radiusKm: entry.radiusKm, count: entry.notified ?? null });
-            }
+            const key = OFFER_STEPS[entry.event];
+            // The first 'opened_to_city' of an emergency (no invite) is the opening itself, shown on 'offered'
+            if (!key || (entry.event === 'opened_to_city' && duty.offer.history[0] === entry)) continue;
+            steps.push({
+                key,
+                at: entry.at,
+                count: entry.notified ?? null,
+                radiusKm: entry.radiusKm ?? null,
+                ...(key === 'invite_opened_to_others' && { openedTo: entry.event === 'opened_to_city' ? 'city' : 'radius' })
+            });
         }
         if (duty.offer?.mode) {
             steps[1] = {

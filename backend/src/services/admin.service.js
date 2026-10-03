@@ -40,6 +40,9 @@ const {
  */
 const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Settings groups edited through /api/admin/settings
+const PLATFORM_SETTING_PREFIXES = ['offer.', 'analytics.', 'notifications.'];
+
 
 
 class AdminService {
@@ -2526,6 +2529,38 @@ class AdminService {
             Promise.all(keys.map(key => SystemConfigService.getHistory(key)))
         ]);
         return keys.map((key, i) => ({ key, value: effective[key], history: historyEntries[i] }));
+    }
+
+
+
+    // GET /api/admin/settings — the staged offer, analytics and notification
+    // settings, which had no admin screen of their own. Same shape as the
+    // calendar config.
+    async getPlatformSettings() {
+        const keys = SystemConfigService.defaultKeys.filter(key => PLATFORM_SETTING_PREFIXES.some(p => key.startsWith(p)));
+        const [effective, historyEntries] = await Promise.all([
+            SystemConfigService.getManyEffective(keys),
+            Promise.all(keys.map(key => SystemConfigService.getHistory(key)))
+        ]);
+        return keys.map((key, i) => ({ key, value: effective[key], history: historyEntries[i] }));
+    }
+
+
+
+    // PATCH /api/admin/settings — Super Admin only ('settings.manage' is
+    // granted to no other sub-role). Only the prefixes above.
+    async updatePlatformSetting(key, value, effectiveFrom, adminUserId) {
+        if (!PLATFORM_SETTING_PREFIXES.some(p => key.startsWith(p)) || !SystemConfigService.isKnownKey(key)) {
+            throw new UnprocessableEntityError(`Unknown setting: ${key}`);
+        }
+        const invalid = await SystemConfigService.validateUpdate(key, value);
+        if (invalid) {
+            throw new UnprocessableEntityError(invalid);
+        }
+        return SystemConfigService.setValue(key, value, {
+            effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : undefined,
+            createdBy: adminUserId
+        });
     }
 
 

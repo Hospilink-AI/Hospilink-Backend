@@ -213,6 +213,7 @@ class ProfileController {
         if (!verified) {
             throw new AppError('Verification could not be completed. Please try again.', 503);
         }
+        activityLogEmitter.logAction(ACTIVITY_ACTIONS.PROFILE_UPDATED, req, { type: 'user', id: req.user._id || req.user.id, name: req.user.name }, { change: 'phone_verified' }).catch(() => {});
 
         res.status(200).json({
             success: true,
@@ -319,6 +320,7 @@ class ProfileController {
 
         try {
             const result = await ProfileService.toggleMedicalStaffAvailability(userId, isAvailable);
+            activityLogEmitter.logAction(ACTIVITY_ACTIONS.AVAILABILITY_CHANGED, req, { type: 'user', id: req.user._id || req.user.id, name: req.user.name }, { change: 'availability_switch', isAvailable }).catch(() => {});
 
             const responseTime = Date.now() - startTime;
 
@@ -387,6 +389,7 @@ class ProfileController {
 
         const userId = req.user.id;
         const result = await ProfileService.uploadProfilePicture(userId, req.file);
+        activityLogEmitter.logAction(ACTIVITY_ACTIONS.PROFILE_UPDATED, req, { type: 'user', id: req.user._id || req.user.id, name: req.user.name }, { change: 'profile_picture_uploaded' }).catch(() => {});
 
         res.status(200).json(result);
     });
@@ -396,6 +399,7 @@ class ProfileController {
     deleteProfilePicture = asyncHandler(async (req, res) => {
         const userId = req.user.id;
         const result = await ProfileService.deleteProfilePicture(userId);
+        activityLogEmitter.logAction(ACTIVITY_ACTIONS.PROFILE_UPDATED, req, { type: 'user', id: req.user._id || req.user.id, name: req.user.name }, { change: 'profile_picture_deleted' }).catch(() => {});
 
         res.status(200).json(result);
     });
@@ -405,6 +409,7 @@ class ProfileController {
         const { skills } = req.body;
 
         const result = await ProfileService.addSkills(userId, skills);
+        activityLogEmitter.logAction(ACTIVITY_ACTIONS.PROFILE_UPDATED, req, { type: 'user', id: req.user._id || req.user.id, name: req.user.name }, { change: 'skills_added', skills }).catch(() => {});
 
         res.status(200).json(result);
     });
@@ -426,6 +431,7 @@ class ProfileController {
         const { skills } = req.body;
 
         const result = await ProfileService.updateSkills(userId, skills);
+        activityLogEmitter.logAction(ACTIVITY_ACTIONS.PROFILE_UPDATED, req, { type: 'user', id: req.user._id || req.user.id, name: req.user.name }, { change: 'skills_updated', skills }).catch(() => {});
 
         res.status(200).json(result);
     });

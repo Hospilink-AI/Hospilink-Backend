@@ -3,6 +3,10 @@ const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
 
+// Failed sign-ins for one email within this window raise a security event
+const FAILED_LOGIN_THRESHOLD = 5;
+const FAILED_LOGIN_WINDOW_SECONDS = 15 * 60;
+
 // Build a human-readable location string from a profile document
 function buildLocationString(profile) {
     if (!profile) return null;
@@ -311,6 +315,47 @@ class ActivityLogEmitter {
             console.error('Error emitting admin activity:', error);
             return null;
         }
+    }
+
+
+    // Counts failed sign-ins per email over a short window and raises one
+    // MULTIPLE_FAILED_LOGINS security event when the threshold is reached
+    async trackFailedLogin(email, req) {
+        if (!email) return;
+        try {
+            const redis = await require('../config/redis').getClientAsync();
+            const key = `security:failed-login:${String(email).trim().toLowerCase()}`;
+            const attempts = await redis.incr(key);
+            if (attempts === 1) await redis.expire(key, FAILED_LOGIN_WINDOW_SECONDS);
+
+            if (attempts === FAILED_LOGIN_THRESHOLD) {
+                await this.emitSecurityActivity(
+                    ACTIVITY_ACTIONS.MULTIPLE_FAILED_LOGINS,
+                    { userId: null, name: 'Unknown', role: 'system', email },
+                    { attemptedEmail: email, attempts, windowMinutes: FAILED_LOGIN_WINDOW_SECONDS / 60 },
+                    req
+                );
+            }
+        } catch (error) {
+            console.error('Error tracking failed login:', error);
+        }
+    }
+
+
+    // Actor for whoever is signed in on the request
+    actorFrom(user) {
+        return {
+            userId: user?._id || user?.id || null,
+            name: user?.name || user?.email || 'Unknown',
+            role: user?.role || 'system',
+            email: user?.email
+        };
+    }
+
+    // Any action by the signed-in user on a target, e.g.
+    // logAction(ACTIVITY_ACTIONS.VACANCY_CLOSED, req, { type: 'vacancy', id, name }, { reason })
+    async logAction(action, req, target = null, details = {}) {
+        return this.emitAdminActivity(action, target, this.actorFrom(req?.user), details, req);
     }
 
 

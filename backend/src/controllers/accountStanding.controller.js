@@ -1,5 +1,7 @@
 const patternEngineService = require('../services/patternEngine.service');
 const { asyncHandler } = require('../middleware/error.middleware');
+const activityLogEmitter = require('../services/activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 
 // GET /api/account/pattern-flags — spec §10.04: never a shadow record.
 exports.listMyFlags = asyncHandler(async (req, res) => {
@@ -17,5 +19,6 @@ exports.listMySuspensionProposals = asyncHandler(async (req, res) => {
 // PATCH /api/account/suspension-proposals/:id/respond
 exports.respondToSuspensionProposal = asyncHandler(async (req, res) => {
     const flag = await patternEngineService.respondToProposal(req.params.id, req.user, req.validatedBody);
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.SUSPENSION_PROPOSAL_RESPONDED, req, { type: 'pattern_flag', id: req.params.id, name: 'Suspension proposal' }).catch(() => {});
     res.status(200).json({ success: true, flag, message: 'Response submitted' });
 });

@@ -13,6 +13,20 @@ const {
 const { ACTIVITY_STATUSES } = require('../utils/activityLog.constants');
 const logger = require('../utils/logger');
 const { NotFoundError } = require('../middleware/error.middleware');
+const mongoose = require('mongoose');
+
+// Only the target fields that are set. A null type fails the model's enum
+// check and the whole entry was dropped (security events, admin sign-ins).
+// Ids that aren't database ids (a setting key, an export name) go in the
+// name, and the caller's details get them as targetRef.
+function buildTarget(targetData = {}) {
+    const target = {};
+    if (targetData.type) target.type = targetData.type;
+    if (targetData.id && mongoose.Types.ObjectId.isValid(String(targetData.id))) target.id = targetData.id;
+    const name = targetData.name || (targetData.id && !target.id ? String(targetData.id) : null);
+    if (name) target.name = name;
+    return target;
+}
 
 /**
  * Activity Log Service
@@ -55,12 +69,10 @@ class ActivityLogService {
                 },
                 action,
                 category,
-                target: {
-                    type: targetData.type || null,
-                    id: targetData.id || null,
-                    name: targetData.name || null
-                },
-                details: sanitizedDetails,
+                target: buildTarget(targetData),
+                details: targetData.id && !mongoose.Types.ObjectId.isValid(String(targetData.id))
+                    ? { ...sanitizedDetails, targetRef: String(targetData.id) }
+                    : sanitizedDetails,
                 location: options.location || null,
                 ipAddress: req ? extractIpAddress(req) : 'system',
                 userAgent: req ? extractUserAgent(req) : 'system',

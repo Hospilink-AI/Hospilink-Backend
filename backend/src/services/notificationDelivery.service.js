@@ -134,7 +134,7 @@ class NotificationDeliveryService {
             // Deliver to online users via WebSocket
             if (onlineIds.length > 0) {
                 for (const userId of onlineIds) {
-                    websocketManager.emitToUser(userId, 'notification', payload);
+                    websocketManager.emitToUser(userId, 'notification', { ...payload, notificationId: notificationService.notificationIdFor(payload, userId) });
                 }
             }
 

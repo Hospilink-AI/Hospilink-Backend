@@ -5,6 +5,8 @@ const redisClient = require('../config/redis');
 const geocodingService = require('./geocoding.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const staffLocator = require('./staffLocator.service');
+const activityLogEmitter = require('./activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const {
     ValidationError,
     NotFoundError,
@@ -245,10 +247,22 @@ class DashboardService {
         await client.setex(this._locationPermissionKey(userId), 60 * 60 * 24 * 30, 'true');
 
         // Durable consent record; the Redis flag above is only the fast path
-        await MedicalStaff.updateOne(
+        const changed = await MedicalStaff.findOneAndUpdate(
             { user: userId, 'locationConsent.granted': { $ne: true } },
-            { $set: { 'locationConsent.granted': true, 'locationConsent.grantedAt': new Date() } }
+            { $set: { 'locationConsent.granted': true, 'locationConsent.grantedAt': new Date() } },
+            { projection: { fullName: 1 } }
         );
+        if (changed) this._logConsent(userId, changed.fullName, true);
+    }
+
+    _logConsent(userId, name, granted) {
+        const person = { _id: userId, name: name || 'Staff', role: 'staff' };
+        activityLogEmitter.emitUserActivity(
+            ACTIVITY_ACTIONS.LOCATION_CONSENT_CHANGED,
+            person,
+            { userId, name: person.name, role: 'staff' },
+            { granted }
+        ).catch(() => {});
     }
 
     // Called by HTTP API or WebSocket revoke — clears both permission and location
@@ -260,10 +274,12 @@ class DashboardService {
             staffLocator.removeLivePosition(userId)
         ]);
 
-        await MedicalStaff.updateOne(
-            { user: userId },
-            { $set: { 'locationConsent.granted': false, 'locationConsent.revokedAt': new Date() } }
+        const changed = await MedicalStaff.findOneAndUpdate(
+            { user: userId, 'locationConsent.granted': true },
+            { $set: { 'locationConsent.granted': false, 'locationConsent.revokedAt': new Date() } },
+            { projection: { fullName: 1 } }
         );
+        if (changed) this._logConsent(userId, changed.fullName, false);
     }
 
     async isDashboardLocationPermitted(userId) {

@@ -1,11 +1,14 @@
 const jobVacancyService = require('../services/jobVacancy.service');
 const { asyncHandler } = require('../middleware/error.middleware');
+const activityLogEmitter = require('../services/activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 
 
 // POST /api/vacancy — hospital posts its own vacancy. hospitalId is resolved from
 // the token inside the service — never accepted from the request body.
 exports.createVacancy = asyncHandler(async (req, res) => {
     const vacancy = await jobVacancyService.createForHospitalUser(req.user.id, req.body);
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.VACANCY_CREATED, req, { type: 'vacancy', id: vacancy?._id || vacancy?.id, name: vacancy?.title }).catch(() => {});
 
     res.status(201).json({
         success: true,
@@ -104,6 +107,7 @@ exports.getVacancy = asyncHandler(async (req, res) => {
 // capability (admin) is checked inside the service, not here.
 exports.editVacancy = asyncHandler(async (req, res) => {
     const vacancy = await jobVacancyService.editVacancy(req.params.id, req.user, req.body);
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.VACANCY_EDITED, req, { type: 'vacancy', id: vacancy?._id || vacancy?.id, name: vacancy?.title }, { fields: Object.keys(req.body) }).catch(() => {});
 
     res.status(200).json({
         success: true,
@@ -117,6 +121,7 @@ exports.editVacancy = asyncHandler(async (req, res) => {
 // PATCH /api/vacancies/:id/close — sets deletedAt, the only lifecycle control.
 exports.closeVacancy = asyncHandler(async (req, res) => {
     const vacancy = await jobVacancyService.closeVacancy(req.params.id, req.user);
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.VACANCY_CLOSED, req, { type: 'vacancy', id: vacancy?._id || vacancy?.id, name: vacancy?.title }).catch(() => {});
 
     res.status(200).json({
         success: true,
