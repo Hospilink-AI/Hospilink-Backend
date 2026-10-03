@@ -7,6 +7,7 @@ const dashboardService = require('./dashboard.service');
 const { URGENCY_LEVELS } = require('../utils/dutyCancellation.constants');
 const { hasDutyStarted, istDayRange } = require('../utils/calendar.helper');
 const staffLocator = require('./staffLocator.service');
+const dutyOfferService = require('./dutyOffer.service');
 
 class LocationBasedStaffService {
     // Calculate bounding box for 50km radius (in degrees: ~111 km per degree)
@@ -76,6 +77,9 @@ class LocationBasedStaffService {
         // Get staff current location (browser GPS from Redis, falls back to profile)
         const staffLocation = await this.getStaffCurrentLocation(staffId);
         console.log(`[AvailableJobs] Staff location → lat: ${staffLocation.latitude}, lng: ${staffLocation.longitude}`);
+
+        // Widen any staged offers that are due before deciding what this doctor sees
+        await dutyOfferService.runDueThrottled();
 
         // Get current date and time for filtering
         const now = new Date();
@@ -152,8 +156,30 @@ class LocationBasedStaffService {
         const nearbyDuties = [];
         let haversineSkippedCount = 0;
 
+        // Staged offers are shown by their own rule (current ring, emergency
+        // city, or already notified) instead of the fixed 50 km
+        const notifiedDuties = await dutyOfferService.notifiedAmong(validDuties, medicalStaff._id);
+        const stagedEligible = new Set();
+
         for (const duty of validDuties) {
             const hospitalId = duty.hospital._id.toString();
+
+            if (dutyOfferService.isStaged(duty)) {
+                const { eligible } = dutyOfferService.eligibility(
+                    duty.toObject(), medicalStaff, staffLocation, notifiedDuties.has(duty._id.toString())
+                );
+                if (!eligible) {
+                    haversineSkippedCount++;
+                    continue;
+                }
+                stagedEligible.add(duty._id.toString());
+                if (!nearbyHospitals.has(hospitalId)) {
+                    const coords = duty.hospital.coordinates.coordinates;
+                    nearbyHospitals.set(hospitalId, { lat: coords.latitude, lng: coords.longitude });
+                }
+                nearbyDuties.push(duty);
+                continue;
+            }
 
             // Already confirmed far — skip without recalculating
             if (skippedHospitals.has(hospitalId)) {
@@ -228,7 +254,7 @@ class LocationBasedStaffService {
                 continue;
             }
 
-            if (distanceResult.distance <= 50) {
+            if (distanceResult.distance <= 50 || stagedEligible.has(duty._id.toString())) {
                 jobsWithDistance.push({
                     ...duty.toObject(),
                     distance: distanceResult.distance,

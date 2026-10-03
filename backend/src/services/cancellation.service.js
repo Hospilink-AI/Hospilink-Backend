@@ -11,6 +11,7 @@ const {
 const autoRelistService = require('./autoRelist.service');
 const locationBasedStaffService = require('./locationBasedStaff.service');
 const notificationEmitter = require('./notificationEmitter');
+const dutyOfferService = require('./dutyOffer.service');
 const activityLogEmitter = require('./activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const systemConfigService = require('./systemConfig.service');
@@ -432,9 +433,11 @@ class CancellationService {
             notificationRadiusKm
         );
 
-        const staffUserIds = matchingStaff
-            .filter(staff => staff.user && staff.user._id && !excludedIds.has(staff._id.toString()))
-            .map(staff => staff.user._id.toString());
+        const relistStaff = matchingStaff
+            .filter(staff => staff.user && staff.user._id && !excludedIds.has(staff._id.toString()));
+        const staffUserIds = relistStaff.map(staff => staff.user._id.toString());
+
+        await dutyOfferService.onRelist(duty, relistStaff.map(staff => staff._id), notificationRadiusKm);
 
         await notificationEmitter.emitDutyRelisted(
             duty,

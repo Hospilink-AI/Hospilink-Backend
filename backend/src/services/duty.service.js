@@ -29,6 +29,7 @@ const { isWithinGeofence, GEOFENCE_RADIUS_KM } = require('./geofence.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const reviewService = require('./review.service');
 const locationBasedStaffService = require('./locationBasedStaff.service');
+const dutyOfferService = require('./dutyOffer.service');
 const systemConfigService = require('./systemConfig.service');
 const {
     AppError,
@@ -416,6 +417,14 @@ class DutyService {
                     .some(id => id.toString() === medicalStaff._id.toString());
                 if (isExcludedFromRelist) {
                     throw new ForbiddenError('You previously cancelled this duty and cannot re-accept it.');
+                }
+
+                // ── 3c. Staged offer check ────────────────────────────────────
+                // A staged duty can only be accepted once it has been offered
+                // to this doctor (in range of its current ring, in the city for
+                // emergencies, or notified about it).
+                if (!(await dutyOfferService.isEligible(duty, medicalStaff))) {
+                    throw new ForbiddenError('This duty has not been offered to you yet.');
                 }
 
                 // ── 4. Status check ───────────────────────────────────────────
@@ -1440,6 +1449,10 @@ class DutyService {
                 throw new ForbiddenError('Access denied: You can only view available duties or duties assigned to you');
             }
 
+            if (!isAssigned && !(await dutyOfferService.isEligible(duty, medicalStaff))) {
+                throw new ForbiddenError('Access denied: This duty has not been offered to you yet');
+            }
+
             if (isExpired) {
                 throw new ForbiddenError('Access denied: This duty has expired and is no longer available');
             }
@@ -2209,9 +2222,10 @@ class DutyService {
                     100,
                     notificationRadiusKm
                 );
-                const staffUserIds = matchingStaff
-                    .filter(s => s.user && s.user._id && !excludedIds.has(s._id.toString()))
-                    .map(s => s.user._id.toString());
+                const pushStaff = matchingStaff
+                    .filter(s => s.user && s.user._id && !excludedIds.has(s._id.toString()));
+                const staffUserIds = pushStaff.map(s => s.user._id.toString());
+                await dutyOfferService.onRelist(duty, pushStaff.map(s => s._id), notificationRadiusKm);
 
                 if (staffUserIds.length > 0) {
                     await notificationEmitter.emitDutyRelistRepeatPush(duty, staffUserIds, {

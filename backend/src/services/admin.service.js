@@ -2335,15 +2335,20 @@ class AdminService {
 
         // Notify matching staff + hospital (same as hospital flow)
         try {
-            const matchingStaff = await MedicalStaff.find({
-                jobRole: staff_role,
-                isAvailable: true
-            }).populate('user', '_id');
+            // Same staged offer as a hospital post; without it, every
+            // available staff member of the role (the old behaviour)
+            let staffUserIds = await require('./dutyOffer.service').startOffer(createdDuties, hospital);
+            if (!staffUserIds) {
+                const matchingStaff = await MedicalStaff.find({
+                    jobRole: staff_role,
+                    isAvailable: true
+                }).populate('user', '_id');
 
-            // Filter out staff with null user references and map to user IDs
-            const staffUserIds = matchingStaff
-                .filter(s => s.user && s.user._id)
-                .map(s => s.user._id.toString());
+                // Filter out staff with null user references and map to user IDs
+                staffUserIds = matchingStaff
+                    .filter(s => s.user && s.user._id)
+                    .map(s => s.user._id.toString());
+            }
 
             const hospitalUserId = hospital.user._id.toString();
 

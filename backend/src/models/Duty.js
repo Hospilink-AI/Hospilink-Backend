@@ -261,6 +261,30 @@ const dutySchema = new mongoose.Schema({
         type: Date
     },
 
+    // Who the duty is offered to and how that widens over time (see
+    // dutyOffer.service.js). Missing on duties posted before staged offers:
+    // those keep the old rule (anyone of the role within 50 km).
+    offer: {
+        mode: { type: String, enum: ['radius', 'city', 'invite'] },
+        radiusKm: { type: Number },
+        maxRadiusKm: { type: Number },
+        stepKm: { type: Number },
+        stepMinutes: { type: Number },
+        city: { type: String },
+        nextActionAt: { type: Date },
+        notifiedStaff: {
+            type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MedicalStaff' }],
+            select: false
+        },
+        history: [{
+            _id: false,
+            at: { type: Date, default: Date.now },
+            event: { type: String, enum: ['opened', 'expanded', 'opened_to_city', 'invite_sent', 'opened_to_radius', 'opened_fully'] },
+            radiusKm: Number,
+            notified: Number
+        }]
+    },
+
     // Fill-progress tracker. Missing on older duties, which reads as unknown.
     unassigned15MinNotifiedAt: {
         type: Date
