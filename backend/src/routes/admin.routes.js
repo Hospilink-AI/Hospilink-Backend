@@ -118,6 +118,10 @@ router.get('/auto-relist/duties/:dutyId/history', requireCapability('autoRelist.
 router.get('/auto-relist/config', requireCapability('autoRelist.config.manage'), adminController.getAutoRelistConfig);
 router.patch('/auto-relist/config', requireCapability('autoRelist.config.manage'), validateAutoRelistConfigUpdate, adminController.updateAutoRelistConfig);
 
+// Duty calendar settings (same key/value/effectiveFrom body as auto-relist config)
+router.get('/calendar/config', requireCapability('calendar.config.manage'), adminController.getCalendarConfig);
+router.patch('/calendar/config', requireCapability('calendar.config.manage'), validateAutoRelistConfigUpdate, adminController.updateCalendarConfig);
+
 router.get('/duty-route-map/:dutyId', requireCapability('duty.view'), validateDutyRouteMap, adminController.getDutyRouteMap);
 
 // Overnight duties and duty history

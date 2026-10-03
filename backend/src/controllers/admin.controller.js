@@ -735,6 +735,21 @@ exports.updateAutoRelistConfig = asyncHandler(async (req, res) => {
 });
 
 
+// GET /api/admin/calendar/config — Super Admin only
+exports.getCalendarConfig = asyncHandler(async (req, res) => {
+    const config = await adminService.getCalendarConfig();
+    res.status(200).json({ success: true, config });
+});
+
+
+// PATCH /api/admin/calendar/config — Super Admin only
+exports.updateCalendarConfig = asyncHandler(async (req, res) => {
+    const { key, value, effectiveFrom } = req.body;
+    const row = await adminService.updateCalendarConfig(key, value, effectiveFrom, req.user.id);
+    res.status(200).json({ success: true, config: row, message: `${key} updated` });
+});
+
+
 // POST /api/admin/assign-duty
 exports.assignDutyToStaff = asyncHandler(async (req, res) => {
     const { hospital_id, duty_id, staff_id } = req.body;

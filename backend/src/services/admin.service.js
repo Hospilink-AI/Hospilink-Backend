@@ -2490,6 +2490,37 @@ class AdminService {
 
 
 
+    // GET /api/admin/calendar/config — same shape as getAutoRelistConfig,
+    // scoped to the 'calendar.*' keys
+    async getCalendarConfig() {
+        const keys = SystemConfigService.defaultKeys.filter(key => key.startsWith('calendar.'));
+        const [effective, historyEntries] = await Promise.all([
+            SystemConfigService.getManyEffective(keys),
+            Promise.all(keys.map(key => SystemConfigService.getHistory(key)))
+        ]);
+        return keys.map((key, i) => ({ key, value: effective[key], history: historyEntries[i] }));
+    }
+
+
+
+    // PATCH /api/admin/calendar/config — Super Admin only ('calendar.config.manage'
+    // is granted to no other sub-role). Only calendar.* keys.
+    async updateCalendarConfig(key, value, effectiveFrom, adminUserId) {
+        if (!key.startsWith('calendar.') || !SystemConfigService.isKnownKey(key)) {
+            throw new UnprocessableEntityError(`Unknown calendar config key: ${key}`);
+        }
+        const invalid = await SystemConfigService.validateUpdate(key, value);
+        if (invalid) {
+            throw new UnprocessableEntityError(invalid);
+        }
+        return SystemConfigService.setValue(key, value, {
+            effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : undefined,
+            createdBy: adminUserId
+        });
+    }
+
+
+
     // ─── Account suspension ────────────────────────────────────────────────────
 
     // PATCH /api/admin/hospitals/:hospitalId/suspend
