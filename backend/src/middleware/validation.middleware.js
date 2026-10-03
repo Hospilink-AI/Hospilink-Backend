@@ -19,6 +19,7 @@ const {
 } = require('../utils/dutyCancellation.constants');
 const mongoose = require('mongoose');
 const { isValidDateKey, daysBetweenKeys } = require('../utils/calendar.helper');
+const { parsePeriod } = require('../utils/analytics.helper');
 
 // Longest window one calendar counts call may cover
 const MAX_CALENDAR_WINDOW_DAYS = 100;
@@ -2273,6 +2274,51 @@ const validateCalendarCountsQuery = (req, res, next) => {
 
 
 
+// Validation for admin analytics sections: period plus optional filters
+const validateAnalyticsQuery = (req, res, next) => {
+    const allowedParams = ['from', 'to', 'granularity', 'staffRole', 'urgency', 'city'];
+    const unexpectedParams = Object.keys(req.query).filter(param => !allowedParams.includes(param));
+    const errors = [];
+
+    if (unexpectedParams.length > 0) {
+        errors.push(`Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`);
+    }
+
+    const period = parsePeriod(req.query);
+    if (period.error) errors.push(period.error);
+
+    const { staffRole, urgency, city } = req.query;
+    if (staffRole !== undefined && !ALLOWED_ROLES.includes(staffRole)) {
+        errors.push('staffRole is not a valid role');
+    }
+    if (urgency !== undefined && !['low', 'medium', 'high', 'emergency'].includes(urgency)) {
+        errors.push('urgency must be one of: low, medium, high, emergency');
+    }
+    if (city !== undefined && (typeof city !== 'string' || !city.trim() || city.length > 100)) {
+        errors.push('city must be a non-empty string up to 100 characters');
+    }
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors
+        });
+    }
+
+    req.analyticsQuery = {
+        period,
+        filters: {
+            ...(staffRole && { staffRole }),
+            ...(urgency && { urgency }),
+            ...(city && { city: city.trim() })
+        }
+    };
+    next();
+};
+
+
+
 // Validation for the calendar day panel
 const validateCalendarDayQuery = (req, res, next) => {
     const allowedParams = ['date'];
@@ -2946,6 +2992,7 @@ module.exports = {
     validateAvailableDutiesQuery,
     validateCalendarCountsQuery,
     validateCalendarDayQuery,
+    validateAnalyticsQuery,
     validateHospitalDutyRouteMap,
     validateSendPhoneOTP,
     validateVerifyPhoneOTP,
