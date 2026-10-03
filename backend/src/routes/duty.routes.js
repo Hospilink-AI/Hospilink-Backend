@@ -19,7 +19,8 @@ const {
     validateObjectId,
     validateStatementQuery,
     validateHospitalDutyRouteMap,
-    validateHospitalActiveDutiesQuery
+    validateHospitalActiveDutiesQuery,
+    validateAvailableDutiesQuery
 } = require('../middleware/validation.middleware');
 
 // Apply protection to all duty routes
@@ -38,7 +39,7 @@ router.get('/duties-published', authorize('hospital'), requireHospitalVerificati
 
 router.get('/duties/history', authorize('hospital'), requireHospitalVerification, validatePagination, dutyController.getDutyHistory);
 
-router.get('/duties/available', authorize('staff'), requireStaffVerificationandisAvailable, dutyController.getAvailableJobsWithDistance);
+router.get('/duties/available', authorize('staff'), requireStaffVerificationandisAvailable, validateAvailableDutiesQuery, dutyController.getAvailableJobsWithDistance);
 
 router.get('/duties/my-upcoming', authorize('staff'), requireStaffVerificationandisAvailable, dutyController.getMyUpcomingDuties);
 

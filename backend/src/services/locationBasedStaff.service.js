@@ -5,7 +5,7 @@ const geocodingService = require('./geocoding.service');
 const redisClient = require('../config/redis');
 const dashboardService = require('./dashboard.service');
 const { URGENCY_LEVELS } = require('../utils/dutyCancellation.constants');
-const { hasDutyStarted } = require('../utils/calendar.helper');
+const { hasDutyStarted, istDayRange } = require('../utils/calendar.helper');
 
 class LocationBasedStaffService {
     // Calculate bounding box for 50km radius
@@ -136,6 +136,17 @@ class LocationBasedStaffService {
             // or re-accept it again — see autoRelist.service.js guardrail #1.
             'autoRelist.excludedStaff': { $ne: medicalStaff._id }
         };
+
+        // Calendar day or window (IST dates), never earlier than today
+        const fromKey = filters.date || filters.from;
+        const toKey = filters.date || filters.to;
+        if (fromKey) {
+            const fromStart = istDayRange(fromKey, fromKey).$gte;
+            query.date.$gte = fromStart > today ? fromStart : today;
+        }
+        if (toKey) {
+            query.date.$lt = istDayRange(toKey, toKey).$lt;
+        }
 
         // Add additional filters
         if (filters.urgency) query.urgency = filters.urgency;
