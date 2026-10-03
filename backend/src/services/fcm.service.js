@@ -1,6 +1,7 @@
 const admin = require('firebase-admin');
 const User = require('../models/User');
 const logger = require('../utils/logger');
+const systemConfigService = require('./systemConfig.service');
 
 /**
  * FCM Service
@@ -63,6 +64,13 @@ class FCMService {
      * @param {Object} data - Additional data payload
      * @returns {Promise<Object>} Send result
      */
+    // Browsers get notifications inside the web app (notification centre and
+    // pop-ups), not as browser push, unless notifications.webPushEnabled is on
+    async _pushableTokens(fcmTokens) {
+        const webPushEnabled = await systemConfigService.getEffective('notifications.webPushEnabled');
+        return webPushEnabled ? fcmTokens : fcmTokens.filter(t => t.platform !== 'web');
+    }
+
     async sendToUser(userId, title, body, data = {}) {
         try {
             if (!this.initialized) {
@@ -77,7 +85,10 @@ class FCMService {
                 return { success: false, reason: 'No FCM tokens' };
             }
 
-            const tokens = user.fcmTokens.map(t => t.token);
+            const tokens = (await this._pushableTokens(user.fcmTokens)).map(t => t.token);
+            if (tokens.length === 0) {
+                return { success: false, reason: 'No app push tokens' };
+            }
             return await this.sendMulticast(tokens, title, body, data, userId);
         } catch (error) {
             logger.error(`FCM sendToUser error for ${userId}:`, error.message);
@@ -112,7 +123,7 @@ class FCMService {
             }
 
             // Collect all tokens
-            const allTokens = users.flatMap(u => u.fcmTokens.map(t => t.token));
+            const allTokens = (await this._pushableTokens(users.flatMap(u => u.fcmTokens))).map(t => t.token);
             
             if (allTokens.length === 0) {
                 return { success: false, reason: 'No FCM tokens' };
