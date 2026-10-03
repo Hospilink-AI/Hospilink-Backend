@@ -112,7 +112,15 @@ const DEFAULTS = {
     'autoRelist.staffWatchlistWindowDays': STAFF_WATCHLIST_WINDOW_DAYS,
     'autoRelist.staffWatchlistThresholdCount': STAFF_WATCHLIST_THRESHOLD_COUNT,
     'autoRelist.pairWatchlistThresholdCount': PAIR_WATCHLIST_THRESHOLD_COUNT,
-    'autoRelist.hospitalWatchlistMultiplier': HOSPITAL_WATCHLIST_MULTIPLIER
+    'autoRelist.hospitalWatchlistMultiplier': HOSPITAL_WATCHLIST_MULTIPLIER,
+
+    // Duty calendar (parameters marked "Admin" in the calendar spec)
+    'calendar.weekStart': 'monday',
+    'calendar.prefetchPeriods': 1,
+    'calendar.countsCacheSeconds': 60,
+    'calendar.bookingHorizonDays': 90,
+    'calendar.historyDays': 180,
+    'calendar.batchNotificationThreshold': 2
 };
 
 const CACHE_TTL_SECONDS = 300;
