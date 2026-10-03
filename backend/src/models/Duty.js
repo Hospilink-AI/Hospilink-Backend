@@ -281,6 +281,17 @@ const dutySchema = new mongoose.Schema({
             type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MedicalStaff' }],
             select: false
         },
+        // In range but not marked free for this shift: told at pendingReleaseAt,
+        // after doctors who are free get a head start
+        pendingStaff: {
+            type: [{
+                _id: false,
+                staff: { type: mongoose.Schema.Types.ObjectId, ref: 'MedicalStaff' },
+                user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+            }],
+            select: false
+        },
+        pendingReleaseAt: { type: Date },
         history: [{
             _id: false,
             at: { type: Date, default: Date.now },

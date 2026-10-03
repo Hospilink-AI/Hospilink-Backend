@@ -137,7 +137,10 @@ const DEFAULTS = {
     'offer.stepMinutes': 60,
     'offer.maxRadiusKm': 75,
     // Invited doctors get this long before the duty opens to others (when the hospital allows it)
-    'offer.inviteWindowMinutes': 30
+    'offer.inviteWindowMinutes': 30,
+    // Doctors who marked themselves free for a shift hear about it this much
+    // earlier than others in the same ring (0 turns the head start off)
+    'offer.availabilityHeadStartMinutes': 10
 };
 
 const CACHE_TTL_SECONDS = 300;

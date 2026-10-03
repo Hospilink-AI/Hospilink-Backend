@@ -299,7 +299,7 @@ exports.rejectMedicalStaff = asyncHandler(async (req, res) => {
 // GET /api/admin/nearby-staff - Get ALL available staff within radius from hospital
 exports.getNearbyAvailableStaff = asyncHandler(async (req, res) => {
     // Extract from validated query object (set by middleware)
-    const { hospital_id, radius, role } = req.validatedQuery;
+    const { hospital_id, radius, role, date } = req.validatedQuery;
 
     const result = await adminService.getNearbyAvailableStaff(
         hospital_id,
@@ -307,8 +307,8 @@ exports.getNearbyAvailableStaff = asyncHandler(async (req, res) => {
         role
     );
 
-    // Favourite / worked-with-you flags for picking doctors to invite
-    await dutyInviteService.annotate(result.data?.hospital?.id, result.data?.staff);
+    // Favourite / worked-with-you flags (and availability on ?date=) for picking doctors to invite
+    await dutyInviteService.annotate(result.data?.hospital?.id, result.data?.staff, { date });
 
     res.status(200).json({
         success: true,

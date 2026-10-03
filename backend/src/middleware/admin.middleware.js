@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const { body, validationResult } = require('express-validator');
 const { ALLOWED_ROLES } = require('../utils/constants');
+const { isValidDateKey } = require('../utils/calendar.helper');
 
 const ADMIN_SUB_ROLES = ['super_admin', 'operations_manager', 'tech_support'];
 
@@ -199,7 +200,7 @@ const validateNearbyStaffQuery = (req, res, next) => {
     }
 
     // Validate allowed query parameters only
-    const allowedParams = ['hospital_id', 'radius', 'role'];
+    const allowedParams = ['hospital_id', 'radius', 'role', 'date'];
     const receivedParams = Object.keys(req.query);
 
     // Check for unexpected parameters
@@ -245,11 +246,20 @@ const validateNearbyStaffQuery = (req, res, next) => {
         });
     }
 
+    // Date (optional): adds each doctor's declared availability for that day
+    if (req.query.date !== undefined && !isValidDateKey(req.query.date)) {
+        return res.status(400).json({
+            success: false,
+            message: 'date must be in YYYY-MM-DD format'
+        });
+    }
+
     // Add validated values to request object
     req.validatedQuery = {
         hospital_id: req.query.hospital_id,
         radius: radiusNum,
-        role: roleParam
+        role: roleParam,
+        date: req.query.date || null
     };
 
     next();

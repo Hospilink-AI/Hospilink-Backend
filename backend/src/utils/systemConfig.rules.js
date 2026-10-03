@@ -60,7 +60,8 @@ const RULES = {
     'offer.stepKm': integer(1, 50),
     'offer.stepMinutes': integer(5, 720),
     'offer.maxRadiusKm': integer(5, 200),
-    'offer.inviteWindowMinutes': integer(5, 240)
+    'offer.inviteWindowMinutes': integer(5, 240),
+    'offer.availabilityHeadStartMinutes': integer(0, 60)
 };
 
 // Rules that compare two keys. Checked against the *other* key's current
