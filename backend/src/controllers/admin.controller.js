@@ -24,7 +24,20 @@ const dutyInviteService = require('../services/dutyInvite.service');
 // Admin signin - POST /api/admin/signin
 exports.adminSignin = asyncHandler(async (req, res) => {
     const { email, password } = req.body;
-    const result = await AdminAuthService.signin(email, password);
+    let result;
+    try {
+        result = await AdminAuthService.signin(email, password);
+    } catch (error) {
+        // Failed admin sign-ins were not recorded at all
+        activityLogEmitter.emitSecurityActivity(
+            ACTIVITY_ACTIONS.USER_LOGIN_FAILED,
+            { userId: null, name: 'Unknown', role: 'system', email: email || 'unknown' },
+            { reason: error.message, attemptedEmail: email, panel: 'admin' },
+            req
+        ).catch(() => {});
+        activityLogEmitter.trackFailedLogin(email, req);
+        throw error;
+    }
 
     // Log admin login
     if (result.admin || result.user) {
@@ -97,6 +110,10 @@ exports.createDutyForHospital = asyncHandler(async (req, res) => {
     }
 
     const result = await adminService.createDutyForHospital(hospital_id, req.body);
+    for (const duty of result.duties || []) {
+        activityLogEmitter.emitDutyActivity(ACTIVITY_ACTIONS.DUTY_CREATED, duty, activityLogEmitter.actorFrom(req.user), { onBehalfOfHospital: hospital_id }, req)
+            .catch(err => logger.error('Error logging admin duty creation:', err));
+    }
 
     res.status(201).json(result);
 });
@@ -112,6 +129,7 @@ exports.createVacancyForHospital = asyncHandler(async (req, res) => {
     }
 
     const vacancy = await adminService.createVacancyForHospital(hospital_id, req.user.id, req.body);
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.VACANCY_CREATED, req, { type: 'vacancy', id: vacancy?._id || vacancy?.id, name: vacancy?.title }, { onBehalfOfHospital: hospital_id }).catch(() => {});
 
     res.status(201).json({
         success: true,
@@ -172,6 +190,8 @@ exports.getInterviewConfig = asyncHandler(async (req, res) => {
 exports.updateInterviewConfig = asyncHandler(async (req, res) => {
     const { key, value, effectiveFrom } = req.body;
     const row = await adminService.updateInterviewConfig(key, value, effectiveFrom, req.user.id);
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.SYSTEM_SETTINGS_CHANGED, req, { type: 'setting', id: key, name: key }, { key, value, effectiveFrom: effectiveFrom || null })
+        .catch(err => logger.error('Error logging settings change:', err));
     res.status(200).json({ success: true, config: row, message: `${key} updated` });
 });
 
@@ -344,6 +364,8 @@ exports.getAdminProfile = asyncHandler(async (req, res) => {
 // POST /api/admin/flush-sessions
 exports.flushUserSessions = asyncHandler(async (req, res) => {
     const count = await cacheService.invalidatePattern('session:*');
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.USER_SESSIONS_FLUSHED, req, { type: 'system', id: 'sessions', name: 'All cached sessions' }, { count })
+        .catch(err => logger.error('Error logging session flush:', err));
     res.status(200).json({ success: true, message: `Flushed ${count} cached sessions.` });
 });
 
@@ -452,6 +474,8 @@ exports.exportActiveDuties = asyncHandler(async (req, res) => {
     }
 
     const exportedAt = new Date().toISOString();
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.DATA_EXPORTED, req, { type: 'export', id: 'active-duties', name: 'Active duties' }, { format, rows: duties.length, filters: { role, location, status } })
+        .catch(err => logger.error('Error logging export:', err));
 
     // ── CSV ──────────────────────────────────────────────────────────────────
     if (format === 'csv') {
@@ -735,6 +759,25 @@ exports.getAutoRelistConfig = asyncHandler(async (req, res) => {
 exports.updateAutoRelistConfig = asyncHandler(async (req, res) => {
     const { key, value, effectiveFrom } = req.body;
     const row = await adminService.updateAutoRelistConfig(key, value, effectiveFrom, req.user.id);
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.SYSTEM_SETTINGS_CHANGED, req, { type: 'setting', id: key, name: key }, { key, value, effectiveFrom: effectiveFrom || null })
+        .catch(err => logger.error('Error logging settings change:', err));
+    res.status(200).json({ success: true, config: row, message: `${key} updated` });
+});
+
+
+// GET /api/admin/settings — Super Admin only
+exports.getPlatformSettings = asyncHandler(async (req, res) => {
+    const config = await adminService.getPlatformSettings();
+    res.status(200).json({ success: true, config });
+});
+
+
+// PATCH /api/admin/settings — Super Admin only
+exports.updatePlatformSetting = asyncHandler(async (req, res) => {
+    const { key, value, effectiveFrom } = req.body;
+    const row = await adminService.updatePlatformSetting(key, value, effectiveFrom, req.user.id);
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.SYSTEM_SETTINGS_CHANGED, req, { type: 'setting', id: key, name: key }, { key, value, effectiveFrom: effectiveFrom || null })
+        .catch(err => logger.error('Error logging settings change:', err));
     res.status(200).json({ success: true, config: row, message: `${key} updated` });
 });
 
@@ -750,6 +793,8 @@ exports.getCalendarConfig = asyncHandler(async (req, res) => {
 exports.updateCalendarConfig = asyncHandler(async (req, res) => {
     const { key, value, effectiveFrom } = req.body;
     const row = await adminService.updateCalendarConfig(key, value, effectiveFrom, req.user.id);
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.SYSTEM_SETTINGS_CHANGED, req, { type: 'setting', id: key, name: key }, { key, value, effectiveFrom: effectiveFrom || null })
+        .catch(err => logger.error('Error logging settings change:', err));
     res.status(200).json({ success: true, config: row, message: `${key} updated` });
 });
 
@@ -771,6 +816,8 @@ exports.assignDutyToStaff = asyncHandler(async (req, res) => {
         staffId: staff_id,
         adminId: req.user._id || req.user.id
     });
+    activityLogEmitter.emitDutyActivity(ACTIVITY_ACTIONS.DUTY_ASSIGNED_BY_ADMIN, duty, activityLogEmitter.actorFrom(req.user), { staffId: staff_id, hospitalId: hospital_id }, req)
+        .catch(err => logger.error('Error logging admin duty assignment:', err));
 
     res.status(200).json({
         success: true,
@@ -897,9 +944,12 @@ exports.unlockDutyOtp = asyncHandler(async (req, res) => {
 
     const duty = await adminService.unlockDutyOtp(id, otpType, adminId, reason);
 
-    activityLogEmitter.emitSystemActivity(
+    activityLogEmitter.emitDutyActivity(
         ACTIVITY_ACTIONS.DUTY_OTP_UNLOCKED,
-        { dutyId: duty._id.toString(), otpType, reason, timestamp: new Date().toISOString() }
+        duty,
+        activityLogEmitter.actorFrom(req.user),
+        { otpType, reason },
+        req
     ).catch(err => logger.error('Error logging OTP unlock:', err));
 
     res.status(200).json({

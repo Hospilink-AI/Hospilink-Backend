@@ -109,7 +109,8 @@ class AuthController {
                 { reason: error.message, attemptedEmail: email },
                 req
             ).catch(err => console.error('Error logging failed login:', err));
-            
+            activityLogEmitter.trackFailedLogin(email, req);
+
             throw error;
         }
     });

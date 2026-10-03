@@ -122,6 +122,10 @@ router.patch('/auto-relist/config', requireCapability('autoRelist.config.manage'
 router.get('/calendar/config', requireCapability('calendar.config.manage'), adminController.getCalendarConfig);
 router.patch('/calendar/config', requireCapability('calendar.config.manage'), validateAutoRelistConfigUpdate, adminController.updateCalendarConfig);
 
+// Staged offer, analytics and notification settings (same key/value/effectiveFrom body)
+router.get('/settings', requireCapability('settings.manage'), adminController.getPlatformSettings);
+router.patch('/settings', requireCapability('settings.manage'), validateAutoRelistConfigUpdate, adminController.updatePlatformSetting);
+
 router.get('/duty-route-map/:dutyId', requireCapability('duty.view'), validateDutyRouteMap, adminController.getDutyRouteMap);
 
 // Overnight duties and duty history
