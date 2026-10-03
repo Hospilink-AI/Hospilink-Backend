@@ -4,6 +4,7 @@ const MedicalStaff = require('../models/MedicalStaff');
 const cacheService = require('./cache.service');
 const systemConfigService = require('./systemConfig.service');
 const locationBasedStaffService = require('./locationBasedStaff.service');
+const dutyOfferService = require('./dutyOffer.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const s3Service = require('./s3.service');
 const logger = require('../utils/logger');
@@ -155,7 +156,7 @@ class DutyCalendarService {
 
 
     async _staffCounts(staffUserId, lo, hi) {
-        const medicalStaff = await MedicalStaff.findOne({ user: staffUserId }).select('_id jobRole').lean();
+        const medicalStaff = await MedicalStaff.findOne({ user: staffUserId }).select('_id jobRole city').lean();
         if (!medicalStaff) {
             throw new NotFoundError('Medical staff profile not found');
         }
@@ -192,13 +193,21 @@ class DutyCalendarService {
                 date: { $gte: range.$gte > today ? range.$gte : today, $lt: range.$lt },
                 'autoRelist.excludedStaff': { $ne: medicalStaff._id }
             })
-                .select('date startTime hospital')
-                .populate('hospital', 'coordinates')
+                .select('date startTime hospital offer.mode offer.radiusKm offer.city')
+                .populate('hospital', 'coordinates city')
                 .lean();
+            const notifiedDuties = await dutyOfferService.notifiedAmong(openDuties, medicalStaff._id);
 
             for (const duty of openDuties) {
                 const coords = duty.hospital?.coordinates?.coordinates;
                 if (!coords || hasDutyStarted(duty, now)) continue;
+
+                // Staged offers count only once offered to this doctor, as in the feed
+                if (dutyOfferService.isStaged(duty)) {
+                    const { eligible } = dutyOfferService.eligibility(duty, medicalStaff, staffLocation, notifiedDuties.has(String(duty._id)));
+                    if (eligible) dayFor(istDateKey(duty.date)).open++;
+                    continue;
+                }
 
                 const distance = locationBasedStaffService.haversineDistance(
                     staffLocation.latitude, staffLocation.longitude,
@@ -413,7 +422,7 @@ class DutyCalendarService {
         }
 
         const duty = await Duty.findById(dutyId)
-            .select('+viewedBy hospital status createdAt assignedAt notifiedCount unassigned15MinNotified unassigned15MinNotifiedAt unfilledCriticalNotified unfilledCriticalNotifiedAt escalatedToCritical escalatedToCriticalAt autoRelist.relistCount autoRelist.history.timestamp assignedTo')
+            .select('+viewedBy hospital status createdAt assignedAt notifiedCount unassigned15MinNotified unassigned15MinNotifiedAt unfilledCriticalNotified unfilledCriticalNotifiedAt escalatedToCritical escalatedToCriticalAt autoRelist.relistCount autoRelist.history.timestamp assignedTo offer.mode offer.radiusKm offer.history')
             .populate({
                 path: 'assignedTo',
                 select: 'fullName profilePicture.s3Key user',
@@ -435,6 +444,21 @@ class DutyCalendarService {
             { key: 'offered', count: duty.notifiedCount ?? null, at: duty.createdAt },
             { key: 'viewed', count: Array.isArray(duty.viewedBy) ? duty.viewedBy.length : null }
         ];
+
+        // Staged offers: each ring it widened through (or the city for emergencies)
+        for (const entry of duty.offer?.history || []) {
+            if (entry.event === 'expanded' || entry.event === 'opened_fully') {
+                steps.push({ key: entry.event === 'expanded' ? 'offer_widened' : 'offer_opened_fully', at: entry.at, radiusKm: entry.radiusKm, count: entry.notified ?? null });
+            }
+        }
+        if (duty.offer?.mode) {
+            steps[1] = {
+                ...steps[1],
+                mode: duty.offer.mode,
+                radiusKm: duty.offer.mode === 'radius' ? (duty.offer.history?.[0]?.radiusKm ?? null) : null,
+                currentRadiusKm: duty.offer.radiusKm ?? null
+            };
+        }
 
         if (duty.unassigned15MinNotified) {
             steps.push({ key: 'unfilled_15min', at: duty.unassigned15MinNotifiedAt || null });
