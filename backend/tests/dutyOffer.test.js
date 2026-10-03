@@ -4,7 +4,8 @@ const settings = {
     'offer.startRadiusKm': 30,
     'offer.stepKm': 5,
     'offer.stepMinutes': 60,
-    'offer.maxRadiusKm': 75
+    'offer.maxRadiusKm': 75,
+    'offer.inviteWindowMinutes': 30
 };
 jest.mock('../src/services/systemConfig.service', () => ({
     getManyEffective: async (keys) => Object.fromEntries(keys.map(k => [k, settings[k]]))
@@ -66,7 +67,7 @@ describe('starting an offer', () => {
     it('opens a normal duty at 30 km and schedules the next ring', async () => {
         const duties = [{ _id: 'd1', urgency: 'medium', staffRole: 'rmo' }];
         const notified = await dutyOffer.startOffer(duties, HOSPITAL);
-        expect(notified).toEqual(['u5', 'u28']);
+        expect(notified).toEqual({ userIds: ['u5', 'u28'], invited: false });
         expect(saved.offer.mode).toBe('radius');
         expect(saved.offer.radiusKm).toBe(30);
         expect(saved.offer.notifiedStaff).toEqual(['s5', 's28']);
@@ -76,9 +77,9 @@ describe('starting an offer', () => {
     it('sends an emergency to everyone in the hospital city at once', async () => {
         const duties = [{ _id: 'd2', urgency: 'emergency', staffRole: 'rmo' }];
         const notified = await dutyOffer.startOffer(duties, HOSPITAL);
-        expect(notified).toEqual(['u5', 'u28', 'u33']);
+        expect(notified).toEqual({ userIds: ['u5', 'u28', 'u33'], invited: false });
         expect(saved.offer).toMatchObject({ mode: 'city', city: 'pune' });
-        expect(saved.offer.nextActionAt).toBeUndefined();
+        expect(saved.offer.nextActionAt).toBeNull();
     });
 
     it('returns null when staged offers are switched off', async () => {
@@ -131,5 +132,53 @@ describe('relist', () => {
         Duty.updateOne = async (q, u) => updates.push(u);
         await dutyOffer.onRelist({ _id: 'd6' }, ['s60'], 75);
         expect(updates).toHaveLength(0);
+    });
+});
+
+describe('invites', () => {
+    const invitees = [{ _id: 's74', user: { _id: 'u74' } }];
+
+    beforeEach(() => { saved = {}; });
+
+    it('invites named doctors first and schedules opening to others', async () => {
+        const result = await dutyOffer.startOffer([{ _id: 'd7', urgency: 'medium', staffRole: 'rmo' }], HOSPITAL, { staff: invitees, openAfterInvite: true });
+        expect(result).toEqual({ userIds: ['u74'], invited: true });
+        expect(saved.offer).toMatchObject({ mode: 'invite', openAfterInvite: true, openTo: 'radius' });
+        expect(saved.offer.notifiedStaff).toEqual(['s74']);
+        const minutes = (saved.offer.nextActionAt.getTime() - Date.now()) / 60000;
+        expect(minutes).toBeGreaterThan(29);
+        expect(minutes).toBeLessThanOrEqual(30);
+    });
+
+    it('keeps an invite-only duty closed to everyone else', async () => {
+        await dutyOffer.startOffer([{ _id: 'd8', urgency: 'medium', staffRole: 'rmo' }], HOSPITAL, { staff: invitees, openAfterInvite: false });
+        expect(saved.offer).toMatchObject({ mode: 'invite', openAfterInvite: false });
+        expect(saved.offer.nextActionAt).toBeNull();
+
+        const duty = { offer: { mode: 'invite' }, hospital: HOSPITAL };
+        expect(dutyOffer.eligibility(duty, {}, at(2), false).eligible).toBe(false);
+        expect(dutyOffer.eligibility(duty, {}, at(80), true).eligible).toBe(true);
+    });
+
+    it('opens to the first ring when the invite window ends, skipping the invitees', async () => {
+        let update;
+        Duty.findOneAndUpdate = async (q, u) => { update = u; return { _id: 'd9', ...u }; };
+        widenedCalls.length = 0;
+        const duty = { _id: 'd9', hospital: 'h1', staffRole: 'rmo', offer: { mode: 'invite', openTo: 'radius', notifiedStaff: ['s28'] } };
+
+        expect(await dutyOffer._openAfterInvite(duty)).toBe(true);
+        expect(update.$set).toMatchObject({ 'offer.mode': 'radius', 'offer.radiusKm': 30 });
+        expect(update.$push['offer.history'].event).toBe('opened_to_radius');
+        expect(widenedCalls[0].userIds).toEqual(['u5']);
+    });
+
+    it('opens an emergency invite to the city', async () => {
+        let update;
+        Duty.findOneAndUpdate = async (q, u) => { update = u; return { _id: 'd10', ...u }; };
+        const duty = { _id: 'd10', hospital: 'h1', staffRole: 'rmo', offer: { mode: 'invite', openTo: 'city', notifiedStaff: [] } };
+
+        await dutyOffer._openAfterInvite(duty);
+        expect(update.$set).toMatchObject({ 'offer.mode': 'city', 'offer.city': 'pune' });
+        expect(update.$push['offer.history'].event).toBe('opened_to_city');
     });
 });

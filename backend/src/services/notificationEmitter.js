@@ -893,6 +893,46 @@ class NotificationEmitter {
     }
 
 
+    // Hospital invited these doctors to a duty by name
+    async emitDutyInvite(duty, staffUserIds, hospitalName, { count, dutyIds, openAfterInvite, inviteExpiresAt } = {}) {
+        try {
+            if (!staffUserIds || staffUserIds.length === 0) return;
+
+            const dutyDate = new Date(duty.date).toLocaleDateString('en-US', {
+                month: 'short', day: 'numeric', year: 'numeric'
+            });
+            const dutyTime = `${duty.startTime} - ${duty.endTime}`;
+            const slots = count > 1 ? `${count} slots: ` : '';
+
+            const payload = {
+                type: 'DUTY_INVITE',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    offeredRate: duty.offeredRate,
+                    urgency: duty.urgency
+                },
+                hospital: { name: hospitalName },
+                ...(count > 1 && { count, dutyIds }),
+                openAfterInvite: Boolean(openAfterInvite),
+                inviteExpiresAt: inviteExpiresAt || null,
+                message: `${hospitalName} invited you to a duty — ${slots}${duty.staffRole}, ${dutyDate} ${dutyTime}. Tap to accept.`,
+                timestamp: new Date().toISOString()
+            };
+
+            await notificationService.createBulkNotifications(staffUserIds, 'DUTY_INVITE', payload);
+            await notificationDelivery.deliverToUsers(staffUserIds, 'DUTY_INVITE', payload);
+
+            console.log(`Duty invite sent to ${staffUserIds.length} staff for duty ${duty._id}`);
+        } catch (error) {
+            console.error('Error emitting duty invite:', error);
+        }
+    }
+
+
     // Staged offer widened: tell only the doctors newly in range
     async emitDutyOfferWidened(duty, staffUserIds, radiusKm, hospitalName) {
         try {

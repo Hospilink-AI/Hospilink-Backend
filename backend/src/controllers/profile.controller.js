@@ -1,4 +1,5 @@
 const ProfileService = require('../services/profile.service');
+const dutyInviteService = require('../services/dutyInvite.service');
 const { asyncHandler, AppError, ValidationError, ConflictError } = require('../middleware/error.middleware');
 const activityLogEmitter = require('../services/activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
@@ -358,10 +359,13 @@ class ProfileController {
         const { radius = 5, role } = req.query; // Default 5km radius, optional role
 
         const result = await ProfileService.getNearbyAvailableStaff(
-            hospitalUserId, 
-            parseFloat(radius), 
+            hospitalUserId,
+            parseFloat(radius),
             role || null
         );
+
+        // Favourite / worked-with-you flags for picking doctors to invite
+        await dutyInviteService.annotate(result.data?.hospital?.id, result.data?.staff);
 
         res.status(200).json({
             success: true,

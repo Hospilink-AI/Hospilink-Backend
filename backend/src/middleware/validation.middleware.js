@@ -817,7 +817,7 @@ const validateDutyCreation = (req, res, next) => {
     if (open_after_invite !== undefined && typeof open_after_invite !== 'boolean') {
         errors.push('open_after_invite must be true or false');
     }
-
+    
     if (date && start_time) {
         const now = getCurrentIST();
         const dutyDate = new Date(date);
