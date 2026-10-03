@@ -13,8 +13,23 @@ function withDisplay(type, payload) {
 
 // Older notifications were stored before the display block existed
 function withStoredDisplay(notification) {
-    if (!notification?.payload || notification.payload.display) return notification;
-    return { ...notification, payload: { ...notification.payload, display: describe(notification.type, notification.payload) } };
+    if (!notification?.payload) return notification;
+    return {
+        ...notification,
+        payload: {
+            ...notification.payload,
+            notificationId: notification._id?.toString(),
+            display: notification.payload.display || describe(notification.type, notification.payload)
+        }
+    };
+}
+
+// Record ids of a bulk send, by the payload object it was sent with
+const bulkIds = new WeakMap();
+
+// The stored id of a notification for one recipient of a send
+function notificationIdFor(payload, userId) {
+    return bulkIds.get(payload)?.get(String(userId)) || payload?.notificationId || null;
 }
 
 /**
@@ -41,6 +56,8 @@ class NotificationService {
             });
             
             await notification.save();
+            // Lets a live pop-up mark this exact notification read
+            payload.notificationId = notification._id.toString();
             console.log(`Notification created: ${type} for user ${recipientId}`);
             return notification;
         } catch (error) {
@@ -173,6 +190,8 @@ class NotificationService {
             }));
             
             const result = await Notification.insertMany(notifications, { ordered: false });
+            // Each recipient has their own record; delivery looks the id up per user
+            bulkIds.set(payload, new Map(result.map(doc => [doc.recipient.toString(), doc._id.toString()])));
             console.log(`Bulk created ${result.length} notifications of type ${type}`);
             return { insertedCount: result.length };
         } catch (error) {
@@ -270,6 +289,8 @@ class NotificationService {
             });
             
             await notification.save();
+            // Lets a live pop-up mark this exact notification read
+            payload.notificationId = notification._id.toString();
             
             // Get unread count in the same operation
             const unreadCount = await Notification.countDocuments({
@@ -371,3 +392,4 @@ class NotificationService {
 }
 
 module.exports = new NotificationService();
+module.exports.notificationIdFor = notificationIdFor;
