@@ -126,7 +126,16 @@ const DEFAULTS = {
     // completed GMV at this percentage until a payments ledger is live.
     'analytics.liveCacheSeconds': 300,
     'analytics.projectedCommissionPercent': 0,
-    'analytics.revenueSource': 'projected'
+    'analytics.revenueSource': 'projected',
+
+    // Staged duty offers: a new duty goes to doctors within startRadiusKm,
+    // widening by stepKm every stepMinutes up to maxRadiusKm. Emergency
+    // duties go to everyone in the hospital's city at once.
+    'offer.featureEnabled': true,
+    'offer.startRadiusKm': 30,
+    'offer.stepKm': 5,
+    'offer.stepMinutes': 60,
+    'offer.maxRadiusKm': 75
 };
 
 const CACHE_TTL_SECONDS = 300;
