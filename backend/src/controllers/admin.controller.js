@@ -873,6 +873,12 @@ exports.adminOverrideDutyStatus = asyncHandler(async (req, res) => {
         logger.error('Error logging admin override activity:', err);
     }
 
+    // Both sides see the duty change without having done it themselves
+    const shift = notificationEmitter.describeShift(duty);
+    const overrideMessage = `HospiLink changed your ${shift} to "${status}". Reason: ${reason}`;
+    await notificationEmitter.emitDutyNotice('DUTY_STATUS_OVERRIDDEN', duty, [duty.hospital?.user?._id], overrideMessage, { reason });
+    await notificationEmitter.emitDutyNotice('DUTY_STATUS_OVERRIDDEN', duty, [duty.assignedTo?.user?._id], overrideMessage, { reason });
+
     res.status(200).json({
         success: true,
         message: `Duty status overridden to ${status} successfully.`,

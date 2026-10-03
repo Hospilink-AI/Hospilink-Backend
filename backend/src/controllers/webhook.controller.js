@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const Document = require("../models/Document");
 const cacheService = require('../services/cache.service');
 const logger = require('../utils/logger');
+const notificationEmitter = require('../services/notificationEmitter');
 
 /**
  * Verify the webhook token embedded in the request URL query string.
@@ -76,6 +77,7 @@ exports.handleAadhaarWebhook = async (req, res) => {
 
                 if (docRecord) {
                     await cacheService.invalidateProfile(docRecord.userId.toString(), docRecord.userRole);
+                    await notificationEmitter.emitDocumentAutoVerified(docRecord.userId.toString(), 'aadhaar-card');
                 }
             } catch (cacheErr) {
                 logger.error(`Failed to invalidate profile cache after Aadhaar webhook: ${cacheErr.message}`);

@@ -7,6 +7,9 @@ const { NotFoundError, ForbiddenError, ConflictError } = require('../middleware/
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
 const vacancyMatchingService = require('./vacancyMatching.service');
 const cacheService = require('./cache.service');
+const notificationEmitter = require('./notificationEmitter');
+const logger = require('../utils/logger');
+const { ACTIVE_STATUSES } = require('../utils/jobApplication.constants');
 
 const VACANCY_FIELDS = ['title', 'specialty', 'experience', 'education', 'skills', 'location', 'salary', 'description'];
 
@@ -291,10 +294,34 @@ class JobVacancyService {
 
             vacancy.deletedAt = new Date();
             await vacancy.save();
+
+            await this._closeOpenApplications(vacancy, requester);
         }
         await vacancy.populate('hospitalId', 'hospitalLegalName');
 
         return flattenHospitalName(vacancy.toObject());
+    }
+
+
+
+    // A closed vacancy's open applications would otherwise stay active for
+    // ever: close them and tell each candidate.
+    async _closeOpenApplications(vacancy, requester) {
+        const open = await JobApplication.find({ vacancy: vacancy._id, status: { $in: ACTIVE_STATUSES } });
+        const changedBy = requester?._id || requester?.id;
+        for (const application of open) {
+            try {
+                application.status = 'rejected';
+                application.rejectionReason = 'other';
+                application.rejectionReasonText = 'The vacancy was closed';
+                application.pushHistory('rejected', changedBy, 'Vacancy closed');
+                await application.save();
+
+                await notificationEmitter.emitVacancyClosed(application, vacancy);
+            } catch (error) {
+                logger.error(`Error closing application ${application._id} for closed vacancy:`, error);
+            }
+        }
     }
 
 

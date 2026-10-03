@@ -190,6 +190,12 @@ class DutyOfferService {
         if (recipients.length) {
             await notificationEmitter.emitDutyOfferWidened(updated, recipients.map(r => String(r.user._id)), offer.radiusKm ?? null, hospital.hospitalLegalName);
         }
+
+        // Let the hospital know its invitees didn't take it and who it went to next
+        const reach = offer.mode === 'city' ? 'every doctor in your city' : `doctors within ${offer.radiusKm} km`;
+        await notificationEmitter.emitDutyNotice('DUTY_OPENED_TO_OTHERS', updated, [hospital.user],
+            `None of the doctors you invited accepted your ${notificationEmitter.describeShift(updated)}, so it is now open to ${reach}.`,
+            { offer: { mode: offer.mode, radiusKm: offer.radiusKm ?? null } });
         return true;
     }
 

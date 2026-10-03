@@ -912,7 +912,7 @@ class DutyService {
                 $gte: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() - 7),
                 $lt: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() + 1)
             }
-        }).select('_id date startTime hospital statusHistory'); // Select only needed fields
+        }).select('_id date startTime endTime staffRole urgency offeredRate hospital statusHistory'); // Select only needed fields
 
         const bulkOps = [];
 
@@ -957,6 +957,16 @@ class DutyService {
         if (bulkOps.length > 0) {
             const result = await Duty.bulkWrite(bulkOps);
             expiredCount = result.modifiedCount;
+
+            // Tell each hospital its duty expired with nobody accepting
+            const expired = await Duty.find({ _id: { $in: bulkOps.map(op => op.updateOne.filter._id) }, status: 'expired', expiredAt: istNow })
+                .select('date startTime endTime staffRole urgency offeredRate status hospital')
+                .populate('hospital', 'user')
+                .lean();
+            for (const duty of expired) {
+                await notificationEmitter.emitDutyNotice('DUTY_EXPIRED_UNFILLED', duty, [duty.hospital?.user],
+                    `Nobody accepted your ${notificationEmitter.describeShift(duty)}, so it has expired. You can post it again.`);
+            }
         }
 
         return expiredCount;
@@ -976,7 +986,7 @@ class DutyService {
                 $gte: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() - 1),
                 $lt: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() + 1)
             }
-        }).populate('hospital', 'hospitalLegalName')
+        }).populate('hospital', 'hospitalLegalName user')
             .populate({
                 path: 'assignedTo',
                 populate: {
@@ -987,6 +997,7 @@ class DutyService {
 
         const bulkOps = [];
         const incompleteDuties = [];
+        const noticeDuties = [];
 
         for (const duty of stuckDuties) {
             // Calculate duty start time in IST
@@ -1017,6 +1028,7 @@ class DutyService {
                     previousStatus: duty.status,
                     minutesOverdue
                 });
+                noticeDuties.push(duty);
 
                 bulkOps.push({
                     updateOne: {
@@ -1052,6 +1064,16 @@ class DutyService {
                 console.log(`• ${duty.staffName} - ${duty.staffRole} at ${duty.hospitalName} (${duty.minutesOverdue}min overdue)`);
             });
             console.log(`================================\n`);
+
+            // Tell both sides the duty was closed as incomplete
+            for (const duty of noticeDuties) {
+                const shift = notificationEmitter.describeShift(duty);
+                const staffName = duty.assignedTo?.fullName || duty.assignedTo?.user?.name || 'The doctor';
+                await notificationEmitter.emitDutyNotice('DUTY_MARKED_INCOMPLETE', { ...duty.toObject(), status: 'incomplete' }, [duty.hospital?.user],
+                    `${staffName} did not start your ${shift}, so it was marked incomplete. Raise a ticket if something went wrong.`);
+                await notificationEmitter.emitDutyNotice('DUTY_MARKED_INCOMPLETE', { ...duty.toObject(), status: 'incomplete' }, [duty.assignedTo?.user?._id],
+                    `Your ${shift} at ${duty.hospital?.hospitalLegalName || 'the hospital'} was marked incomplete because it was not started. Raise a ticket if this is wrong.`);
+            }
         }
 
         return markedIncompleteCount;
@@ -2800,6 +2822,15 @@ class DutyService {
                 select: 'name email'
             }
         });
+
+        // Tell the doctor and the hospital; neither made this booking themselves
+        const hospitalDoc = await Hospital.findById(duty.hospital).select('user hospitalLegalName').lean();
+        const shift = notificationEmitter.describeShift(duty);
+        const staffName = duty.assignedTo?.fullName || duty.assignedTo?.user?.name || 'A doctor';
+        await notificationEmitter.emitDutyNotice('DUTY_ASSIGNED_BY_ADMIN', duty, [duty.assignedTo?.user?._id],
+            `HospiLink assigned you to a ${shift} at ${hospitalDoc?.hospitalLegalName || 'a hospital'}.`);
+        await notificationEmitter.emitDutyNotice('DUTY_ASSIGNED_BY_ADMIN', duty, [hospitalDoc?.user],
+            `HospiLink assigned ${staffName} to your ${shift}.`, { staff: { id: duty.assignedTo?._id, name: staffName } });
 
         return duty;
     }
