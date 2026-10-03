@@ -5,9 +5,12 @@ const overview = require('./overview.service');
 const marketplace = require('./marketplace.service');
 const execution = require('./execution.service');
 const money = require('./money.service');
+const supply = require('./supply.service');
+const demand = require('./demand.service');
+const quality = require('./quality.service');
 const { SECTIONS, KPIS } = require('./catalogue');
 
-const BUILDERS = { overview, marketplace, execution, money };
+const BUILDERS = { overview, marketplace, execution, money, supply, demand, quality };
 
 class AnalyticsService {
     get sections() {
