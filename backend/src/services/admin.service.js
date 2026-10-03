@@ -2345,6 +2345,11 @@ class AdminService {
 
             const hospitalUserId = hospital.user._id.toString();
 
+            Duty.updateMany(
+                { _id: { $in: createdDuties.map(d => d._id) } },
+                { $set: { notifiedCount: staffUserIds.length } }
+            ).catch(err => logger.error('Error saving notified count:', err));
+
             // Several slots posted together go out as one notification naming the count
             const batchThreshold = await SystemConfigService.getEffective('calendar.batchNotificationThreshold');
             if (createdDuties.length >= batchThreshold) {

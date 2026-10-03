@@ -115,6 +115,11 @@ exports.createDuty = asyncHandler(async (req, res) => {
             throw new Error('Hospital profile not found');
         }
 
+        Duty.updateMany(
+            { _id: { $in: createdDuties.map(d => d._id) } },
+            { $set: { notifiedCount: staffUserIds.length } }
+        ).catch(err => logger.error('Error saving notified count:', err));
+
         // Several slots posted together go out as one notification naming the count
         const batchThreshold = await systemConfigService.getEffective('calendar.batchNotificationThreshold');
         const isBatch = createdDuties.length >= batchThreshold;
@@ -1039,6 +1044,18 @@ exports.getAvailableJobsWithDistance = asyncHandler(async (req, res) => {
 exports.getCalendarCounts = asyncHandler(async (req, res) => {
     const { from, to } = req.query;
     const result = await dutyCalendarService.getCounts(req.user, from, to);
+
+    res.status(200).json({
+        success: true,
+        ...result
+    });
+});
+
+
+
+// GET /api/duties/:id/fill-progress - fill tracker for a hospital's duty
+exports.getFillProgress = asyncHandler(async (req, res) => {
+    const result = await dutyCalendarService.getFillProgress(req.user.id, req.params.id);
 
     res.status(200).json({
         success: true,

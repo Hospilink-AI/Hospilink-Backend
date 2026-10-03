@@ -1444,6 +1444,12 @@ class DutyService {
                 throw new ForbiddenError('Access denied: This duty has expired and is no longer available');
             }
 
+            // Counts towards "viewed by N" on the hospital's fill tracker
+            if (isAvailable) {
+                Duty.updateOne({ _id: duty._id }, { $addToSet: { viewedBy: medicalStaff._id } })
+                    .catch(err => console.error('Failed to record duty view:', err));
+            }
+
             // Add distance information for staff members only (always show distance)
             try {
                 // Get staff real-time location with fallback to profile
@@ -2123,7 +2129,7 @@ class DutyService {
                 await notificationEmitter.emitDutyUnassigned15Min(duty, hospitalUserId);
 
                 // Mark as notified to prevent duplicates
-                await Duty.updateOne({ _id: duty._id }, { $set: { unassigned15MinNotified: true } });
+                await Duty.updateOne({ _id: duty._id }, { $set: { unassigned15MinNotified: true, unassigned15MinNotifiedAt: new Date() } });
                 notified++;
             } catch (err) {
                 console.error(`Error sending 15-min unassigned notification for duty ${duty._id}:`, err);
@@ -2264,7 +2270,7 @@ class DutyService {
                     await notificationEmitter.emitDutyUnfilledCritical(duty, hospitalUserId, minutesToShift);
 
                     // Mark as notified to prevent duplicates
-                    await Duty.updateOne({ _id: duty._id }, { $set: { unfilledCriticalNotified: true } });
+                    await Duty.updateOne({ _id: duty._id }, { $set: { unfilledCriticalNotified: true, unfilledCriticalNotifiedAt: new Date() } });
                     notified++;
                 }
             } catch (err) {
@@ -2608,7 +2614,7 @@ class DutyService {
         // Only mark as notified — urgency stays untouched
         await Duty.updateMany(
             { _id: { $in: ids } },
-            { $set: { unfilledCriticalNotified: true } }
+            { $set: { unfilledCriticalNotified: true, unfilledCriticalNotifiedAt: new Date() } }
         );
 
         return { count: toEscalate.length, duties: toEscalate };

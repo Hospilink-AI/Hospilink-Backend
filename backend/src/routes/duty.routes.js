@@ -55,6 +55,8 @@ router.get('/duties/calendar-counts', authorize('staff', 'hospital'), requireCal
 
 router.get('/duties/calendar-day', authorize('staff', 'hospital'), requireCalendarVerification, validateCalendarDayQuery, dutyController.getCalendarDay);
 
+router.get('/duties/:id/fill-progress', authorize('hospital'), requireHospitalVerification, validateObjectId('id'), dutyController.getFillProgress);
+
 router.get('/duties/my-upcoming', authorize('staff'), requireStaffVerificationandisAvailable, dutyController.getMyUpcomingDuties);
 
 router.get('/duties/ongoing', authorize('staff'), requireStaffVerificationandisAvailable, validatePagination, dutyController.getOngoingDuties);

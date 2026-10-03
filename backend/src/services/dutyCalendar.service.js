@@ -7,7 +7,7 @@ const locationBasedStaffService = require('./locationBasedStaff.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const s3Service = require('./s3.service');
 const logger = require('../utils/logger');
-const { NotFoundError } = require('../middleware/error.middleware');
+const { NotFoundError, ForbiddenError } = require('../middleware/error.middleware');
 const {
     istDateKey,
     istDayRange,
@@ -400,6 +400,80 @@ class DutyCalendarService {
         }
 
         return { date, duties: result };
+    }
+
+
+
+    // GET /api/duties/:id/fill-progress — where a posted duty is in filling,
+    // from states the platform actually records (no offer cascade)
+    async getFillProgress(hospitalUserId, dutyId) {
+        const hospital = await Hospital.findOne({ user: hospitalUserId }).select('_id').lean();
+        if (!hospital) {
+            throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
+        }
+
+        const duty = await Duty.findById(dutyId)
+            .select('+viewedBy hospital status createdAt assignedAt notifiedCount unassigned15MinNotified unassigned15MinNotifiedAt unfilledCriticalNotified unfilledCriticalNotifiedAt autoRelist.relistCount autoRelist.history.timestamp assignedTo')
+            .populate({
+                path: 'assignedTo',
+                select: 'fullName profilePicture.s3Key user',
+                populate: { path: 'user', select: 'name' }
+            })
+            .lean();
+
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        if (duty.hospital.toString() !== hospital._id.toString()) {
+            throw new ForbiddenError('You can only view your own duties');
+        }
+
+        const steps = [
+            { key: 'posted', at: duty.createdAt },
+            // null on duties posted before this was recorded
+            { key: 'offered', count: duty.notifiedCount ?? null, at: duty.createdAt },
+            { key: 'viewed', count: Array.isArray(duty.viewedBy) ? duty.viewedBy.length : null }
+        ];
+
+        if (duty.unassigned15MinNotified) {
+            steps.push({ key: 'unfilled_15min', at: duty.unassigned15MinNotifiedAt || null });
+        }
+        if (duty.unfilledCriticalNotified) {
+            steps.push({ key: 'unfilled_critical', at: duty.unfilledCriticalNotifiedAt || null });
+        }
+
+        const relistCount = duty.autoRelist?.relistCount || 0;
+        if (relistCount > 0) {
+            const history = duty.autoRelist.history || [];
+            steps.push({ key: 'relisted', count: relistCount, at: history.length ? history[history.length - 1].timestamp : null });
+        }
+
+        const staff = duty.assignedTo;
+        if (staff && FILLED_STATUSES.includes(duty.status)) {
+            let profilePicture = null;
+            if (staff.profilePicture?.s3Key) {
+                try {
+                    profilePicture = await s3Service.generatePreSignedURL(staff.profilePicture.s3Key);
+                } catch (error) {
+                    logger.error('Error generating presigned URL for profile picture:', error);
+                }
+            }
+            steps.push({
+                key: 'accepted',
+                at: duty.assignedAt || null,
+                staff: { name: staff.fullName || staff.user?.name || '—', profilePicture }
+            });
+        } else if (duty.status === 'expired' || duty.status === 'cancelled') {
+            steps.push({ key: duty.status, at: null });
+        }
+
+        return {
+            dutyId: duty._id,
+            status: duty.status,
+            current: steps[steps.length - 1].key,
+            steps
+        };
     }
 }
 

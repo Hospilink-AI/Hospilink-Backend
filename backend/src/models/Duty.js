@@ -251,6 +251,21 @@ const dutySchema = new mongoose.Schema({
         default: false
     },
 
+    // Fill-progress tracker. Missing on older duties, which reads as unknown.
+    unassigned15MinNotifiedAt: {
+        type: Date
+    },
+    unfilledCriticalNotifiedAt: {
+        type: Date
+    },
+    notifiedCount: {
+        type: Number
+    },
+    viewedBy: {
+        type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MedicalStaff' }],
+        select: false
+    },
+
     
     autoRelist: {
         enabled: {
