@@ -200,6 +200,13 @@ const medicalStaffSchema = new mongoose.Schema({
         trim: true,
         maxlength: [500, 'Rejection reason cannot exceed 500 characters']
     },
+    // Consent to share live location from the app (DPDP record). Set and
+    // cleared through dashboard.service; the Redis flag is the fast path.
+    locationConsent: {
+        granted: { type: Boolean },
+        grantedAt: { type: Date },
+        revokedAt: { type: Date }
+    },
     isSuspended: {
         type: Boolean,
         default: false,

@@ -2433,7 +2433,7 @@ class DutyService {
                 const redis = await redisClient.getClientAsync();
 
                 try {
-                    const key = `hospilink:staff_location:${staff.user._id}`;
+                    const key = `staff_location:${staff.user._id}`;
                     const data = await redis.get(key);
 
                     if (data) {
