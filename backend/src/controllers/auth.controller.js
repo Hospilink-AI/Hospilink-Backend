@@ -3,6 +3,7 @@ const fcmService = require('../services/fcm.service');
 const { asyncHandler } = require('../middleware/error.middleware');
 const activityLogEmitter = require('../services/activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
+const User = require('../models/User');
 
 class AuthController {
     signup = asyncHandler(async (req, res) => {
@@ -82,6 +83,13 @@ class AuthController {
             if (result.user) {
                 activityLogEmitter.logUserLogin(result.user, req, true)
                     .catch(err => console.error('Error logging login:', err));
+
+                // At most one write an hour per user
+                const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+                User.updateOne(
+                    { _id: result.user.id, $or: [{ lastActiveAt: { $exists: false } }, { lastActiveAt: { $lt: oneHourAgo } }] },
+                    { $set: { lastActiveAt: new Date() } }
+                ).catch(err => console.error('Error updating last active:', err));
             }
             
             res.status(200).json({
