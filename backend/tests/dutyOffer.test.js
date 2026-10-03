@@ -19,8 +19,11 @@ jest.mock('../src/services/systemConfig.service', () => ({
 jest.mock('../src/services/cache.service', () => ({ acquireLock: async () => true, releaseLock: async () => true }));
 jest.mock('../src/utils/logger', () => ({ error: () => {}, info: () => {} }));
 const widenedCalls = [];
+const mockNotices = [];
 jest.mock('../src/services/notificationEmitter', () => ({
-    emitDutyOfferWidened: async (duty, userIds, radiusKm) => widenedCalls.push({ radiusKm, userIds })
+    emitDutyOfferWidened: async (duty, userIds, radiusKm) => widenedCalls.push({ radiusKm, userIds }),
+    emitDutyNotice: async (type, duty, userIds, message) => mockNotices.push({ type, userIds, message }),
+    describeShift: () => 'rmo duty on 5 Jan, 09:00–17:00'
 }));
 jest.mock('../src/config/redis', () => ({ getClientAsync: async () => ({}) }));
 
@@ -215,10 +218,13 @@ describe('invites', () => {
         widenedCalls.length = 0;
         const duty = { _id: 'd9', hospital: 'h1', staffRole: 'rmo', offer: { mode: 'invite', openTo: 'radius', notifiedStaff: ['s28'] } };
 
+        mockNotices.length = 0;
         expect(await dutyOffer._openAfterInvite(duty)).toBe(true);
         expect(update.$set).toMatchObject({ 'offer.mode': 'radius', 'offer.radiusKm': 30 });
         expect(update.$push['offer.history'].event).toBe('opened_to_radius');
         expect(widenedCalls[0].userIds).toEqual(['u5']);
+        expect(mockNotices[0]).toMatchObject({ type: 'DUTY_OPENED_TO_OTHERS' });
+        expect(mockNotices[0].message).toContain('now open to doctors within 30 km');
     });
 
     it('opens an emergency invite to the city', async () => {

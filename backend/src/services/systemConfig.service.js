@@ -140,7 +140,11 @@ const DEFAULTS = {
     'offer.inviteWindowMinutes': 30,
     // Doctors who marked themselves free for a shift hear about it this much
     // earlier than others in the same ring (0 turns the head start off)
-    'offer.availabilityHeadStartMinutes': 10
+    'offer.availabilityHeadStartMinutes': 10,
+
+    // Web users get notifications inside the app (notification centre and
+    // pop-ups). Browser push only when this is switched on.
+    'notifications.webPushEnabled': false
 };
 
 const CACHE_TTL_SECONDS = 300;

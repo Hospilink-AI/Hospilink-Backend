@@ -67,7 +67,7 @@ class NotificationDeliveryService {
                 };
             } else {
                 // User is offline - deliver via FCM push
-                const title = FCM_TITLES[type] || 'HospiLink';
+                const title = payload.display?.title || FCM_TITLES[type] || 'HospiLink';
                 const body = payload.message || 'You have a new notification';
                 
                 const fcmData = {
@@ -141,7 +141,7 @@ class NotificationDeliveryService {
             // Deliver to offline users via FCM
             let fcmResult = { success: true, successCount: 0, failureCount: 0 };
             if (offlineIds.length > 0) {
-                const title = FCM_TITLES[type] || 'HospiLink';
+                const title = payload.display?.title || FCM_TITLES[type] || 'HospiLink';
                 const body = payload.message || 'You have a new notification';
                 
                 const fcmData = {

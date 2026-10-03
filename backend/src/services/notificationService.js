@@ -1,4 +1,21 @@
 const Notification = require('../models/Notification');
+const { describe } = require('../utils/notificationDisplay');
+
+// Adds the in-app display block (title, severity, icon, where to open) to a
+// payload before it is saved. The same object is then delivered, so live
+// pop-ups and the stored notification match.
+function withDisplay(type, payload) {
+    if (payload && typeof payload === 'object' && !payload.display) {
+        payload.display = describe(type, payload);
+    }
+    return payload;
+}
+
+// Older notifications were stored before the display block existed
+function withStoredDisplay(notification) {
+    if (!notification?.payload || notification.payload.display) return notification;
+    return { ...notification, payload: { ...notification.payload, display: describe(notification.type, notification.payload) } };
+}
 
 /**
  * Notification Service
@@ -13,6 +30,7 @@ class NotificationService {
      * @returns {Promise<Object>} Created notification
      */
     async createNotification(recipientId, type, payload) {
+        withDisplay(type, payload);
         try {
             const notification = new Notification({
                 recipient: recipientId,
@@ -46,7 +64,7 @@ class NotificationService {
                 .skip(skip)
                 .lean();
             
-            return notifications;
+            return notifications.map(withStoredDisplay);
         } catch (error) {
             console.error('Error fetching user notifications:', error);
             throw error;
@@ -140,6 +158,7 @@ class NotificationService {
      * @returns {Promise<Object>} Insert result
      */
     async createBulkNotifications(recipientIds, type, payload) {
+        withDisplay(type, payload);
         try {
             if (!recipientIds || recipientIds.length === 0) {
                 return { insertedCount: 0 };
@@ -224,7 +243,7 @@ class NotificationService {
             .limit(limit)
             .lean();
             
-            return notifications;
+            return notifications.map(withStoredDisplay);
         } catch (error) {
             console.error('Error fetching notifications since timestamp:', error);
             throw error;
@@ -240,6 +259,7 @@ class NotificationService {
      * @returns {Promise<Object>} { notification, unreadCount }
      */
     async createNotificationWithCount(recipientId, type, payload) {
+        withDisplay(type, payload);
         try {
             const notification = new Notification({
                 recipient: recipientId,
@@ -281,7 +301,7 @@ class NotificationService {
             .limit(limit)
             .lean();
             
-            return notifications;
+            return notifications.map(withStoredDisplay);
         } catch (error) {
             console.error('Error fetching undelivered notifications:', error);
             throw error;

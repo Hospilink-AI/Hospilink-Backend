@@ -893,6 +893,87 @@ class NotificationEmitter {
     }
 
 
+    // A vacancy was closed while this candidate's application was still open
+    async emitVacancyClosed(application, vacancy) {
+        try {
+            const payload = {
+                type: 'VACANCY_CLOSED',
+                application: { id: application._id.toString() },
+                vacancy: { id: vacancy._id.toString(), title: vacancy.title },
+                message: `The vacancy "${vacancy.title}" has been closed, so your application has ended. Keep an eye out for other vacancies.`,
+                timestamp: new Date().toISOString()
+            };
+            const userId = application.user.toString();
+            const { unreadCount } = await notificationService.createNotificationWithCount(userId, 'VACANCY_CLOSED', payload);
+            await notificationDelivery.deliverToUser(userId, 'VACANCY_CLOSED', payload, unreadCount);
+        } catch (error) {
+            console.error('Error emitting vacancy closed notification:', error);
+        }
+    }
+
+
+    // A document was verified automatically (e.g. Aadhaar through IDfy)
+    async emitDocumentAutoVerified(userId, documentType) {
+        try {
+            const label = documentType === 'aadhaar-card' ? 'Aadhaar' : documentType;
+            const payload = {
+                type: 'DOCUMENT_AUTO_VERIFIED',
+                document: { type: documentType },
+                message: `Your ${label} has been verified.`,
+                timestamp: new Date().toISOString()
+            };
+            const { unreadCount } = await notificationService.createNotificationWithCount(userId, 'DOCUMENT_AUTO_VERIFIED', payload);
+            await notificationDelivery.deliverToUser(userId, 'DOCUMENT_AUTO_VERIFIED', payload, unreadCount);
+        } catch (error) {
+            console.error('Error emitting document auto-verified notification:', error);
+        }
+    }
+
+
+    // "rmo duty on 5 Oct, 09:00–17:00" for notification messages
+    describeShift(duty) {
+        const day = new Date(duty.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
+        return `${duty.staffRole} duty on ${day}, ${duty.startTime}–${duty.endTime}`;
+    }
+
+
+    // One-off duty notices that share a payload shape: admin assignment,
+    // expiry, incomplete, status override, invite window ending
+    async emitDutyNotice(type, duty, userIds, message, extra = {}) {
+        try {
+            const recipients = [...new Set((userIds || []).filter(Boolean).map(String))];
+            if (!duty || recipients.length === 0) return;
+
+            const payload = {
+                type,
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    offeredRate: duty.offeredRate,
+                    urgency: duty.urgency,
+                    status: duty.status
+                },
+                ...extra,
+                message,
+                timestamp: new Date().toISOString()
+            };
+
+            if (recipients.length === 1) {
+                const { unreadCount } = await notificationService.createNotificationWithCount(recipients[0], type, payload);
+                await notificationDelivery.deliverToUser(recipients[0], type, payload, unreadCount);
+            } else {
+                await notificationService.createBulkNotifications(recipients, type, payload);
+                await notificationDelivery.deliverToUsers(recipients, type, payload);
+            }
+        } catch (error) {
+            console.error(`Error emitting ${type} notification:`, error);
+        }
+    }
+
+
     // Hospital invited these doctors to a duty by name
     async emitDutyInvite(duty, staffUserIds, hospitalName, { count, dutyIds, openAfterInvite, inviteExpiresAt } = {}) {
         try {
