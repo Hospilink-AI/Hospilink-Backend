@@ -27,8 +27,9 @@ class NotificationEmitter {
      * @param {Object} hospital - Hospital object
      * @param {string[]} matchingStaffUserIds - Array of user IDs for matching staff
      * @param {string} hospitalUserId - Hospital user ID
+     * @param {Object} [batch] - { count, dutyIds } when several slots were posted at once
      */
-    async emitDutyCreated(duty, hospital, matchingStaffUserIds, hospitalUserId) {
+    async emitDutyCreated(duty, hospital, matchingStaffUserIds, hospitalUserId, batch = null) {
         try {
             // Validate required parameters
             if (!duty || !hospital || !hospitalUserId) {
@@ -47,9 +48,13 @@ class NotificationEmitter {
             if (isEmergency) {
                 // Count matching staff for emergency acknowledgment
                 const staffCount = matchingStaffUserIds ? matchingStaffUserIds.length : 0;
-                hospitalMessage = `Your emergency request for ${duty.staffRole} has been broadcast to ${staffCount} available staff within radius.`;
+                hospitalMessage = batch
+                    ? `Your emergency request for ${batch.count} ${duty.staffRole} has been broadcast to ${staffCount} available staff within radius.`
+                    : `Your emergency request for ${duty.staffRole} has been broadcast to ${staffCount} available staff within radius.`;
             } else {
-                hospitalMessage = `Duty created successfully for ${duty.staffRole}`;
+                hospitalMessage = batch
+                    ? `${batch.count} duties created successfully for ${duty.staffRole}`
+                    : `Duty created successfully for ${duty.staffRole}`;
             }
 
             const hospitalPayload = {
@@ -69,6 +74,7 @@ class NotificationEmitter {
                     id: hospital._id?.toString() || 'unknown',
                     name: hospitalName
                 },
+                ...(batch && { count: batch.count, dutyIds: batch.dutyIds }),
                 message: hospitalMessage,
                 timestamp: new Date().toISOString()
             };
@@ -102,9 +108,13 @@ class NotificationEmitter {
                     // Create message based on urgency
                     let message;
                     if (isEmergency) {
-                        message = `EMERGENCY: Immediate ${duty.staffRole} required at ${hospitalName} — ${hospitalLocation}. Critical response needed. Tap to accept.`;
+                        message = batch
+                            ? `EMERGENCY: ${batch.count} ${duty.staffRole} required immediately at ${hospitalName} — ${hospitalLocation}. Critical response needed. Tap to accept.`
+                            : `EMERGENCY: Immediate ${duty.staffRole} required at ${hospitalName} — ${hospitalLocation}. Critical response needed. Tap to accept.`;
                     } else {
-                        message = `New duty available near you — ${duty.staffRole} at ${hospitalName}, ${dutyDate} ${dutyTime}. Tap to accept.`;
+                        message = batch
+                            ? `${batch.count} duties available near you — ${duty.staffRole} at ${hospitalName}, ${dutyDate} ${dutyTime}. Tap to accept.`
+                            : `New duty available near you — ${duty.staffRole} at ${hospitalName}, ${dutyDate} ${dutyTime}. Tap to accept.`;
                     }
 
                     // Create staff payload for role room broadcast
@@ -125,6 +135,7 @@ class NotificationEmitter {
                             id: hospital._id?.toString() || 'unknown',
                             name: hospitalName
                         },
+                        ...(batch && { count: batch.count, dutyIds: batch.dutyIds }),
                         message: message,
                         timestamp: new Date().toISOString()
                     };

@@ -2345,9 +2345,18 @@ class AdminService {
 
             const hospitalUserId = hospital.user._id.toString();
 
-            // Send notifications for all created duties
-            for (const duty of createdDuties) {
-                await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, hospitalUserId);
+            // Several slots posted together go out as one notification naming the count
+            const batchThreshold = await SystemConfigService.getEffective('calendar.batchNotificationThreshold');
+            if (createdDuties.length >= batchThreshold) {
+                await notificationEmitter.emitDutyCreated(createdDuties[0], hospital, staffUserIds, hospitalUserId, {
+                    count: createdDuties.length,
+                    dutyIds: createdDuties.map(d => d._id.toString())
+                });
+            } else {
+                // Send notifications for all created duties
+                for (const duty of createdDuties) {
+                    await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, hospitalUserId);
+                }
             }
 
             // Notify all admins if this is an emergency duty

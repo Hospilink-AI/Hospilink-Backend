@@ -18,7 +18,8 @@ const notificationEmitterModule = require('../services/notificationEmitter');
 const { ACTIVITY_ACTIONS: AA } = require('../utils/activityLog.constants');
 const geocodingService = require('../services/geocoding.service');
 const CancellationService = require('../services/cancellation.service');
-const dutyCalendarService = require('../services/dutyCalendar.service');                    
+const dutyCalendarService = require('../services/dutyCalendar.service');
+const systemConfigService = require('../services/systemConfig.service');                    
 
 // Extend logger with debug method
 logger.debug = (message) => {
@@ -114,9 +115,21 @@ exports.createDuty = asyncHandler(async (req, res) => {
             throw new Error('Hospital profile not found');
         }
 
+        // Several slots posted together go out as one notification naming the count
+        const batchThreshold = await systemConfigService.getEffective('calendar.batchNotificationThreshold');
+        const isBatch = createdDuties.length >= batchThreshold;
+        if (isBatch) {
+            await notificationEmitter.emitDutyCreated(createdDuties[0], hospital, staffUserIds, userId, {
+                count: createdDuties.length,
+                dutyIds: createdDuties.map(d => d._id.toString())
+            });
+        }
+
         // Emit notification to both hospital and matching staff for all created duties
         for (const duty of createdDuties) {
-            await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, userId);
+            if (!isBatch) {
+                await notificationEmitter.emitDutyCreated(duty, hospital, staffUserIds, userId);
+            }
             
             // Log duty creation activity
             const isEmergency = duty.urgency === 'emergency';
