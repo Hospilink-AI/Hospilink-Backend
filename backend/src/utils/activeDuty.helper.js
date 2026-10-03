@@ -10,7 +10,7 @@ async function getBatchStaffLocations(staffUserIds) {
         
         const locationPromises = staffUserIds.map(async (userId) => {
             try {
-                const key = `hospilink:staff_location:${userId}`;
+                const key = `staff_location:${userId}`;
                 console.log('🔍 DEBUG: Checking Redis key:', key);
                 const data = await redis.get(key);
                 console.log('🔍 DEBUG: Found data for user', userId, ':', data ? 'YES' : 'NO');
