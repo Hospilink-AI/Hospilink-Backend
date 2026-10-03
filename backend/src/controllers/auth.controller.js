@@ -110,7 +110,7 @@ class AuthController {
                 req
             ).catch(err => console.error('Error logging failed login:', err));
             activityLogEmitter.trackFailedLogin(email, req);
-
+            
             throw error;
         }
     });
