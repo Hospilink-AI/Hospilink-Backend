@@ -142,6 +142,11 @@ const hospitalSchema = new mongoose.Schema({
             'Pulmonology'
         ]
     }],
+    // Doctors the hospital wants to invite to duties directly (capped in dutyInvite.service)
+    favouriteStaff: {
+        type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MedicalStaff' }],
+        default: undefined
+    },
     staffCount: {
         type: String,
         required: [true, 'Staff count is required'],
