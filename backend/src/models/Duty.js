@@ -627,12 +627,6 @@ dutySchema.index({
     date: -1 
 }); // For hospital-specific queries 
 
-// TTL index for status history cleanup (90 days)
-dutySchema.index({ 
-    'statusHistory.timestamp': 1 
-}, { 
-    expireAfterSeconds: 7776000 // 90 days
-});
 
 
 
