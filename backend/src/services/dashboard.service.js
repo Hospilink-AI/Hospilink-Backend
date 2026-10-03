@@ -4,6 +4,7 @@ const { getCurrentIST } = require('../utils/helpers');
 const redisClient = require('../config/redis');
 const geocodingService = require('./geocoding.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
+const staffLocator = require('./staffLocator.service');
 const {
     ValidationError,
     NotFoundError,
@@ -242,6 +243,12 @@ class DashboardService {
     async grantDashboardLocationPermission(userId) {
         const client = await redisClient.getClientAsync();
         await client.setex(this._locationPermissionKey(userId), 60 * 60 * 24 * 30, 'true');
+
+        // Durable consent record; the Redis flag above is only the fast path
+        await MedicalStaff.updateOne(
+            { user: userId, 'locationConsent.granted': { $ne: true } },
+            { $set: { 'locationConsent.granted': true, 'locationConsent.grantedAt': new Date() } }
+        );
     }
 
     // Called by HTTP API or WebSocket revoke — clears both permission and location
@@ -249,8 +256,14 @@ class DashboardService {
         const client = await redisClient.getClientAsync();
         await Promise.all([
             client.del(this._locationPermissionKey(userId)),
-            client.del(this._locationDataKey(userId))
+            client.del(this._locationDataKey(userId)),
+            staffLocator.removeLivePosition(userId)
         ]);
+
+        await MedicalStaff.updateOne(
+            { user: userId },
+            { $set: { 'locationConsent.granted': false, 'locationConsent.revokedAt': new Date() } }
+        );
     }
 
     async isDashboardLocationPermitted(userId) {
@@ -277,6 +290,8 @@ class DashboardService {
 
         // 2-minute TTL: auto-expires if staff goes offline and stops sending updates
         await client.setex(this._locationDataKey(userId), 120, JSON.stringify(locationData));
+        // Lets duty offers find staff who are near a hospital right now
+        await staffLocator.addLivePosition(userId, latitude, longitude);
         return locationData;
     }
 
