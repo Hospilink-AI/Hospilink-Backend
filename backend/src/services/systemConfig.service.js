@@ -120,7 +120,13 @@ const DEFAULTS = {
     'calendar.countsCacheSeconds': 60,
     'calendar.bookingHorizonDays': 90,
     'calendar.historyDays': 180,
-    'calendar.batchNotificationThreshold': 2
+    'calendar.batchNotificationThreshold': 2,
+
+    // Admin analytics. No platform fee exists yet: revenue is projected from
+    // completed GMV at this percentage until a payments ledger is live.
+    'analytics.liveCacheSeconds': 300,
+    'analytics.projectedCommissionPercent': 0,
+    'analytics.revenueSource': 'projected'
 };
 
 const CACHE_TTL_SECONDS = 300;

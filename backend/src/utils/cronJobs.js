@@ -8,6 +8,7 @@ const redisClient = require('../config/redis');
 const InterviewLifecycleService = require('../services/interviewLifecycle.service');
 const TicketService = require('../services/ticket.service');
 const autoRelistAnalyticsService = require('../services/autoRelistAnalytics.service');
+const analyticsSnapshotService = require('../services/analytics/snapshot.service');
 
 /**
  * Acquire a distributed Redis lock so only one ECS task runs a given cron job.
@@ -320,7 +321,22 @@ class CronJobs {
             'Auto-relist daily rollup'
         );
 
-        console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min), Interview lifecycle (15 min), Ticket SLA sweeps (15 min), Auto-relist repeat push (5 min), Auto-relist rollup (hourly, acts at midnight)');
+        // Analytics daily snapshot — writes yesterday's row once, any hour
+        // after midnight (the service skips it when the row already exists)
+        this.scheduleJob(
+            async () => {
+                try {
+                    const written = await analyticsSnapshotService.ensureYesterday();
+                    if (written) console.log('Analytics daily snapshot written');
+                } catch (err) {
+                    console.error('Analytics daily snapshot failed:', err);
+                }
+            },
+            60,
+            'Analytics daily snapshot'
+        );
+
+        console.log('Cron jobs scheduled: Auto-complete (1 min), Mark incomplete (30 min), Interview lifecycle (15 min), Ticket SLA sweeps (15 min), Auto-relist repeat push (5 min), Auto-relist rollup (hourly, acts at midnight), Analytics snapshot (hourly, once a day)');
 
         // Log cron job initialization after a short delay to ensure DB/Redis are ready
         setTimeout(() => {
