@@ -250,6 +250,16 @@ const dutySchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    // Flagged for admins an hour before start while still unfilled. Kept
+    // apart from unfilledCriticalNotified so the hospital's 30-minute alert
+    // still goes out.
+    escalatedToCritical: {
+        type: Boolean,
+        default: false
+    },
+    escalatedToCriticalAt: {
+        type: Date
+    },
 
     // Fill-progress tracker. Missing on older duties, which reads as unknown.
     unassigned15MinNotifiedAt: {

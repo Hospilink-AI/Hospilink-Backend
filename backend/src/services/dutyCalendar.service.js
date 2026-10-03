@@ -413,7 +413,7 @@ class DutyCalendarService {
         }
 
         const duty = await Duty.findById(dutyId)
-            .select('+viewedBy hospital status createdAt assignedAt notifiedCount unassigned15MinNotified unassigned15MinNotifiedAt unfilledCriticalNotified unfilledCriticalNotifiedAt autoRelist.relistCount autoRelist.history.timestamp assignedTo')
+            .select('+viewedBy hospital status createdAt assignedAt notifiedCount unassigned15MinNotified unassigned15MinNotifiedAt unfilledCriticalNotified unfilledCriticalNotifiedAt escalatedToCritical escalatedToCriticalAt autoRelist.relistCount autoRelist.history.timestamp assignedTo')
             .populate({
                 path: 'assignedTo',
                 select: 'fullName profilePicture.s3Key user',
@@ -438,6 +438,9 @@ class DutyCalendarService {
 
         if (duty.unassigned15MinNotified) {
             steps.push({ key: 'unfilled_15min', at: duty.unassigned15MinNotifiedAt || null });
+        }
+        if (duty.escalatedToCritical) {
+            steps.push({ key: 'escalated_to_admins', at: duty.escalatedToCriticalAt || null });
         }
         if (duty.unfilledCriticalNotified) {
             steps.push({ key: 'unfilled_critical', at: duty.unfilledCriticalNotifiedAt || null });
