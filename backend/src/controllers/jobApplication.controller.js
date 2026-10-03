@@ -1,6 +1,16 @@
 const jobApplicationService = require('../services/jobApplication.service');
 const interviewSchedulingService = require('../services/interviewScheduling.service');
 const { asyncHandler } = require('../middleware/error.middleware');
+const activityLogEmitter = require('../services/activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
+
+// Audit trail for recruitment actions (the caller is the actor)
+const auditApplication = (req, action, application, details = {}) => activityLogEmitter.logAction(
+    action,
+    req,
+    { type: 'application', id: application?._id || application?.id || req.params.applicationId },
+    { status: application?.status, vacancyId: application?.vacancy?._id || application?.vacancy, ...details }
+).catch(() => {});
 
 // ─── Apply / review pipeline ────────────────────────────────────────────────
 
@@ -10,6 +20,7 @@ const { asyncHandler } = require('../middleware/error.middleware');
 // checks that both already exist.
 exports.apply = asyncHandler(async (req, res) => {
     const application = await jobApplicationService.applyToVacancy(req.user.id, req.params.id);
+    auditApplication(req, ACTIVITY_ACTIONS.APPLICATION_SUBMITTED, application);
     res.status(201).json({
         success: true,
         application,
@@ -87,6 +98,7 @@ exports.updateStatus = asyncHandler(async (req, res) => {
     const application = await jobApplicationService.updateStatus(
         req.params.applicationId, req.user, status, reason, reasonText
     );
+    auditApplication(req, ACTIVITY_ACTIONS.APPLICATION_STATUS_CHANGED, application);
     res.status(200).json({ success: true, application, message: `Application moved to ${status}` });
 });
 
@@ -94,6 +106,7 @@ exports.updateStatus = asyncHandler(async (req, res) => {
 exports.withdraw = asyncHandler(async (req, res) => {
     const { reason, reasonText } = req.body;
     const application = await jobApplicationService.withdraw(req.params.applicationId, req.user.id, reason, reasonText);
+    auditApplication(req, ACTIVITY_ACTIONS.APPLICATION_WITHDRAWN, application, { reason });
     res.status(200).json({ success: true, application, message: 'Application withdrawn' });
 });
 
@@ -113,12 +126,14 @@ exports.getInterviewConfig = asyncHandler(async (req, res) => {
 exports.offerSlots = asyncHandler(async (req, res) => {
     const { slots, durationMinutes } = req.body;
     const application = await interviewSchedulingService.offerSlots(req.params.applicationId, req.user, { slots, durationMinutes });
+    auditApplication(req, ACTIVITY_ACTIONS.INTERVIEW_SLOTS_OFFERED, application, { slots: (slots || []).length, durationMinutes });
     res.status(200).json({ success: true, application, message: 'Interview slots offered' });
 });
 
 // PATCH /api/applications/:applicationId/slots/select — staff.
 exports.selectSlots = asyncHandler(async (req, res) => {
     const application = await interviewSchedulingService.selectSlots(req.params.applicationId, req.user.id, req.body.picks);
+    auditApplication(req, ACTIVITY_ACTIONS.INTERVIEW_SLOTS_SELECTED, application);
     res.status(200).json({ success: true, application, message: 'Slots selected' });
 });
 
@@ -141,6 +156,8 @@ exports.confirmInterview = asyncHandler(async (req, res) => {
         });
     }
 
+    auditApplication(req, ACTIVITY_ACTIONS.INTERVIEW_CONFIRMED, result.application);
+
     res.status(200).json({ success: true, application: result.application, message: 'Interview confirmed' });
 });
 
@@ -148,6 +165,7 @@ exports.confirmInterview = asyncHandler(async (req, res) => {
 exports.cancelOffer = asyncHandler(async (req, res) => {
     const { reason, reasonText } = req.body;
     const application = await interviewSchedulingService.cancelOffer(req.params.applicationId, req.user, reason, reasonText);
+    auditApplication(req, ACTIVITY_ACTIONS.INTERVIEW_CANCELLED, application, { reason, stage: 'offer' });
     res.status(200).json({ success: true, application, message: 'Interview offer cancelled' });
 });
 
@@ -157,6 +175,7 @@ exports.rescheduleInterview = asyncHandler(async (req, res) => {
     const application = await interviewSchedulingService.rescheduleInterview(
         req.params.applicationId, req.user, { slots, durationMinutes }, reason, reasonText
     );
+    auditApplication(req, ACTIVITY_ACTIONS.INTERVIEW_RESCHEDULED, application);
     res.status(200).json({ success: true, application, message: 'Interview rescheduled' });
 });
 
@@ -164,6 +183,7 @@ exports.rescheduleInterview = asyncHandler(async (req, res) => {
 exports.cancelInterview = asyncHandler(async (req, res) => {
     const { reason, reasonText } = req.body;
     const application = await interviewSchedulingService.cancelInterview(req.params.applicationId, req.user, reason, reasonText);
+    auditApplication(req, ACTIVITY_ACTIONS.INTERVIEW_CANCELLED, application, { reason });
     res.status(200).json({ success: true, application, message: 'Interview cancelled' });
 });
 
@@ -171,6 +191,7 @@ exports.cancelInterview = asyncHandler(async (req, res) => {
 exports.requestReschedule = asyncHandler(async (req, res) => {
     const { reason, reasonText } = req.body;
     const application = await interviewSchedulingService.requestReschedule(req.params.applicationId, req.user.id, reason, reasonText);
+    auditApplication(req, ACTIVITY_ACTIONS.INTERVIEW_RESCHEDULE_REQUESTED, application, { reason });
     res.status(200).json({ success: true, application, message: 'Reschedule requested' });
 });
 
@@ -180,6 +201,7 @@ exports.updateMeetingLink = asyncHandler(async (req, res) => {
     const application = await interviewSchedulingService.updateMeetingLink(req.params.applicationId, req.user, {
         meetingLink, interviewerName, interviewerDesignation
     });
+    auditApplication(req, ACTIVITY_ACTIONS.INTERVIEW_LINK_CHANGED, application);
     res.status(200).json({ success: true, application, message: 'Meeting link updated' });
 });
 
@@ -187,6 +209,7 @@ exports.updateMeetingLink = asyncHandler(async (req, res) => {
 exports.recordOutcome = asyncHandler(async (req, res) => {
     const { result, reason, reasonText } = req.body;
     const application = await interviewSchedulingService.recordOutcome(req.params.applicationId, req.user, { result, reason, reasonText });
+    auditApplication(req, ACTIVITY_ACTIONS.INTERVIEW_OUTCOME_RECORDED, application, { result });
     res.status(200).json({ success: true, application, message: `Outcome recorded: ${result}` });
 });
 
@@ -196,18 +219,21 @@ exports.markNoShow = asyncHandler(async (req, res) => {
     const application = await interviewSchedulingService.markNoShow(req.params.applicationId, req.user, {
         reoffer, newSlots, durationMinutes, reasonText
     });
+    auditApplication(req, ACTIVITY_ACTIONS.INTERVIEW_NO_SHOW_MARKED, application);
     res.status(200).json({ success: true, application, message: reoffer ? 'Fresh interview offer sent' : 'Candidate marked as no-show' });
 });
 
 // PATCH /api/applications/:applicationId/no-show/report — staff.
 exports.reportNoShow = asyncHandler(async (req, res) => {
     const application = await interviewSchedulingService.reportNoShow(req.params.applicationId, req.user.id);
+    auditApplication(req, ACTIVITY_ACTIONS.INTERVIEW_NO_SHOW_REPORTED, application);
     res.status(200).json({ success: true, application, message: 'Reported — the hospital has been notified' });
 });
 
 // PATCH /api/applications/:applicationId/offer/respond — staff.
 exports.respondToOffer = asyncHandler(async (req, res) => {
     const application = await interviewSchedulingService.respondToOffer(req.params.applicationId, req.user.id, req.body.accept);
+    auditApplication(req, ACTIVITY_ACTIONS.JOB_OFFER_RESPONDED, application, { accept: req.body.accept });
     res.status(200).json({
         success: true,
         application,
