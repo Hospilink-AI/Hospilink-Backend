@@ -8,9 +8,16 @@ const money = require('./money.service');
 const supply = require('./supply.service');
 const demand = require('./demand.service');
 const quality = require('./quality.service');
+const support = require('./support.service');
+const recruitment = require('./recruitment.service');
+const engagement = require('./engagement.service');
+const geography = require('./geography.service');
 const { SECTIONS, KPIS } = require('./catalogue');
 
-const BUILDERS = { overview, marketplace, execution, money, supply, demand, quality };
+const BUILDERS = {
+    overview, marketplace, execution, money, supply, demand, quality,
+    support, recruitment, engagement, geography
+};
 
 class AnalyticsService {
     get sections() {
