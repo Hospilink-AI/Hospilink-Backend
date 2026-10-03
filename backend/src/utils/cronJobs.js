@@ -9,6 +9,7 @@ const InterviewLifecycleService = require('../services/interviewLifecycle.servic
 const TicketService = require('../services/ticket.service');
 const autoRelistAnalyticsService = require('../services/autoRelistAnalytics.service');
 const analyticsSnapshotService = require('../services/analytics/snapshot.service');
+const dutyOfferService = require('../services/dutyOffer.service');
 
 /**
  * Acquire a distributed Redis lock so only one ECS task runs a given cron job.
@@ -263,6 +264,21 @@ class CronJobs {
             },
             15,
             'Ticket SLA sweeps job'
+        );
+
+        // Staged duty offers — widen rings that are due (the service holds
+        // its own lock, so this and the read-path trigger never overlap)
+        this.scheduleJob(
+            async () => {
+                try {
+                    const widened = await dutyOfferService.runDue();
+                    if (widened > 0) console.log(`Staged duty offers widened: ${widened}`);
+                } catch (err) {
+                    console.error('Staged duty offer job failed:', err);
+                }
+            },
+            5,
+            'Staged duty offers'
         );
 
         // Auto-relist repeat push — run every 5 minutes. State-based

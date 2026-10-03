@@ -19,6 +19,7 @@ const { ACTIVITY_ACTIONS: AA } = require('../utils/activityLog.constants');
 const geocodingService = require('../services/geocoding.service');
 const CancellationService = require('../services/cancellation.service');
 const dutyCalendarService = require('../services/dutyCalendar.service');
+const dutyOfferService = require('../services/dutyOffer.service');
 const systemConfigService = require('../services/systemConfig.service');                    
 
 // Extend logger with debug method
@@ -98,17 +99,22 @@ exports.createDuty = asyncHandler(async (req, res) => {
             longitude: hospital.coordinates.coordinates.longitude
         };
 
-        const matchingStaff = await locationBasedStaffService.getNearbyStaffByRole(
-            hospitalCoords,
-            staff_role
-        );
+        // Staged offer (first ring, or the whole city for emergencies); the
+        // old 50 km search only when staged offers are switched off
+        let staffUserIds = await dutyOfferService.startOffer(createdDuties, hospital);
+        if (!staffUserIds) {
+            const matchingStaff = await locationBasedStaffService.getNearbyStaffByRole(
+                hospitalCoords,
+                staff_role
+            );
 
-        // Convert to user IDs for notification
-        const staffUserIds = matchingStaff
-            .filter(staff => staff.user && staff.user._id)
-            .map(staff => staff.user._id.toString());
+            // Convert to user IDs for notification
+            staffUserIds = matchingStaff
+                .filter(staff => staff.user && staff.user._id)
+                .map(staff => staff.user._id.toString());
+        }
 
-        console.log(`Found ${staffUserIds.length} staff within 50km for ${staff_role} role`);
+        console.log(`Notifying ${staffUserIds.length} staff for ${staff_role} role`);
 
         if (!hospital) {
             logger.error('Hospital not found for user: ' + userId);

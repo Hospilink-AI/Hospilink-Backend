@@ -144,7 +144,8 @@ class NotificationEmitter {
                     await notificationService.createBulkNotifications(matchingStaffUserIds, notificationType, staffPayload);
                     
                     // Broadcast to role room for real-time notification (online staff)
-                    websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
+                    // Staged offers reach only the doctors they are offered to
+                    if (!duty.offer?.mode) websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
 
                     // Phase 3: Smart delivery - WebSocket (online) + FCM (offline)
                     await notificationDelivery.deliverToUsers(matchingStaffUserIds, notificationType, staffPayload);
@@ -780,7 +781,7 @@ class NotificationEmitter {
                     };
 
                     await notificationService.createBulkNotifications(matchingStaffUserIds, 'DUTY_RELISTED', staffPayload);
-                    websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
+                    if (!duty.offer?.mode) websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
                     await notificationDelivery.deliverToUsers(matchingStaffUserIds, 'DUTY_RELISTED', staffPayload);
 
                     const onlineStaffIds = matchingStaffUserIds.filter(staffUserId =>
@@ -882,12 +883,48 @@ class NotificationEmitter {
             };
 
             await notificationService.createBulkNotifications(staffUserIds, 'DUTY_RELISTED', payload);
-            websocketManager.emitToStaffRole(duty.staffRole, 'notification', payload);
+            if (!duty.offer?.mode) websocketManager.emitToStaffRole(duty.staffRole, 'notification', payload);
             await notificationDelivery.deliverToUsers(staffUserIds, 'DUTY_RELISTED', payload);
 
             console.log(`Duty relist repeat push #${pushNumber} sent to ${staffUserIds.length} staff for duty ${duty._id}`);
         } catch (error) {
             console.error('Error emitting duty relist repeat push:', error);
+        }
+    }
+
+
+    // Staged offer widened: tell only the doctors newly in range
+    async emitDutyOfferWidened(duty, staffUserIds, radiusKm, hospitalName) {
+        try {
+            if (!staffUserIds || staffUserIds.length === 0) return;
+
+            const dutyDate = new Date(duty.date).toLocaleDateString('en-US', {
+                month: 'short', day: 'numeric', year: 'numeric'
+            });
+            const dutyTime = `${duty.startTime} - ${duty.endTime}`;
+
+            const payload = {
+                type: 'NEW_DUTY_OFFER',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    offeredRate: duty.offeredRate,
+                    urgency: duty.urgency,
+                    offerRadiusKm: radiusKm
+                },
+                message: `New duty available near you — ${duty.staffRole} at ${hospitalName || 'a hospital'}, ${dutyDate} ${dutyTime}. Tap to accept.`,
+                timestamp: new Date().toISOString()
+            };
+
+            await notificationService.createBulkNotifications(staffUserIds, 'NEW_DUTY_OFFER', payload);
+            await notificationDelivery.deliverToUsers(staffUserIds, 'NEW_DUTY_OFFER', payload);
+
+            console.log(`Duty offer widened to ${radiusKm}km: ${staffUserIds.length} staff notified for duty ${duty._id}`);
+        } catch (error) {
+            console.error('Error emitting widened duty offer:', error);
         }
     }
 
