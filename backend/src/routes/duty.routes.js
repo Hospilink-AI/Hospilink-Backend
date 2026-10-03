@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const dutyController = require('../controllers/duty.controller');
+const dutyInviteController = require('../controllers/dutyInvite.controller');
 const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
 const { requireHospitalVerification, requireStaffVerificationandisAvailable, requireVerifiedStaffOnly} = require('../middleware/accountsVerification.middleware');
 const {
@@ -22,7 +23,8 @@ const {
     validateHospitalActiveDutiesQuery,
     validateAvailableDutiesQuery,
     validateCalendarCountsQuery,
-    validateCalendarDayQuery
+    validateCalendarDayQuery,
+    validateInviteCandidatesQuery
 } = require('../middleware/validation.middleware');
 
 // Apply protection to all duty routes
@@ -56,6 +58,9 @@ router.get('/duties/calendar-counts', authorize('staff', 'hospital'), requireCal
 router.get('/duties/calendar-day', authorize('staff', 'hospital'), requireCalendarVerification, validateCalendarDayQuery, dutyController.getCalendarDay);
 
 router.get('/duties/:id/fill-progress', authorize('hospital'), requireHospitalVerification, validateObjectId('id'), dutyController.getFillProgress);
+
+// Favourites, past doctors and nearby doctors a hospital can invite to a duty
+router.get('/duties/invite-candidates', authorize('hospital'), requireHospitalVerification, validateInviteCandidatesQuery, dutyInviteController.getInviteCandidates);
 
 router.get('/duties/my-upcoming', authorize('staff'), requireStaffVerificationandisAvailable, dutyController.getMyUpcomingDuties);
 

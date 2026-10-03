@@ -805,7 +805,19 @@ const validateDutyCreation = (req, res, next) => {
             errors.push('Sub-type is required for RMO duties');
         }
     }
-    
+
+    // Doctors invited by name, and whether the duty opens to others if none accept
+    const { invite_staff_ids, open_after_invite } = req.body;
+    if (invite_staff_ids !== undefined) {
+        if (!Array.isArray(invite_staff_ids) || invite_staff_ids.length > 20 ||
+            !invite_staff_ids.every(id => mongoose.Types.ObjectId.isValid(id))) {
+            errors.push('invite_staff_ids must be a list of up to 20 doctor ids');
+        }
+    }
+    if (open_after_invite !== undefined && typeof open_after_invite !== 'boolean') {
+        errors.push('open_after_invite must be true or false');
+    }
+
     if (date && start_time) {
         const now = getCurrentIST();
         const dutyDate = new Date(date);
@@ -2351,6 +2363,39 @@ const validateAnalyticsExportQuery = (sections) => (req, res, next) => {
 
 
 
+// Validation for the invite picker: the duty's role, optionally its shift
+const validateInviteCandidatesQuery = (req, res, next) => {
+    const allowedParams = ['role', 'date', 'start_time', 'end_time'];
+    const unexpectedParams = Object.keys(req.query).filter(param => !allowedParams.includes(param));
+    const { role, date, start_time, end_time } = req.query;
+    const errors = [];
+
+    if (unexpectedParams.length > 0) {
+        errors.push(`Invalid query parameters: ${unexpectedParams.join(', ')}. Allowed parameters: ${allowedParams.join(', ')}`);
+    }
+    if (!role || !ALLOWED_ROLES.includes(role)) {
+        errors.push('role is required and must be a valid role');
+    }
+    if (date !== undefined && !isValidDateKey(date)) {
+        errors.push('date must be in YYYY-MM-DD format');
+    }
+    const timePattern = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (start_time !== undefined && !timePattern.test(start_time)) errors.push('start_time must be in HH:MM format');
+    if (end_time !== undefined && !timePattern.test(end_time)) errors.push('end_time must be in HH:MM format');
+
+    if (errors.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors
+        });
+    }
+
+    next();
+};
+
+
+
 // Validation for the calendar day panel
 const validateCalendarDayQuery = (req, res, next) => {
     const allowedParams = ['date'];
@@ -3026,6 +3071,7 @@ module.exports = {
     validateCalendarDayQuery,
     validateAnalyticsQuery,
     validateAnalyticsExportQuery,
+    validateInviteCandidatesQuery,
     validateHospitalDutyRouteMap,
     validateSendPhoneOTP,
     validateVerifyPhoneOTP,
