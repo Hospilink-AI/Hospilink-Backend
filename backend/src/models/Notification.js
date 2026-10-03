@@ -37,7 +37,12 @@ const notificationSchema = new mongoose.Schema({
             'TICKET_CLAIM_EXISTS', 'TICKET_RESPONSE_WINDOW_CLOSING', 'TICKET_OUTCOME_DECIDED',
             'TICKET_APPEAL_OUTCOME', 'TICKET_INFO_REQUESTED', 'TICKET_INFO_REQUEST_REMINDER',
             'TICKET_CHAT_MESSAGE',
-            'PATTERN_FLAG_RAISED', 'SUSPENSION_PROPOSED', 'SUSPENSION_DECIDED'],
+            'PATTERN_FLAG_RAISED', 'SUSPENSION_PROPOSED', 'SUSPENSION_DECIDED',
+            // Sent by existing code but missing here, so they were never saved or delivered
+            'DUTY_PENDING_CONFIRMATION', 'END_OTP_REGENERATED', 'RATING_PENALTY_APPLIED', 'RATING_PENALTY_REVERSED',
+            // Duty, document and vacancy events that had no notification
+            'DUTY_ASSIGNED_BY_ADMIN', 'DUTY_EXPIRED_UNFILLED', 'DUTY_MARKED_INCOMPLETE', 'DUTY_STATUS_OVERRIDDEN',
+            'DUTY_OPENED_TO_OTHERS', 'DOCUMENT_AUTO_VERIFIED', 'VACANCY_CLOSED'],
         required: [true, 'Notification type is required']
     },
     payload: {
