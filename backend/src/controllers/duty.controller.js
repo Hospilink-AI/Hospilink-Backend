@@ -17,7 +17,8 @@ const locationBasedStaffService = require('../services/locationBasedStaff.servic
 const notificationEmitterModule = require('../services/notificationEmitter');
 const { ACTIVITY_ACTIONS: AA } = require('../utils/activityLog.constants');
 const geocodingService = require('../services/geocoding.service');
-const CancellationService = require('../services/cancellation.service');                    
+const CancellationService = require('../services/cancellation.service');
+const dutyCalendarService = require('../services/dutyCalendar.service');                    
 
 // Extend logger with debug method
 logger.debug = (message) => {
@@ -73,6 +74,7 @@ exports.createDuty = asyncHandler(async (req, res) => {
         const result = await DutyService.createDuty(dutyData, userId);
         createdDuties.push(result.duty);
     }
+    dutyCalendarService.invalidateCounts(userId);
 
     // Emit WebSocket notification to matching available staff AND hospital
     try {
@@ -228,6 +230,7 @@ exports.acceptDuty = asyncHandler(async (req, res) => {
 
     try {
         const duty = await DutyService.acceptDuty(duty_id, userId);
+        dutyCalendarService.invalidateCounts(userId);
 
         // Prepare email details
         const dutyDetails = {
@@ -625,6 +628,7 @@ exports.editDuty = asyncHandler(async (req, res) => {
     if (req.body.duty_sub_type) updateData.dutySubType = req.body.duty_sub_type;
 
     const duty = await DutyService.editDuty(id, userId, updateData);
+    dutyCalendarService.invalidateCounts(userId);
 
     // Emit WebSocket notification if duty is assigned
     try {
@@ -1013,6 +1017,31 @@ exports.getAvailableJobsWithDistance = asyncHandler(async (req, res) => {
         jobs: result.jobs,
         staffLocation: result.staffLocation,
         totalJobs: result.jobs.length
+    });
+});
+
+
+
+// GET /api/duties/calendar-counts - per-date counts for the calendar grid
+exports.getCalendarCounts = asyncHandler(async (req, res) => {
+    const { from, to } = req.query;
+    const result = await dutyCalendarService.getCounts(req.user, from, to);
+
+    res.status(200).json({
+        success: true,
+        ...result
+    });
+});
+
+
+
+// GET /api/duties/calendar-day - duties behind one calendar date
+exports.getCalendarDay = asyncHandler(async (req, res) => {
+    const result = await dutyCalendarService.getDay(req.user, req.query.date);
+
+    res.status(200).json({
+        success: true,
+        ...result
     });
 });
 

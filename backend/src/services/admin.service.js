@@ -2329,6 +2329,7 @@ class AdminService {
             const result = await DutyService.createDuty(dutyData, hospital.user._id);
             createdDuties.push(result.duty);
         }
+        require('./dutyCalendar.service').invalidateCounts(hospital.user._id.toString());
 
         // Notify matching staff + hospital (same as hospital flow)
         try {

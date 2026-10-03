@@ -16,6 +16,7 @@ const { generateActiveDutiesPDF } = require('../utils/pdf.puppeteer');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const { redactBulkDutyFinancials } = require('../utils/adminResponseFilters');
 const autoRelistAnalyticsService = require('../services/autoRelistAnalytics.service');
+const dutyCalendarService = require('../services/dutyCalendar.service');
 
 
 
@@ -907,6 +908,9 @@ exports.editDutyForHospital = asyncHandler(async (req, res) => {
     if (req.body.duty_sub_type) updateData.dutySubType = req.body.duty_sub_type;
 
     const duty = await DutyService.editDuty(id, req.user.id, updateData, { asAdmin: true });
+    if (duty.hospital?.user?._id) {
+        dutyCalendarService.invalidateCounts(duty.hospital.user._id.toString());
+    }
 
     try {
         const changes = [];
