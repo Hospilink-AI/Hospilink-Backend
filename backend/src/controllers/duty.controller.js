@@ -747,6 +747,8 @@ exports.setAutoRelistEnabled = asyncHandler(async (req, res) => {
     const { enabled } = req.body;
 
     const duty = await DutyService.setAutoRelistEnabled(id, userId, enabled);
+    activityLogEmitter.emitDutyActivity(ACTIVITY_ACTIONS.DUTY_EDITED, duty, activityLogEmitter.actorFrom(req.user), { changes: [{ field: 'Auto-relist', newValue: enabled }] }, req)
+        .catch(err => logger.error('Error logging auto-relist change:', err));
 
     res.status(200).json({
         success: true,

@@ -22,6 +22,11 @@ const DashboardService = require('./dashboard.service');
 const redisClient = require('../config/redis');
 const { getBatchStaffLocations, formatActiveDuty } = require('../utils/activeDuty.helper');
 const notificationEmitter = require('./notificationEmitter');
+const activityLogEmitter = require('./activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
+
+// Actor for changes the platform makes on its own (expiry, incomplete, pending confirmation)
+const SYSTEM_ACTOR = { userId: null, name: 'System', role: 'system' };
 const s3Service = require('./s3.service');
 const OTPService = require('./otp.service');
 const SMSService = require('./sms.service');
@@ -883,6 +888,7 @@ class DutyService {
 
                             // Notify hospital (please confirm) and staff (free to accept new duties)
                             await notificationEmitter.emitDutyPendingConfirmation(duty, staff, hospitalUserId, staffUserId);
+                            activityLogEmitter.emitDutyActivity(ACTIVITY_ACTIONS.DUTY_PENDING_CONFIRMATION, duty, SYSTEM_ACTOR).catch(() => {});
                             console.log(`Pending-confirmation notification sent for duty ${duty._id}`);
                         }
                     } catch (notifError) {
@@ -966,6 +972,7 @@ class DutyService {
             for (const duty of expired) {
                 await notificationEmitter.emitDutyNotice('DUTY_EXPIRED_UNFILLED', duty, [duty.hospital?.user],
                     `Nobody accepted your ${notificationEmitter.describeShift(duty)}, so it has expired. You can post it again.`);
+                activityLogEmitter.emitDutyActivity(ACTIVITY_ACTIONS.DUTY_EXPIRED, duty, SYSTEM_ACTOR).catch(() => {});
             }
         }
 
@@ -1067,6 +1074,7 @@ class DutyService {
 
             // Tell both sides the duty was closed as incomplete
             for (const duty of noticeDuties) {
+                activityLogEmitter.emitDutyActivity(ACTIVITY_ACTIONS.DUTY_MARKED_INCOMPLETE, duty, SYSTEM_ACTOR, { previousStatus: duty.status }).catch(() => {});
                 const shift = notificationEmitter.describeShift(duty);
                 const staffName = duty.assignedTo?.fullName || duty.assignedTo?.user?.name || 'The doctor';
                 await notificationEmitter.emitDutyNotice('DUTY_MARKED_INCOMPLETE', { ...duty.toObject(), status: 'incomplete' }, [duty.hospital?.user],

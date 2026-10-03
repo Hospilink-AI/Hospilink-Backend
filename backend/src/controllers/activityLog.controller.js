@@ -2,6 +2,8 @@ const activityLogService = require('../services/activityLog.service');
 const { asyncHandler } = require('../middleware/error.middleware');
 const { generateActivityLogsPDF } = require('../utils/pdf.puppeteer');
 const logger = require('../utils/logger');
+const activityLogEmitter = require('../services/activityLogEmitter');
+const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 
 
 // Get activity logs with filters and pagination
@@ -254,6 +256,8 @@ exports.exportActivityLogs = asyncHandler(async (req, res) => {
 
     // Fetch logs without pagination for export
     const result = await activityLogService.getActivityLogs(filters, { limit: 10000 });
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.DATA_EXPORTED, req, { type: 'export', id: 'activity-logs', name: 'Activity logs' }, { format, filters })
+        .catch(err => logger.error('Error logging export:', err));
 
     if (format === 'json') {
         res.setHeader('Content-Type', 'application/json');
