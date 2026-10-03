@@ -6,20 +6,12 @@ const redisClient = require('../config/redis');
 const dashboardService = require('./dashboard.service');
 const { URGENCY_LEVELS } = require('../utils/dutyCancellation.constants');
 const { hasDutyStarted, istDayRange } = require('../utils/calendar.helper');
+const staffLocator = require('./staffLocator.service');
 
 class LocationBasedStaffService {
-    // Calculate bounding box for 50km radius
+    // Calculate bounding box for 50km radius (in degrees: ~111 km per degree)
     getBoundingBox(lat, lng, radiusKm = 50) {
-        const earthRadius = 6371; // km
-        const latDelta = radiusKm / earthRadius;
-        const lngDelta = radiusKm / (earthRadius * Math.cos(lat * Math.PI / 180));
-        
-        return {
-            minLat: lat - latDelta,
-            maxLat: lat + latDelta,
-            minLng: lng - lngDelta,
-            maxLng: lng + lngDelta
-        };
+        return staffLocator.boundingBox(lat, lng, radiusKm);
     }
 
 
@@ -43,6 +35,10 @@ class LocationBasedStaffService {
     // the auto-relist broadcast calls this with a wider radius
     // (RELIST_NOTIFICATION_RADIUS_KM) to reach staff who weren't in range
     // the first time.
+    // Verified, available, not suspended staff of a role within radiusKm in a
+    // straight line (live position when the app is open, else home address),
+    // nearest first. No Maps calls: one per doctor made new-duty posts slow
+    // and costly.
     async getNearbyStaffByRole(hospitalCoords, requiredRole, limit = 100, radiusKm = 50) {
         const cacheKey = `nearby_staff:${requiredRole}:${radiusKm}:${Math.round(hospitalCoords.latitude*1000)}:${Math.round(hospitalCoords.longitude*1000)}`;
 
@@ -54,52 +50,11 @@ class LocationBasedStaffService {
                 return JSON.parse(cached);
             }
 
-            const box = this.getBoundingBox(hospitalCoords.latitude, hospitalCoords.longitude, radiusKm);
+            const staffWithinRadius = (await staffLocator.findInRadius(hospitalCoords, requiredRole, radiusKm)).slice(0, limit);
 
-            const nearbyStaff = await MedicalStaff.find({
-                isAvailable: true,
-                jobRole: requiredRole,
-                'coordinates.coordinates.latitude': { $gte: box.minLat, $lte: box.maxLat },
-                'coordinates.coordinates.longitude': { $gte: box.minLng, $lte: box.maxLng }
-            })
-            .select('user fullName jobRole coordinates isAvailable')
-            .populate('user', '_id')
-            .limit(limit)
-            .lean();
+            // Short cache: live positions move
+            await redis.setex(cacheKey, 60, JSON.stringify(staffWithinRadius));
 
-            // Filter by actual distance using Google Maps API (bounding box is approximate)
-            const staffWithinRadius = [];
-            for (const staff of nearbyStaff) {
-                try {
-                    const distanceResult = await geocodingService.calculateDistanceAndETA(
-                        hospitalCoords.latitude,
-                        hospitalCoords.longitude,
-                        staff.coordinates.coordinates.latitude,
-                        staff.coordinates.coordinates.longitude
-                    );
-
-                    if (distanceResult.distance <= radiusKm) {
-                        staffWithinRadius.push({
-                            ...staff,
-                            distance: distanceResult.distance,
-                            duration: distanceResult.duration,
-                            distanceText: distanceResult.distanceText,
-                            durationText: distanceResult.durationText
-                        });
-                    }
-                } catch (error) {
-                    console.error('Error calculating distance for staff:', error);
-                    // Skip this staff if distance calculation fails
-                    continue;
-                }
-            }
-
-            // Sort by distance
-            staffWithinRadius.sort((a, b) => a.distance - b.distance);
-
-            // Cache for 5 minutes
-            await redis.setex(cacheKey, 300, JSON.stringify(staffWithinRadius));
-            
             return staffWithinRadius;
         } catch (error) {
             console.error('Error getting nearby staff:', error);
