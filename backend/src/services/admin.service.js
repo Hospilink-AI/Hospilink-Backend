@@ -2741,6 +2741,9 @@ class AdminService {
             manualOverride: true,
             overriddenFromStatus: previousStatus
         });
+        if (newStatus === 'completed' && !duty.completedAt) {
+            duty.completedAt = getCurrentIST();
+        }
 
         await duty.save();
 
