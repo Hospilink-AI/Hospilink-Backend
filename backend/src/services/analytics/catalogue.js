@@ -10,10 +10,10 @@ const SECTIONS = [
     { key: 'supply', label: 'Staff (supply)', availability: 'available' },
     { key: 'demand', label: 'Hospitals (demand)', availability: 'available' },
     { key: 'quality', label: 'Quality and trust', availability: 'available' },
-    { key: 'support', label: 'Support and disputes', availability: 'coming_soon' },
-    { key: 'recruitment', label: 'Recruitment', availability: 'coming_soon' },
-    { key: 'engagement', label: 'Engagement', availability: 'coming_soon' },
-    { key: 'geography', label: 'Geography', availability: 'coming_soon' }
+    { key: 'support', label: 'Support and disputes', availability: 'available' },
+    { key: 'recruitment', label: 'Recruitment', availability: 'available' },
+    { key: 'engagement', label: 'Engagement', availability: 'available' },
+    { key: 'geography', label: 'Geography', availability: 'available' }
 ];
 
 const k = (section, key, label, definition, unit, availability = 'available') => ({ section, key, label, definition, unit, availability });
@@ -121,31 +121,54 @@ const KPIS = [
     k('quality', 'suspensions', 'Suspensions', 'Accounts suspended in the period.', 'count'),
 
     // Support
-    k('support', 'ticketVolume', 'Ticket volume', 'By domain, category, source, language and priority.', 'count', 'coming_soon'),
-    k('support', 'chatbotDeflection', 'Chatbot deflection', 'Chatbot conversations that ended without a ticket.', 'ratio', 'coming_soon'),
-    k('support', 'botAccuracy', 'Bot accuracy', 'Bot category matching the final category.', 'ratio', 'coming_soon'),
-    k('support', 'slaAttainment', 'SLA attainment', 'Tickets acknowledged, replied to and decided within SLA.', 'ratio', 'coming_soon'),
-    k('support', 'resolutionTime', 'Resolution time', 'Ticket creation to resolution, median.', 'hours', 'coming_soon'),
-    k('support', 'appealOverturn', 'Appeals and overturns', 'Decisions appealed, and appeals that overturned the decision.', 'ratio', 'coming_soon'),
-    k('support', 'feedbackSentiment', 'Feedback sentiment', 'Platform feedback by sentiment and area.', 'count', 'coming_soon'),
+    k('support', 'tickets', 'Tickets raised', 'Support tickets raised in the period, by area, category, source, language and priority.', 'count'),
+    k('support', 'openBacklog', 'Open tickets', 'Tickets in any active status right now, with their age and queue.', 'count'),
+    k('support', 'chatbotDeflection', 'Chatbot deflection', 'Finished chatbot conversations that did not need a ticket.', 'ratio'),
+    k('support', 'botAccuracy', 'Bot accuracy', 'Tickets where the agent kept the category the bot suggested.', 'ratio'),
+    k('support', 'acknowledgeSla', 'Acknowledged within SLA', 'Tickets claimed or moved out of New/Triage before the acknowledge deadline.', 'ratio'),
+    k('support', 'firstReplySla', 'First reply within SLA', 'Tickets with a first reply before the first-reply deadline.', 'ratio'),
+    k('support', 'decideSla', 'Decided within SLA', 'Closed tickets closed before the decision deadline.', 'ratio'),
+    k('support', 'resolutionTime', 'Time to close', 'Hours from a ticket being raised to it closing, median.', 'hours'),
+    k('support', 'appealRate', 'Appeal rate', 'Appeals raised against decided tickets.', 'ratio'),
+    k('support', 'overturnRate', 'Overturn rate', 'Decided appeals that overturned or varied the outcome.', 'ratio'),
+    k('support', 'workload', 'Workload', 'Tickets closed per admin.', 'count'),
+    k('support', 'feedbackSentiment', 'Feedback sentiment', 'Platform feedback by sentiment and area, and how much became a ticket.', 'count'),
 
     // Recruitment
-    k('recruitment', 'applicationsPerVacancy', 'Applications per vacancy', 'Applications received per live vacancy.', 'ratio', 'coming_soon'),
-    k('recruitment', 'hiringFunnel', 'Hiring funnel', 'Applied → shortlisted → interview confirmed → offered → hired.', 'count', 'coming_soon'),
-    k('recruitment', 'timeToHire', 'Time to hire', 'Application to hire, median.', 'days', 'coming_soon'),
-    k('recruitment', 'interviewNoShows', 'Interview no-shows', 'Candidate and hospital no-shows.', 'ratio', 'coming_soon'),
-    k('recruitment', 'offerAcceptance', 'Offer acceptance', 'Offers that ended in a hire.', 'ratio', 'coming_soon'),
+    k('recruitment', 'vacanciesPosted', 'Vacancies posted', 'Permanent vacancies posted in the period, by specialty.', 'count'),
+    k('recruitment', 'liveVacancies', 'Live vacancies', 'Vacancies not deleted, right now.', 'count'),
+    k('recruitment', 'applications', 'Applications', 'Applications made in the period.', 'count'),
+    k('recruitment', 'applicationsPerVacancy', 'Applications per vacancy', 'Applications per vacancy that received any.', 'ratio'),
+    k('recruitment', 'shortlistRate', 'Shortlist rate', 'Applications that reached shortlisted or further.', 'ratio'),
+    k('recruitment', 'hiringFunnel', 'Hiring funnel', 'Applied → shortlisted → interview confirmed → interviewed → offered → hired.', 'count'),
+    k('recruitment', 'hires', 'Hires', 'Applications from the period that ended in a hire.', 'count'),
+    k('recruitment', 'timeToHire', 'Time to hire', 'Days from application to hire, median.', 'days'),
+    k('recruitment', 'offerAcceptance', 'Offer acceptance', 'Offers that ended in a hire, out of offers that have ended.', 'ratio'),
+    k('recruitment', 'candidateNoShowRate', 'Candidate no-shows', 'Recorded interviews the candidate missed.', 'ratio'),
+    k('recruitment', 'hospitalNoShowRate', 'Hospital no-shows', 'Recorded interviews the hospital missed.', 'ratio'),
+    k('recruitment', 'rescheduleRate', 'Reschedules', 'Confirmed interviews that were rescheduled at least once.', 'ratio'),
+    k('recruitment', 'matchTierHires', 'Match tier outcomes', 'Shortlist and hire rate for exact, related and unscored matches.', 'ratio'),
 
     // Engagement
-    k('engagement', 'dau', 'Daily active users', 'Distinct users signing in per day (90 days live, longer from snapshots).', 'count', 'coming_soon'),
-    k('engagement', 'stickiness', 'Stickiness', 'DAU divided by MAU.', 'ratio', 'coming_soon'),
-    k('engagement', 'notificationReadRate', 'Notification read rate', 'Notifications opened, by type.', 'ratio', 'coming_soon'),
-    k('engagement', 'documentThroughput', 'Document verification', 'Documents verified, backlog, and auto-verify rate.', 'count', 'coming_soon'),
-    k('engagement', 'securityEvents', 'Security events', 'Failed sign-ins and other security events.', 'count', 'coming_soon'),
+    k('engagement', 'dau', 'Daily active users', 'Distinct users signing in per day, averaged over the period. Logs keep 90 days; older days come from the daily snapshot.', 'count'),
+    k('engagement', 'wau', 'Weekly active users', 'Distinct users signing in during the last 7 days of the period.', 'count'),
+    k('engagement', 'mau', 'Monthly active users', 'Distinct users signing in during the last 30 days of the period.', 'count'),
+    k('engagement', 'stickiness', 'Stickiness', 'Average daily active users divided by monthly active users.', 'ratio'),
+    k('engagement', 'seenLast30Days', 'Seen in 30 days', 'Users whose last sign-in was in the last 30 days.', 'count'),
+    k('engagement', 'notificationReadRate', 'Notification read rate', 'Notifications opened, overall and by type.', 'ratio'),
+    k('engagement', 'pushPlatforms', 'Push platforms', 'Users with push notifications, by Android, iOS and web.', 'count'),
+    k('engagement', 'failedLogins', 'Failed sign-ins', 'Failed sign-in attempts.', 'count'),
+    k('engagement', 'securityEvents', 'Security events', 'Suspicious sign-ins, lockouts and other security events.', 'count'),
+    k('engagement', 'documentsVerified', 'Documents verified', 'Documents verified in the period.', 'count'),
+    k('engagement', 'documentAutoVerifyRate', 'Automatic verification', 'Documents verified automatically rather than by an admin.', 'ratio'),
+    k('engagement', 'documentVerifyTime', 'Document verification time', 'Hours from upload to verification, median.', 'hours'),
+    k('engagement', 'documentBacklog', 'Document backlog', 'Documents waiting for review right now.', 'count'),
 
     // Geography
-    k('geography', 'cityTable', 'City view', 'Supply, demand, fill rate, GMV and average rate per city.', 'mixed', 'coming_soon'),
-    k('geography', 'shortageCities', 'Shortage cities', 'Cities with high demand and low fill rate.', 'mixed', 'coming_soon')
+    k('geography', 'cityTable', 'City view', 'Per city: verified hospitals and staff, available staff, duties posted, fill rate, completed GMV and average rate.', 'mixed'),
+    k('geography', 'shortageCities', 'Shortage cities', 'Cities with at least 5 posts in the period and a fill rate under 60%.', 'count'),
+    k('geography', 'demandWithoutSupply', 'Demand without supply', 'Cities with duties posted but no available staff.', 'count'),
+    k('geography', 'stateTable', 'State view', 'The city figures rolled up by state.', 'mixed')
 ];
 
 module.exports = { SECTIONS, KPIS };
