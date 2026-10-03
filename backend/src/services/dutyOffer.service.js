@@ -6,7 +6,13 @@ const notificationEmitter = require('./notificationEmitter');
 const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
 
-const OFFER_KEYS = ['offer.featureEnabled', 'offer.startRadiusKm', 'offer.stepKm', 'offer.stepMinutes', 'offer.maxRadiusKm', 'offer.inviteWindowMinutes'];
+const staffAvailabilityService = require('./staffAvailability.service');
+const { istDateKey } = require('../utils/calendar.helper');
+
+const OFFER_KEYS = [
+    'offer.featureEnabled', 'offer.startRadiusKm', 'offer.stepKm', 'offer.stepMinutes', 'offer.maxRadiusKm',
+    'offer.inviteWindowMinutes', 'offer.availabilityHeadStartMinutes'
+];
 const MINUTE_MS = 60 * 1000;
 
 // Staged duty offers. A normal duty is offered to doctors within
@@ -22,7 +28,28 @@ class DutyOfferService {
             stepKm: cfg['offer.stepKm'],
             stepMinutes: cfg['offer.stepMinutes'],
             maxRadiusKm: cfg['offer.maxRadiusKm'],
-            inviteWindowMinutes: cfg['offer.inviteWindowMinutes']
+            inviteWindowMinutes: cfg['offer.inviteWindowMinutes'],
+            headStartMinutes: cfg['offer.availabilityHeadStartMinutes']
+        };
+    }
+
+    // Doctors in a ring who marked themselves free for this shift hear first;
+    // the rest headStartMinutes later. If nobody in the ring has marked
+    // themselves free, everyone hears at once.
+    async _prioritise(recipients, duty, settings, now) {
+        if (!recipients.length || !(settings.headStartMinutes > 0) || !duty.date) {
+            return { notifyNow: recipients, pending: [], releaseAt: null };
+        }
+        const free = await staffAvailabilityService.freeFor(
+            recipients.map(r => r._id), istDateKey(duty.date), duty.startTime, duty.endTime
+        );
+        if (!free.size || free.size === recipients.length) {
+            return { notifyNow: recipients, pending: [], releaseAt: null };
+        }
+        return {
+            notifyNow: recipients.filter(r => free.has(String(r._id))),
+            pending: recipients.filter(r => !free.has(String(r._id))).map(r => ({ staff: r._id, user: r.user._id })),
+            releaseAt: new Date(now.getTime() + settings.headStartMinutes * MINUTE_MS)
         };
     }
 
@@ -65,6 +92,16 @@ class DutyOfferService {
             ({ offer, recipients } = await this._openOffer(openTo, hospital, first.staffRole, settings, now));
             offer.history = [offer.historyEntry];
             delete offer.historyEntry;
+
+            // Emergencies go to everyone at once; rings give free doctors a head start
+            if (offer.mode === 'radius') {
+                const { notifyNow, pending, releaseAt } = await this._prioritise(recipients, first, settings, now);
+                recipients = notifyNow;
+                if (pending.length) {
+                    offer.pendingStaff = pending;
+                    offer.pendingReleaseAt = releaseAt;
+                }
+            }
         }
 
         await Duty.updateMany(
@@ -124,9 +161,20 @@ class DutyOfferService {
 
         const now = new Date();
         const already = (duty.offer.notifiedStaff || []).map(String);
-        const { offer, recipients } = await this._openOffer(duty.offer.openTo || 'radius', hospital, duty.staffRole, settings, now, already);
+        const opened = await this._openOffer(duty.offer.openTo || 'radius', hospital, duty.staffRole, settings, now, already);
+        const offer = opened.offer;
+        let recipients = opened.recipients;
         const historyEntry = { ...offer.historyEntry, event: offer.mode === 'city' ? 'opened_to_city' : 'opened_to_radius' };
         delete offer.historyEntry;
+
+        if (offer.mode === 'radius') {
+            const { notifyNow, pending, releaseAt } = await this._prioritise(recipients, duty, settings, now);
+            recipients = notifyNow;
+            if (pending.length) {
+                offer.pendingStaff = pending;
+                offer.pendingReleaseAt = releaseAt;
+            }
+        }
 
         const updated = await Duty.findOneAndUpdate(
             { _id: duty._id, status: 'available', 'offer.mode': 'invite' },
@@ -154,15 +202,24 @@ class DutyOfferService {
         if (!locked) return 0;
 
         try {
+            const now = new Date();
             const due = await Duty.find({
                 status: 'available',
                 'offer.mode': { $in: ['radius', 'invite'] },
-                'offer.nextActionAt': { $lte: new Date() }
-            }).select('+offer.notifiedStaff staffRole date startTime endTime urgency offeredRate hospital offer');
+                $or: [
+                    { 'offer.nextActionAt': { $lte: now } },
+                    { 'offer.pendingReleaseAt': { $lte: now } }
+                ]
+            }).select('+offer.notifiedStaff +offer.pendingStaff staffRole date startTime endTime urgency offeredRate hospital offer');
 
             let widened = 0;
             for (const duty of due) {
                 try {
+                    if (duty.offer.pendingReleaseAt && duty.offer.pendingReleaseAt <= now) {
+                        await this._releasePending(duty);
+                    }
+                    if (!duty.offer.nextActionAt || duty.offer.nextActionAt > now) continue;
+
                     const done = duty.offer.mode === 'invite'
                         ? await this._openAfterInvite(duty)
                         : await this._widen(duty);
@@ -189,6 +246,33 @@ class DutyOfferService {
 
 
 
+    // Head start over: tell the doctors in range who weren't marked free
+    async _releasePending(duty) {
+        const pending = duty.offer.pendingStaff || [];
+        const updated = await Duty.findOneAndUpdate(
+            { _id: duty._id, 'offer.pendingReleaseAt': duty.offer.pendingReleaseAt },
+            {
+                $set: { 'offer.pendingStaff': [], 'offer.pendingReleaseAt': null },
+                $addToSet: { 'offer.notifiedStaff': { $each: pending.map(p => p.staff) } }
+            },
+            { new: true }
+        );
+        if (!updated) return false;
+
+        // Keep the in-memory copy current so a widen in the same run skips them
+        duty.offer.notifiedStaff = [...(duty.offer.notifiedStaff || []), ...pending.map(p => p.staff)];
+        duty.offer.pendingStaff = [];
+        duty.offer.pendingReleaseAt = null;
+
+        if (pending.length && updated.status === 'available') {
+            const hospital = await Hospital.findById(duty.hospital).select('hospitalLegalName').lean();
+            await notificationEmitter.emitDutyOfferWidened(updated, pending.map(p => String(p.user)), updated.offer.radiusKm ?? null, hospital?.hospitalLegalName);
+        }
+        return true;
+    }
+
+
+
     async _widen(duty) {
         const offer = duty.offer;
         const radiusKm = Math.min(offer.radiusKm + offer.stepKm, offer.maxRadiusKm);
@@ -196,19 +280,28 @@ class DutyOfferService {
         const center = this._hospitalPoint(hospital);
         if (!center) return false;
 
-        const already = (offer.notifiedStaff || []).map(String);
-        const recipients = await staffLocator.findInRadius(center, duty.staffRole, radiusKm, { excludeStaffIds: already });
+        const already = [
+            ...(offer.notifiedStaff || []),
+            ...(offer.pendingStaff || []).map(p => p.staff)
+        ].map(String);
+        const found = await staffLocator.findInRadius(center, duty.staffRole, radiusKm, { excludeStaffIds: already });
         const now = new Date();
+        const settings = await this.getSettings();
+        const { notifyNow: recipients, pending, releaseAt } = await this._prioritise(found, duty, settings, now);
 
         const updated = await Duty.findOneAndUpdate(
             { _id: duty._id, status: 'available', 'offer.radiusKm': offer.radiusKm },
             {
                 $set: {
                     'offer.radiusKm': radiusKm,
-                    'offer.nextActionAt': radiusKm < offer.maxRadiusKm ? new Date(now.getTime() + offer.stepMinutes * MINUTE_MS) : null
+                    'offer.nextActionAt': radiusKm < offer.maxRadiusKm ? new Date(now.getTime() + offer.stepMinutes * MINUTE_MS) : null,
+                    ...(pending.length && { 'offer.pendingReleaseAt': releaseAt })
                 },
                 $addToSet: { 'offer.notifiedStaff': { $each: recipients.map(r => r._id) } },
-                $push: { 'offer.history': { at: now, event: 'expanded', radiusKm, notified: recipients.length } }
+                $push: {
+                    'offer.history': { at: now, event: 'expanded', radiusKm, notified: found.length },
+                    ...(pending.length && { 'offer.pendingStaff': { $each: pending } })
+                }
             },
             { new: true }
         );

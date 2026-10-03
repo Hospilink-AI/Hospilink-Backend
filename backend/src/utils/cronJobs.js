@@ -10,6 +10,8 @@ const TicketService = require('../services/ticket.service');
 const autoRelistAnalyticsService = require('../services/autoRelistAnalytics.service');
 const analyticsSnapshotService = require('../services/analytics/snapshot.service');
 const dutyOfferService = require('../services/dutyOffer.service');
+const staffAvailabilityService = require('../services/staffAvailability.service');
+const { istDateKey } = require('./calendar.helper');
 
 /**
  * Acquire a distributed Redis lock so only one ECS task runs a given cron job.
@@ -264,6 +266,23 @@ class CronJobs {
             },
             15,
             'Ticket SLA sweeps job'
+        );
+
+        // Doctor availability — remind once a day when a weekly pattern is about to lapse
+        this.scheduleJob(
+            async () => {
+                const dateKey = istDateKey(new Date());
+                const hasLock = await acquireCronLock(`availability-reminders:${dateKey}`, 23 * 60 * 60);
+                if (!hasLock) return;
+                try {
+                    const sent = await staffAvailabilityService.sendExpiryReminders();
+                    if (sent > 0) console.log(`Availability reminders sent: ${sent}`);
+                } catch (err) {
+                    console.error('Availability reminder job failed:', err);
+                }
+            },
+            60,
+            'Availability reminders'
         );
 
         // Staged duty offers — widen rings that are due (the service holds

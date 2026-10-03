@@ -5,8 +5,14 @@ const settings = {
     'offer.stepKm': 5,
     'offer.stepMinutes': 60,
     'offer.maxRadiusKm': 75,
-    'offer.inviteWindowMinutes': 30
+    'offer.inviteWindowMinutes': 30,
+    'offer.availabilityHeadStartMinutes': 10
 };
+// Doctors who marked themselves free for the shift (empty = nobody declared)
+let mockFreeStaff = new Set();
+jest.mock('../src/services/staffAvailability.service', () => ({
+    freeFor: async (ids) => new Set(ids.map(String).filter(id => mockFreeStaff.has(id)))
+}));
 jest.mock('../src/services/systemConfig.service', () => ({
     getManyEffective: async (keys) => Object.fromEntries(keys.map(k => [k, settings[k]]))
 }));
@@ -132,6 +138,49 @@ describe('relist', () => {
         Duty.updateOne = async (q, u) => updates.push(u);
         await dutyOffer.onRelist({ _id: 'd6' }, ['s60'], 75);
         expect(updates).toHaveLength(0);
+    });
+});
+
+describe('availability head start', () => {
+    beforeEach(() => { saved = {}; });
+    afterEach(() => { mockFreeStaff = new Set(); });
+
+    it('tells doctors free for the shift first and holds the rest for 10 minutes', async () => {
+        mockFreeStaff = new Set(['s28']);
+        const result = await dutyOffer.startOffer([{ _id: 'd11', urgency: 'medium', staffRole: 'rmo', date: new Date('2027-01-05T00:00:00Z'), startTime: '09:00', endTime: '17:00' }], HOSPITAL);
+        expect(result.userIds).toEqual(['u28']);
+        expect(saved.offer.notifiedStaff).toEqual(['s28']);
+        expect(saved.offer.pendingStaff).toEqual([{ staff: 's5', user: 'u5' }]);
+        const minutes = (saved.offer.pendingReleaseAt.getTime() - Date.now()) / 60000;
+        expect(minutes).toBeGreaterThan(9);
+        expect(minutes).toBeLessThanOrEqual(10);
+    });
+
+    it('tells everyone at once when nobody in the ring declared', async () => {
+        const result = await dutyOffer.startOffer([{ _id: 'd12', urgency: 'medium', staffRole: 'rmo', date: new Date('2027-01-05T00:00:00Z') }], HOSPITAL);
+        expect(result.userIds).toEqual(['u5', 'u28']);
+        expect(saved.offer.pendingStaff).toBeUndefined();
+    });
+
+    it('gives no head start on emergencies', async () => {
+        mockFreeStaff = new Set(['s28']);
+        const result = await dutyOffer.startOffer([{ _id: 'd13', urgency: 'emergency', staffRole: 'rmo', date: new Date('2027-01-05T00:00:00Z') }], HOSPITAL);
+        expect(result.userIds).toEqual(['u5', 'u28', 'u33']);
+    });
+
+    it('releases the held doctors when the head start ends', async () => {
+        let update;
+        Duty.findOneAndUpdate = async (q, u) => { update = u; return { _id: 'd14', status: 'available', offer: { radiusKm: 30 } }; };
+        widenedCalls.length = 0;
+        const duty = { _id: 'd14', hospital: 'h1', offer: { radiusKm: 30, notifiedStaff: ['s28'], pendingStaff: [{ staff: 's5', user: 'u5' }], pendingReleaseAt: new Date() } };
+        Hospital.findById = () => ({ select: () => ({ lean: async () => HOSPITAL }) });
+
+        expect(await dutyOffer._releasePending(duty)).toBe(true);
+        expect(update.$addToSet['offer.notifiedStaff'].$each).toEqual(['s5']);
+        expect(update.$set).toEqual({ 'offer.pendingStaff': [], 'offer.pendingReleaseAt': null });
+        expect(widenedCalls[0].userIds).toEqual(['u5']);
+        expect(duty.offer.notifiedStaff).toEqual(['s28', 's5']);
+        Hospital.findById = () => ({ select: async () => HOSPITAL });
     });
 });
 

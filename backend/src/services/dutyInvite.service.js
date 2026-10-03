@@ -7,7 +7,9 @@ const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const s3Service = require('./s3.service');
 const systemConfigService = require('./systemConfig.service');
 const logger = require('../utils/logger');
+const StaffAvailability = require('../models/StaffAvailability');
 const { normalizeRole, doDutiesOverlap } = require('../utils/helpers');
+const { resolveDay, isFreeFor } = require('../utils/availability.helper');
 const { NotFoundError, ValidationError } = require('../middleware/error.middleware');
 
 const MAX_FAVOURITES = 200;
@@ -107,13 +109,23 @@ class DutyInviteService {
         const allIds = [...new Set([...favouriteIds, ...workedIds, ...nearbyIds])];
 
         const cards = await this._loadCards(allIds, hospital._id, { role, nearby, workedRows });
-        const clashes = date && startTime && endTime
-            ? await this._clashes(allIds, { date: new Date(date), startTime, endTime })
-            : new Set();
+        const [clashes, availability] = await Promise.all([
+            date && startTime && endTime
+                ? this._clashes(allIds, { date: new Date(date), startTime, endTime })
+                : new Set(),
+            date ? this._availabilityOn(allIds, date, startTime, endTime) : new Map()
+        ]);
 
         const withClash = (id) => {
             const card = cards.get(id);
-            return card ? { ...card, hasClash: clashes.has(id) } : null;
+            if (!card) return null;
+            const day = availability.get(id);
+            return {
+                ...card,
+                hasClash: clashes.has(id),
+                availabilityOnDate: date ? (day?.status || 'unknown') : null,
+                freeForShift: date ? Boolean(day?.freeForShift) : null
+            };
         };
 
         return {
@@ -186,9 +198,22 @@ class DutyInviteService {
 
 
 
-    // isFavourite / workedWithYou / dutiesWithYou for staff lists such as the
-    // hospital and admin nearby-staff maps. Adds fields only.
-    async annotate(hospitalId, staffList) {
+    // What each doctor declared for a date: status free/busy/unknown, and
+    // whether the given shift fits inside their hours
+    async _availabilityOn(staffIds, date, startTime, endTime) {
+        const docs = await StaffAvailability.find({ staff: { $in: staffIds } }).lean();
+        return new Map(docs.map(d => [String(d.staff), {
+            status: resolveDay(d, date).status,
+            freeForShift: isFreeFor(d, date, startTime, endTime)
+        }]));
+    }
+
+
+
+    // isFavourite / workedWithYou / dutiesWithYou (and availabilityOnDate when
+    // a date is given) for staff lists such as the hospital and admin
+    // nearby-staff maps. Adds fields only.
+    async annotate(hospitalId, staffList, { date } = {}) {
         if (!hospitalId || !Array.isArray(staffList) || !staffList.length) return staffList;
         try {
             const ids = staffList.map(s => String(s.id)).filter(id => mongoose.Types.ObjectId.isValid(id));
@@ -203,11 +228,13 @@ class DutyInviteService {
             ]);
             const favourites = new Set((hospital?.favouriteStaff || []).map(String));
             const dutiesById = new Map(worked.map(r => [String(r._id), r.duties]));
+            const availability = date && ids.length ? await this._availabilityOn(ids, date) : null;
             for (const s of staffList) {
                 const id = String(s.id);
                 s.isFavourite = favourites.has(id);
                 s.dutiesWithYou = dutiesById.get(id) || 0;
                 s.workedWithYou = s.dutiesWithYou > 0;
+                if (availability) s.availabilityOnDate = availability.get(id)?.status || 'unknown';
             }
         } catch (error) {
             logger.error('Error annotating staff list:', error);
