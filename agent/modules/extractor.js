@@ -13,11 +13,15 @@ const { logger, costTracker } = require("../utils/logger");
 // Initialize Gemini client
 let genAI = null;
 
-// Available models for fallback
-const MODELS = [
-  "gemini-2.5-flash-lite", // Fast, cost-efficient, high free-tier quota
-  "gemini-2.5-flash",      // Fallback - balanced speed/quality
-];
+// Available models for fallback: GEMINI_MODEL and GEMINI_MODEL_FALLBACK first,
+// then current stable models (Google has limited the 2.5 models to projects
+// that already used them)
+const MODELS = [...new Set([
+  process.env.GEMINI_MODEL,
+  process.env.GEMINI_MODEL_FALLBACK,
+  "gemini-3.5-flash-lite", // Fast, cost-efficient
+  "gemini-3.5-flash",      // Fallback - balanced speed/quality
+].map(name => (name || "").trim()).filter(Boolean))];
 
 /**
  * Get Gemini model instance
