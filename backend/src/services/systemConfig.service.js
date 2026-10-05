@@ -144,7 +144,13 @@ const DEFAULTS = {
 
     // Web users get notifications inside the app (notification centre and
     // pop-ups). Browser push only when this is switched on.
-    'notifications.webPushEnabled': false
+    'notifications.webPushEnabled': false,
+
+    // What hospitals see about doctors on the staff map, before any duty is
+    // assigned. Contacts stay hidden unless switched on; positions are
+    // rounded to this many km (0 shows the exact point and street address).
+    'privacy.showContactOnMap': false,
+    'privacy.mapLocationPrecisionKm': 1
 };
 
 const CACHE_TTL_SECONDS = 300;

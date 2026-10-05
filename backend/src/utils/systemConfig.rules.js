@@ -52,6 +52,7 @@ const RULES = {
 
     // Admin analytics
     'analytics.liveCacheSeconds': integer(0, 3600),
+    'privacy.mapLocationPrecisionKm': number(0, 10),
     'analytics.projectedCommissionPercent': number(0, 50),
     'analytics.revenueSource': { kind: 'oneOf', values: ['projected', 'ledger'] },
 

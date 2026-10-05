@@ -41,7 +41,7 @@ const {
 const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Settings groups edited through /api/admin/settings
-const PLATFORM_SETTING_PREFIXES = ['offer.', 'analytics.', 'notifications.'];
+const PLATFORM_SETTING_PREFIXES = ['offer.', 'analytics.', 'notifications.', 'privacy.'];
 
 
 
