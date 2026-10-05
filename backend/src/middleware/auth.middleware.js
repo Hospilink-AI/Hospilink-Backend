@@ -60,6 +60,9 @@ exports.protect = asyncHandler(async (req, res, next) => {
         }
 
         // Requesting deletion clears the cached session, so this is reached
+        if (user.deletion?.completedAt) {
+            throw new UnauthorizedError('User not found');
+        }
         if (user.deletion?.requestedAt) {
             throw new ForbiddenError('This account is scheduled for deletion. Sign in again to keep it.');
         }

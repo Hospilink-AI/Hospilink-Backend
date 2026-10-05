@@ -4,6 +4,12 @@ const Hospital = require('../models/Hospital');
 const MedicalStaff = require('../models/MedicalStaff');
 const JobVacancy = require('../models/JobVacancy');
 const JobApplication = require('../models/JobApplication');
+const Document = require('../models/Document');
+const Notification = require('../models/Notification');
+const StaffAvailability = require('../models/StaffAvailability');
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const s3Service = require('./s3.service');
 const cancellationService = require('./cancellation.service');
 const jobVacancyService = require('./jobVacancy.service');
 const jobApplicationService = require('./jobApplication.service');
@@ -23,6 +29,16 @@ const REASON_TEXT = 'Account deleted';
 const HOSPITAL_CANCEL_CUTOFF_MINUTES = 30;
 // A duty already under way can't be cancelled out from under the other side
 const UNDER_WAY = ['enroute', 'in-progress', 'pending-confirmation'];
+const PURGE_BATCH = 50;
+
+// Personal fields removed from the profile. Ratings, role, city and state stay
+// for the other party's history and for analytics.
+const STAFF_PERSONAL = ['email', 'currentAddress', 'pincode', 'phoneNumber', 'normalizedPhone', 'profilePicture',
+    'profileSummary', 'education', 'skills', 'coordinates', 'experience', 'resumeAnalysis', 'locationConsent',
+    'correctionHistory', 'rejectionReason', 'suspensionReason'];
+const HOSPITAL_PERSONAL = ['email', 'currentAddress', 'pincode', 'phoneNumber', 'normalizedPhone', 'profilePicture',
+    'coordinates', 'description', 'servicesAvailable', 'favouriteStaff', 'correctionHistory', 'rejectionReason',
+    'suspensionReason'];
 
 class AccountDeletionService {
     async status(userId) {
@@ -116,6 +132,102 @@ class AccountDeletionService {
             { requestedAt: user.deletion.requestedAt }
         ).catch(() => {});
         return true;
+    }
+
+    // Hourly: removes personal data from accounts whose grace period is over.
+    // A failure leaves the account for the next run; every step is safe to repeat.
+    async runDue(now = new Date()) {
+        const due = await User.find({
+            'deletion.scheduledFor': { $lte: now },
+            'deletion.completedAt': { $exists: false }
+        }).select('_id role email deletion').limit(PURGE_BATCH);
+
+        let purged = 0;
+        for (const user of due) {
+            try {
+                await this.purge(user);
+                purged++;
+            } catch (error) {
+                logger.error(`Account deletion failed for ${user._id}: ${error.message}`);
+            }
+        }
+        return purged;
+    }
+
+    async purge(user) {
+        const isHospital = user.role === 'hospital';
+        const Profile = isHospital ? Hospital : MedicalStaff;
+        const profile = await Profile.findOne({ user: user._id }).select('_id profilePicture').lean();
+
+        // Files first, so a storage failure stops before anything is anonymised
+        await this._deleteFiles(user._id, profile);
+
+        if (profile) {
+            const personal = isHospital ? HOSPITAL_PERSONAL : STAFF_PERSONAL;
+            await Profile.updateOne({ _id: profile._id }, {
+                $set: isHospital
+                    ? { hospitalLegalName: 'Deleted hospital', isPhoneVerified: false }
+                    : { fullName: 'Deleted doctor', isPhoneVerified: false, isAvailable: false },
+                $unset: Object.fromEntries(personal.map(f => [f, 1]))
+            });
+            if (!isHospital) {
+                await Promise.all([
+                    StaffAvailability.deleteOne({ staff: profile._id }),
+                    Hospital.updateMany({ favouriteStaff: profile._id }, { $pull: { favouriteStaff: profile._id } })
+                ]);
+            }
+        }
+
+        await Notification.deleteMany({ recipient: user._id });
+
+        // The email is freed so the person can sign up again later
+        const scrambled = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
+        await User.updateOne({ _id: user._id }, {
+            $set: {
+                name: 'Deleted user',
+                email: `deleted-${user._id}@hospilink.invalid`,
+                password: scrambled,
+                isEmailVerified: false,
+                isActive: false,
+                fcmTokens: [],
+                loginDevices: [],
+                'deletion.completedAt': new Date()
+            },
+            $unset: { otp: 1, 'deletion.reason': 1, pendingRoleChange: 1 }
+        });
+
+        await Promise.all([
+            cacheService.del(`session:${user._id}`),
+            cacheService.del(`user:${user.email}`),
+            cacheService.invalidateUserProfiles(user._id),
+            cacheService.del(`staff_location:${user._id}`),
+            profile ? cacheService.del(`staff_location:${profile._id}`) : null
+        ]);
+
+        activityLogEmitter.emitSystemActivity(ACTIVITY_ACTIONS.ACCOUNT_DELETED, {
+            userId: String(user._id),
+            role: user.role,
+            requestedAt: user.deletion?.requestedAt
+        }).catch(() => {});
+    }
+
+    // ID documents, certificates, resumes and the profile photo
+    async _deleteFiles(userId, profile) {
+        const records = await Document.find({ userId }).select('documents.s3Key').lean();
+        const applications = await JobApplication.find({ user: userId, resumeS3Key: { $ne: 'deleted' } })
+            .select('resumeS3Key').lean();
+        const keys = new Set([
+            ...records.flatMap(r => (r.documents || []).map(d => d.s3Key)),
+            ...applications.map(a => a.resumeS3Key),
+            profile?.profilePicture?.s3Key
+        ].filter(Boolean));
+
+        for (const key of keys) await s3Service.deleteFromS3(key);
+
+        await Document.deleteMany({ userId });
+        if (applications.length) {
+            await JobApplication.updateMany({ user: userId }, { $set: { resumeS3Key: 'deleted' } });
+        }
     }
 
     async _assertNothingImminent(duties, isHospital) {
