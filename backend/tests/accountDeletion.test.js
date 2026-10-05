@@ -16,13 +16,14 @@ jest.mock('../src/services/jobApplication.service', () => ({
 jest.mock('../src/services/jobVacancy.service', () => ({
     _closeOpenApplications: async (vacancy) => { mockCalls.closeApps.push(vacancy._id); }
 }));
-jest.mock('../src/services/cache.service', () => ({ del: async (k) => { mockCalls.cache.push(k); return true; } }));
+jest.mock('../src/services/cache.service', () => ({ del: async (k) => { mockCalls.cache.push(k); return true; }, invalidateUserProfiles: async () => true }));
 jest.mock('../src/services/auth.service', () => ({ logout: async (token) => { mockCalls.logout.push(token); } }));
 jest.mock('../src/services/dashboard.service', () => ({ revokeDashboardLocationPermission: async (id) => { mockCalls.revoke.push(id); } }));
 jest.mock('../src/services/email.service', () => ({ sendAccountDeletionScheduledEmail: async (email) => { mockCalls.email.push(email); } }));
 jest.mock('../src/services/activityLogEmitter', () => ({
     emitUserActivity: async (action) => { mockCalls.logs.push(action); },
     emitDutyActivity: async (action) => { mockCalls.logs.push(action); },
+    emitSystemActivity: async (action) => { mockCalls.logs.push(action); },
     actorFrom: (u) => ({ userId: u._id, name: u.name, role: u.role })
 }));
 jest.mock('../src/services/systemConfig.service', () => ({ getEffective: async () => 30 }));
@@ -147,5 +148,72 @@ describe('signing in during the grace period', () => {
         const user = setup();
         expect(await accountDeletion.cancelOnSignin(user)).toBe(false);
         expect(userUpdates).toEqual([]);
+    });
+});
+
+describe('removing personal data after the grace period', () => {
+    const Document = require('../src/models/Document');
+    const Notification = require('../src/models/Notification');
+    const StaffAvailability = require('../src/models/StaffAvailability');
+    const s3 = require('../src/services/s3.service');
+
+    let ops;
+    function setupPurge({ role = 'staff', s3Fails = false } = {}) {
+        ops = { s3: [], profile: [], user: [], deleted: [], apps: [], favourites: [] };
+        mockCalls.logs.length = 0;
+        const due = [{ _id: 'u9', role, email: 'gone@x.com', deletion: { requestedAt: new Date('2026-10-01') } }];
+        User.find = () => ({ select: () => ({ limit: async () => due }) });
+        User.updateOne = async (q, u) => { ops.user.push(u); };
+        const profile = { _id: 'p9', profilePicture: { s3Key: 'photos/p9.jpg' } };
+        MedicalStaff.findOne = () => chain(profile);
+        Hospital.findOne = () => chain(profile);
+        MedicalStaff.updateOne = async (q, u) => { ops.profile.push(u); };
+        Hospital.updateOne = async (q, u) => { ops.profile.push(u); };
+        Hospital.updateMany = async (q, u) => { ops.favourites.push(u); };
+        Document.find = () => chain([{ documents: [{ s3Key: 'docs/aadhaar.pdf' }, { s3Key: 'docs/mci.pdf' }] }]);
+        Document.deleteMany = async () => { ops.deleted.push('documents'); };
+        JobApplication.find = () => chain([{ resumeS3Key: 'resumes/r1.pdf' }]);
+        JobApplication.updateMany = async (q, u) => { ops.apps.push(u); };
+        Notification.deleteMany = async () => { ops.deleted.push('notifications'); };
+        StaffAvailability.deleteOne = async () => { ops.deleted.push('availability'); };
+        s3.deleteFromS3 = async (key) => { if (s3Fails) throw new Error('Storage service error'); ops.s3.push(key); };
+    }
+
+    it('deletes files, anonymises the profile and frees the email', async () => {
+        setupPurge();
+        expect(await accountDeletion.runDue()).toBe(1);
+
+        expect(ops.s3.sort()).toEqual(['docs/aadhaar.pdf', 'docs/mci.pdf', 'photos/p9.jpg', 'resumes/r1.pdf']);
+        expect(ops.deleted).toEqual(expect.arrayContaining(['documents', 'notifications', 'availability']));
+        expect(ops.apps).toEqual([{ $set: { resumeS3Key: 'deleted' } }]);
+        expect(ops.favourites).toEqual([{ $pull: { favouriteStaff: 'p9' } }]);
+
+        const [profile] = ops.profile;
+        expect(profile.$set).toMatchObject({ fullName: 'Deleted doctor', isAvailable: false });
+        expect(Object.keys(profile.$unset)).toEqual(expect.arrayContaining(['phoneNumber', 'normalizedPhone', 'currentAddress', 'coordinates', 'resumeAnalysis', 'email']));
+        expect(profile.$unset.averageRating).toBeUndefined();
+
+        const [user] = ops.user;
+        expect(user.$set.email).toBe('deleted-u9@hospilink.invalid');
+        expect(user.$set.name).toBe('Deleted user');
+        expect(user.$set.password).not.toBe('');
+        expect(user.$set['deletion.completedAt']).toBeInstanceOf(Date);
+        expect(mockCalls.logs).toContain('ACCOUNT_DELETED');
+    });
+
+    it('anonymises a hospital the same way', async () => {
+        setupPurge({ role: 'hospital' });
+        await accountDeletion.runDue();
+        expect(ops.profile[0].$set.hospitalLegalName).toBe('Deleted hospital');
+        expect(ops.profile[0].$unset.favouriteStaff).toBe(1);
+        expect(ops.favourites).toEqual([]);
+    });
+
+    it('leaves the account untouched when a file cannot be deleted, so the next run retries', async () => {
+        setupPurge({ s3Fails: true });
+        expect(await accountDeletion.runDue()).toBe(0);
+        expect(ops.profile).toEqual([]);
+        expect(ops.user).toEqual([]);
+        expect(ops.deleted).toEqual([]);
     });
 });
