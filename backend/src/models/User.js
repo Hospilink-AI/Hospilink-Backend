@@ -77,6 +77,15 @@ const userSchema = new mongoose.Schema({
         type: Date
     },
 
+    // Set when a doctor or hospital asks to delete their account. Signing in
+    // before scheduledFor cancels it; after that the account is anonymised.
+    deletion: {
+        requestedAt: Date,
+        scheduledFor: Date,
+        reason: String,
+        completedAt: Date
+    },
+
     // Track admin login devices for security alerts
     loginDevices: [{
         deviceId: {
