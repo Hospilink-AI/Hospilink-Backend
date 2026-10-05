@@ -126,6 +126,10 @@ router.patch('/calendar/config', requireCapability('calendar.config.manage'), va
 router.get('/settings', requireCapability('settings.manage'), adminController.getPlatformSettings);
 router.patch('/settings', requireCapability('settings.manage'), validateAutoRelistConfigUpdate, adminController.updatePlatformSetting);
 
+// Store reviewer demo accounts — Super Admin only
+router.get('/demo-accounts', requireCapability('settings.manage'), adminController.listDemoAccounts);
+router.patch('/demo-accounts/:userId', requireCapability('settings.manage'), validateObjectId('userId'), adminController.setDemoAccount);
+
 router.get('/duty-route-map/:dutyId', requireCapability('duty.view'), validateDutyRouteMap, adminController.getDutyRouteMap);
 
 // Overnight duties and duty history

@@ -766,6 +766,25 @@ exports.updateAutoRelistConfig = asyncHandler(async (req, res) => {
 
 
 // GET /api/admin/settings — Super Admin only
+// GET /api/admin/demo-accounts — Super Admin only
+exports.listDemoAccounts = asyncHandler(async (req, res) => {
+    const accounts = await require('../services/demoAccount.service').list();
+    res.status(200).json({ success: true, accounts });
+});
+
+
+// PATCH /api/admin/demo-accounts/:userId { isDemo } — Super Admin only
+exports.setDemoAccount = asyncHandler(async (req, res) => {
+    const result = await require('../services/demoAccount.service').set(req.params.userId, req.body?.isDemo);
+    activityLogEmitter.logAction(ACTIVITY_ACTIONS.DEMO_ACCOUNT_CHANGED, req, { type: 'user', id: result.userId }, { role: result.role, isDemo: result.isDemo }).catch(() => {});
+    res.status(200).json({
+        success: true,
+        message: result.isDemo ? 'Marked as a store reviewer demo account' : 'No longer a demo account; verification is pending again',
+        ...result
+    });
+});
+
+
 exports.getPlatformSettings = asyncHandler(async (req, res) => {
     const config = await adminService.getPlatformSettings();
     res.status(200).json({ success: true, config });
