@@ -8,7 +8,7 @@ const FILLED_STATUSES = ['assigned', 'enroute', 'in-progress', 'pending-confirma
 
 // Base query for the role / urgency / city filters every section accepts
 async function dutyFilter(filters = {}) {
-    const query = {};
+    const query = { isDemo: { $ne: true } };
     if (filters.staffRole) query.staffRole = filters.staffRole;
     if (filters.urgency) query.urgency = filters.urgency;
     if (filters.city) {
