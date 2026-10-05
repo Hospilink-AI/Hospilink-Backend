@@ -114,6 +114,7 @@ app.use("/api/tickets", ticketRoutes);
 app.use("/api/admin/tickets", require("./routes/adminTicket.routes"));
 app.use("/api/chatbot", require("./routes/chatbot.routes"));
 app.use("/api/admin/knowledge-base", require("./routes/adminKnowledgeBase.routes"));
+app.use("/api/account/deletion", require("./routes/accountDeletion.routes"));
 app.use("/api/account", require("./routes/accountStanding.routes"));
 app.use("/api/support/feedback", require("./routes/feedback.routes"));
 app.use("/api/admin/feedback", require("./routes/adminFeedback.routes"));
