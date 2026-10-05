@@ -3,6 +3,7 @@ const Hospital = require('../models/Hospital');
 const User = require('../models/User');
 const Duty = require('../models/Duty');
 const Document = require('../models/Document');
+const { approximatePoint } = require('../utils/privacy.helper');
 const geocodingService = require('../services/geocoding.service');
 const cacheService = require('./cache.service');
 const documentService = require('./document.service');
@@ -1404,17 +1405,27 @@ class ProfileService {
             // ratingAlgorithm.service.js#getEffectiveRatingsForMany.
             const effectiveRatings = await ratingAlgorithmService.getEffectiveRatingsForMany(validStaff, 'hospital_to_staff');
 
+            // Before any duty is assigned, contacts and exact positions stay
+            // private unless the platform settings say otherwise
+            const privacy = await require('./systemConfig.service').getManyEffective([
+                'privacy.showContactOnMap', 'privacy.mapLocationPrecisionKm'
+            ]);
+            const showContact = privacy['privacy.showContactOnMap'] === true;
+            const precisionKm = Number(privacy['privacy.mapLocationPrecisionKm']) || 0;
+
             // Format response with duty status
             const staffWithDutyStatus = validStaff.map((staff, index) => {
                 const dutyStatus = dutyStatusMap.get(staff._id.toString());
+                const point = approximatePoint(staff.realTimeLocation.latitude, staff.realTimeLocation.longitude, precisionKm);
 
                 return {
                     id: staff._id,
                     name: staff.fullName,
-                    email: staff.user?.email || staff.email,
+                    email: showContact ? (staff.user?.email || staff.email) : null,
                     role: staff.jobRole,
                     formattedRole: formatRoleForDisplay(staff.jobRole),
-                    phone: staff.phoneNumber,
+                    phone: showContact ? staff.phoneNumber : null,
+                    contactHidden: !showContact,
                     rating: staff.totalRatings ? staff.averageRating : null,
                     effectiveRating: effectiveRatings[index].ratingShown,
                     isAvailable: staff.isAvailable,
@@ -1431,15 +1442,17 @@ class ProfileService {
                     activeDutyCount: dutyStatus.activeDutyCount,
                     upcomingDutyCount: dutyStatus.upcomingDutyCount,
                     address: {
-                        currentAddress: staff.currentAddress,
+                        currentAddress: precisionKm > 0 ? null : staff.currentAddress,
                         city: staff.city,
                         state: staff.state,
                         pincode: staff.pincode
                     },
                     location: {
-                        latitude: staff.realTimeLocation.latitude,
-                        longitude: staff.realTimeLocation.longitude,
-                        source: staff.realTimeLocation.source // 'browser', 'profile', or 'profile_fallback'
+                        latitude: point.latitude,
+                        longitude: point.longitude,
+                        source: staff.realTimeLocation.source, // 'browser', 'profile', or 'profile_fallback'
+                        approximate: precisionKm > 0,
+                        precisionKm
                     }
                 };
             });
