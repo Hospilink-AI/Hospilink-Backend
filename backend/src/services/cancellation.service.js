@@ -12,6 +12,7 @@ const autoRelistService = require('./autoRelist.service');
 const locationBasedStaffService = require('./locationBasedStaff.service');
 const notificationEmitter = require('./notificationEmitter');
 const dutyOfferService = require('./dutyOffer.service');
+const blockService = require('./block.service');
 const activityLogEmitter = require('./activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const systemConfigService = require('./systemConfig.service');
@@ -424,9 +425,10 @@ class CancellationService {
             return;
         }
 
-        const excludedIds = new Set(
-            (duty.autoRelist.excludedStaff || []).map(id => id.toString())
-        );
+        const excludedIds = new Set([
+            ...(duty.autoRelist.excludedStaff || []).map(id => id.toString()),
+            ...(await blockService.staffHiddenFrom(hospital._id))
+        ]);
 
         const notificationRadiusKm = await systemConfigService.getEffective('autoRelist.notificationRadiusKm');
         const matchingStaff = await locationBasedStaffService.getNearbyStaffByRole(

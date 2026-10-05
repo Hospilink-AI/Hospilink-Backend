@@ -5,6 +5,7 @@ const cacheService = require('./cache.service');
 const systemConfigService = require('./systemConfig.service');
 const locationBasedStaffService = require('./locationBasedStaff.service');
 const dutyOfferService = require('./dutyOffer.service');
+const blockService = require('./block.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const s3Service = require('./s3.service');
 const logger = require('../utils/logger');
@@ -191,7 +192,8 @@ class DutyCalendarService {
                 status: 'available',
                 staffRole: medicalStaff.jobRole,
                 date: { $gte: range.$gte > today ? range.$gte : today, $lt: range.$lt },
-                'autoRelist.excludedStaff': { $ne: medicalStaff._id }
+                'autoRelist.excludedStaff': { $ne: medicalStaff._id },
+                hospital: { $nin: await blockService.hospitalsHiddenFrom(medicalStaff._id) }
             })
                 .select('date startTime hospital offer.mode offer.radiusKm offer.city')
                 .populate('hospital', 'coordinates city')

@@ -2289,7 +2289,7 @@ class AdminService {
         } = dutyPayload;
 
         // Doctors invited by name are checked before anything is created
-        const invitees = await require('./dutyInvite.service').resolveInvitees(invite_staff_ids, staff_role);
+        const invitees = await require('./dutyInvite.service').resolveInvitees(invite_staff_ids, staff_role, { hospitalId });
 
         // Fetch and validate hospital
         const hospital = await Hospital.findById(hospitalId)

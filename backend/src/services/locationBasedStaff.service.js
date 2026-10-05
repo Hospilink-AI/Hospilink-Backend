@@ -8,6 +8,7 @@ const { URGENCY_LEVELS } = require('../utils/dutyCancellation.constants');
 const { hasDutyStarted, istDayRange } = require('../utils/calendar.helper');
 const staffLocator = require('./staffLocator.service');
 const dutyOfferService = require('./dutyOffer.service');
+const blockService = require('./block.service');
 
 class LocationBasedStaffService {
     // Calculate bounding box for 50km radius (in degrees: ~111 km per degree)
@@ -93,7 +94,9 @@ class LocationBasedStaffService {
             date: { $gte: today },
             // A staff member who cancelled this specific duty can never see
             // or re-accept it again — see autoRelist.service.js guardrail #1.
-            'autoRelist.excludedStaff': { $ne: medicalStaff._id }
+            'autoRelist.excludedStaff': { $ne: medicalStaff._id },
+            // Hospitals blocked by or blocking this doctor
+            hospital: { $nin: await blockService.hospitalsHiddenFrom(medicalStaff._id) }
         };
 
         // Calendar day or window (IST dates), never earlier than today

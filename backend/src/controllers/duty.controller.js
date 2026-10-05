@@ -20,6 +20,7 @@ const geocodingService = require('../services/geocoding.service');
 const CancellationService = require('../services/cancellation.service');
 const dutyCalendarService = require('../services/dutyCalendar.service');
 const dutyOfferService = require('../services/dutyOffer.service');
+const blockService = require('../services/block.service');
 const dutyInviteService = require('../services/dutyInvite.service');
 const systemConfigService = require('../services/systemConfig.service');                    
 
@@ -52,7 +53,7 @@ exports.createDuty = asyncHandler(async (req, res) => {
     } = req.body;
 
     // Doctors invited by name are checked before anything is created
-    const invitees = await dutyInviteService.resolveInvitees(invite_staff_ids, staff_role);
+    const invitees = await dutyInviteService.resolveInvitees(invite_staff_ids, staff_role, { hospitalUserId: req.user.id });
 
 
     // Use hospital user ID from the authenticated user (JWT)
@@ -119,9 +120,10 @@ exports.createDuty = asyncHandler(async (req, res) => {
                 staff_role
             );
 
-            // Convert to user IDs for notification
+            // Convert to user IDs for notification, skipping blocked doctors
+            const hidden = new Set(await blockService.staffHiddenFrom(hospital._id));
             staffUserIds = matchingStaff
-                .filter(staff => staff.user && staff.user._id)
+                .filter(staff => staff.user && staff.user._id && !hidden.has(String(staff._id)))
                 .map(staff => staff.user._id.toString());
         }
 

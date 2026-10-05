@@ -1266,6 +1266,7 @@ class ProfileService {
             const query = {
                 isAvailable: true,
                 verificationStatus: 'verified',
+                _id: { $nin: await require('./block.service').staffHiddenFrom(hospital._id) },
                 'coordinates.coordinates.latitude': {
                     $gte: hospitalLat - latDelta,
                     $lte: hospitalLat + latDelta
