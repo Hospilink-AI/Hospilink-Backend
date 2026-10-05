@@ -11,6 +11,7 @@ const autoRelistAnalyticsService = require('../services/autoRelistAnalytics.serv
 const analyticsSnapshotService = require('../services/analytics/snapshot.service');
 const dutyOfferService = require('../services/dutyOffer.service');
 const staffAvailabilityService = require('../services/staffAvailability.service');
+const accountDeletionService = require('../services/accountDeletion.service');
 const { istDateKey } = require('./calendar.helper');
 
 /**
@@ -266,6 +267,22 @@ class CronJobs {
             },
             15,
             'Ticket SLA sweeps job'
+        );
+
+        // Account deletion — remove personal data once the 7 days are up
+        this.scheduleJob(
+            async () => {
+                const hasLock = await acquireCronLock('account-deletion', 55 * 60);
+                if (!hasLock) return;
+                try {
+                    const purged = await accountDeletionService.runDue();
+                    if (purged > 0) console.log(`Accounts deleted: ${purged}`);
+                } catch (err) {
+                    console.error('Account deletion job failed:', err);
+                }
+            },
+            60,
+            'Account deletion'
         );
 
         // Doctor availability — remind once a day when a weekly pattern is about to lapse
