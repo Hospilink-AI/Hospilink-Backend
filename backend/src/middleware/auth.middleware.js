@@ -59,6 +59,11 @@ exports.protect = asyncHandler(async (req, res, next) => {
             throw new ForbiddenError('This admin account has been deactivated. Please contact your super admin.');
         }
 
+        // Requesting deletion clears the cached session, so this is reached
+        if (user.deletion?.requestedAt) {
+            throw new ForbiddenError('This account is scheduled for deletion. Sign in again to keep it.');
+        }
+
         // Cache session for future requests
         await cacheService.set(sessionKey, {
             _id: user._id,
