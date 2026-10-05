@@ -257,6 +257,12 @@ const dutySchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+
+    // Posted by a store reviewer demo hospital: offered only to demo doctors
+    isDemo: {
+        type: Boolean,
+        default: undefined
+    },
     escalatedToCriticalAt: {
         type: Date
     },

@@ -212,6 +212,11 @@ const medicalStaffSchema = new mongoose.Schema({
         type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Hospital' }],
         default: undefined
     },
+    // Store reviewer demo account: only ever sees and reaches other demo accounts
+    isDemo: {
+        type: Boolean,
+        default: undefined
+    },
     isSuspended: {
         type: Boolean,
         default: false,
