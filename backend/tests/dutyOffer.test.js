@@ -10,6 +10,8 @@ const settings = {
 };
 // Doctors who marked themselves free for the shift (empty = nobody declared)
 let mockFreeStaff = new Set();
+// Nobody is blocked in these tests (tests/block.test.js covers blocking)
+jest.mock('../src/services/block.service', () => ({ staffHiddenFrom: async () => [], isBlocked: async () => false }));
 jest.mock('../src/services/staffAvailability.service', () => ({
     freeFor: async (ids) => new Set(ids.map(String).filter(id => mockFreeStaff.has(id)))
 }));
