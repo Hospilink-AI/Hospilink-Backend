@@ -435,7 +435,8 @@ class CancellationService {
             { latitude: hospitalCoords.latitude, longitude: hospitalCoords.longitude },
             duty.staffRole,
             100,
-            notificationRadiusKm
+            notificationRadiusKm,
+            { demo: !!duty.isDemo }
         );
 
         const relistStaff = matchingStaff

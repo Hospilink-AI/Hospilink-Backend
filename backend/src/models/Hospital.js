@@ -196,6 +196,11 @@ const hospitalSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },    
+    // Store reviewer demo account: only ever sees and reaches other demo accounts
+    isDemo: {
+        type: Boolean,
+        default: undefined
+    },
     isSuspended: {
         type: Boolean,
         default: false,

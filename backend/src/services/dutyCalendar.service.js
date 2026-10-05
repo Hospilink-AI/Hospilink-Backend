@@ -157,7 +157,7 @@ class DutyCalendarService {
 
 
     async _staffCounts(staffUserId, lo, hi) {
-        const medicalStaff = await MedicalStaff.findOne({ user: staffUserId }).select('_id jobRole city').lean();
+        const medicalStaff = await MedicalStaff.findOne({ user: staffUserId }).select('_id jobRole city isDemo').lean();
         if (!medicalStaff) {
             throw new NotFoundError('Medical staff profile not found');
         }
@@ -193,6 +193,7 @@ class DutyCalendarService {
                 staffRole: medicalStaff.jobRole,
                 date: { $gte: range.$gte > today ? range.$gte : today, $lt: range.$lt },
                 'autoRelist.excludedStaff': { $ne: medicalStaff._id },
+                isDemo: medicalStaff.isDemo ? true : { $ne: true },
                 hospital: { $nin: await blockService.hospitalsHiddenFrom(medicalStaff._id) }
             })
                 .select('date startTime hospital offer.mode offer.radiusKm offer.city')

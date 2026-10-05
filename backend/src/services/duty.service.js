@@ -134,6 +134,7 @@ class DutyService {
         const duty = await Duty.create({
             ...dutyData,
             hospital: hospital._id,
+            ...(hospital.isDemo && { isDemo: true }),
             autoRelist: { enabled: autoRelistEnabled },
             statusHistory: [{
                 status: 'available',
@@ -2254,7 +2255,8 @@ class DutyService {
                     { latitude: hospitalCoords.latitude, longitude: hospitalCoords.longitude },
                     duty.staffRole,
                     100,
-                    notificationRadiusKm
+                    notificationRadiusKm,
+                    { demo: !!duty.isDemo }
                 );
                 const pushStaff = matchingStaff
                     .filter(s => s.user && s.user._id && !excludedIds.has(s._id.toString()));

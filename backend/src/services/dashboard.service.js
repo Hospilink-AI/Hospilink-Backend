@@ -5,6 +5,7 @@ const redisClient = require('../config/redis');
 const geocodingService = require('./geocoding.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const staffLocator = require('./staffLocator.service');
+const cacheService = require('./cache.service');
 const activityLogEmitter = require('./activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const {
@@ -304,11 +305,24 @@ class DashboardService {
             source: 'websocket'
         };
 
+        // Store reviewers test from abroad: demo doctors keep their profile address
+        if (await this._isDemoStaff(userId)) return locationData;
+
         // 2-minute TTL: auto-expires if staff goes offline and stops sending updates
         await client.setex(this._locationDataKey(userId), 120, JSON.stringify(locationData));
         // Lets duty offers find staff who are near a hospital right now
         await staffLocator.addLivePosition(userId, latitude, longitude);
         return locationData;
+    }
+
+    // Cached for 10 minutes; this runs on every location update
+    async _isDemoStaff(userId) {
+        const key = `demo:staff:${userId}`;
+        const cached = await cacheService.get(key);
+        if (cached !== null && cached !== undefined) return cached === true;
+        const isDemo = Boolean(await MedicalStaff.exists({ user: userId, isDemo: true }));
+        await cacheService.set(key, isDemo, 600);
+        return isDemo;
     }
 
     // Get the live location (null if staff offline or TTL expired)

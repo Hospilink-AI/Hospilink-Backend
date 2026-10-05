@@ -145,7 +145,7 @@ class NotificationEmitter {
                     
                     // Broadcast to role room for real-time notification (online staff)
                     // Staged offers reach only the doctors they are offered to
-                    if (!duty.offer?.mode) websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
+                    if (!duty.offer?.mode && !duty.isDemo) websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
 
                     // Phase 3: Smart delivery - WebSocket (online) + FCM (offline)
                     await notificationDelivery.deliverToUsers(matchingStaffUserIds, notificationType, staffPayload);
@@ -781,7 +781,7 @@ class NotificationEmitter {
                     };
 
                     await notificationService.createBulkNotifications(matchingStaffUserIds, 'DUTY_RELISTED', staffPayload);
-                    if (!duty.offer?.mode) websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
+                    if (!duty.offer?.mode && !duty.isDemo) websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
                     await notificationDelivery.deliverToUsers(matchingStaffUserIds, 'DUTY_RELISTED', staffPayload);
 
                     const onlineStaffIds = matchingStaffUserIds.filter(staffUserId =>
@@ -883,7 +883,7 @@ class NotificationEmitter {
             };
 
             await notificationService.createBulkNotifications(staffUserIds, 'DUTY_RELISTED', payload);
-            if (!duty.offer?.mode) websocketManager.emitToStaffRole(duty.staffRole, 'notification', payload);
+            if (!duty.offer?.mode && !duty.isDemo) websocketManager.emitToStaffRole(duty.staffRole, 'notification', payload);
             await notificationDelivery.deliverToUsers(staffUserIds, 'DUTY_RELISTED', payload);
 
             console.log(`Duty relist repeat push #${pushNumber} sent to ${staffUserIds.length} staff for duty ${duty._id}`);
