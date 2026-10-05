@@ -35,19 +35,23 @@ class DutyInviteService {
     // --- Favourites ---
 
     async listFavourites(hospitalUserId) {
-        const hospital = await this._hospitalFor(hospitalUserId);
+        const hospital = await this._hospitalFor(hospitalUserId, '_id favouriteStaff isDemo');
         const ids = hospital.favouriteStaff || [];
         if (!ids.length) return [];
-        const staff = await this._loadCards(ids, hospital._id);
+        const staff = await this._loadCards(ids, hospital._id, { demo: !!hospital.isDemo });
         return ids.map(id => staff.get(String(id))).filter(Boolean);
     }
 
     async addFavourite(hospitalUserId, staffId) {
-        const hospital = await this._hospitalFor(hospitalUserId);
+        const hospital = await this._hospitalFor(hospitalUserId, '_id favouriteStaff isDemo');
         if ((hospital.favouriteStaff || []).length >= MAX_FAVOURITES) {
             throw new ValidationError(`You can keep up to ${MAX_FAVOURITES} favourite doctors`);
         }
-        const staff = await MedicalStaff.findOne({ _id: staffId, verificationStatus: 'verified' }).select('_id').lean();
+        const staff = await MedicalStaff.findOne({
+            _id: staffId,
+            verificationStatus: 'verified',
+            isDemo: hospital.isDemo ? true : { $ne: true }
+        }).select('_id').lean();
         if (!staff) throw new NotFoundError('Verified doctor not found');
 
         await Hospital.updateOne({ _id: hospital._id }, { $addToSet: { favouriteStaff: staff._id } });
@@ -72,7 +76,10 @@ class DutyInviteService {
             throw new ValidationError(`You can invite up to ${MAX_INVITEES} doctors to a duty`);
         }
 
-        const hospitalId = hospital.hospitalId || (hospital.hospitalUserId && (await this._hospitalFor(hospital.hospitalUserId, '_id'))._id);
+        const hospitalDoc = hospital.hospitalId
+            ? await Hospital.findById(hospital.hospitalId).select('_id isDemo').lean()
+            : hospital.hospitalUserId ? await this._hospitalFor(hospital.hospitalUserId, '_id isDemo') : null;
+        const hospitalId = hospitalDoc?._id;
         if (hospitalId) {
             const hidden = new Set(await blockService.staffHiddenFrom(hospitalId));
             if (unique.some(id => hidden.has(id))) {
@@ -80,7 +87,12 @@ class DutyInviteService {
             }
         }
 
-        const staff = await MedicalStaff.find({ _id: { $in: unique }, verificationStatus: 'verified', isSuspended: { $ne: true } })
+        const staff = await MedicalStaff.find({
+            _id: { $in: unique },
+            verificationStatus: 'verified',
+            isSuspended: { $ne: true },
+            isDemo: hospitalDoc?.isDemo ? true : { $ne: true }
+        })
             .select('_id user jobRole fullName')
             .lean();
         const wrongRole = staff.filter(s => normalizeRole(s.jobRole) !== normalizeRole(role));
@@ -98,7 +110,7 @@ class DutyInviteService {
     // there, and verified doctors nearby. Each doctor appears once.
     //   query: { role, date?, start_time?, end_time? }
     async getCandidates(hospitalUserId, { role, date, start_time: startTime, end_time: endTime }) {
-        const hospital = await this._hospitalFor(hospitalUserId, '_id favouriteStaff coordinates city');
+        const hospital = await this._hospitalFor(hospitalUserId, '_id favouriteStaff coordinates city isDemo');
         const maxRadiusKm = await systemConfigService.getEffective('offer.maxRadiusKm');
 
         const [workedRows, nearby] = await Promise.all([
@@ -109,7 +121,7 @@ class DutyInviteService {
                 { $limit: CANDIDATES_PER_GROUP * 2 }
             ]),
             hospital.coordinates?.coordinates
-                ? staffLocator.findInRadius(hospital.coordinates.coordinates, role, maxRadiusKm)
+                ? staffLocator.findInRadius(hospital.coordinates.coordinates, role, maxRadiusKm, { demo: !!hospital.isDemo })
                 : []
         ]);
 
@@ -119,7 +131,7 @@ class DutyInviteService {
         const hidden = new Set(await blockService.staffHiddenFrom(hospital._id));
         const allIds = [...new Set([...favouriteIds, ...workedIds, ...nearbyIds])].filter(id => !hidden.has(id));
 
-        const cards = await this._loadCards(allIds, hospital._id, { role, nearby, workedRows });
+        const cards = await this._loadCards(allIds, hospital._id, { role, nearby, workedRows, demo: !!hospital.isDemo });
         const [clashes, availability] = await Promise.all([
             date && startTime && endTime
                 ? this._clashes(allIds, { date: new Date(date), startTime, endTime })
@@ -151,8 +163,8 @@ class DutyInviteService {
     }
 
     // Doctor cards for the invite picker and favourites list
-    async _loadCards(ids, hospitalId, { nearby = [], workedRows = null } = {}) {
-        const staff = await MedicalStaff.find({ _id: { $in: ids }, verificationStatus: 'verified', isSuspended: { $ne: true } })
+    async _loadCards(ids, hospitalId, { nearby = [], workedRows = null, demo = false } = {}) {
+        const staff = await MedicalStaff.find({ _id: { $in: ids }, verificationStatus: 'verified', isSuspended: { $ne: true }, isDemo: demo ? true : { $ne: true } })
             .select('fullName jobRole city user averageRating totalRatings experience isAvailable profilePicture.s3Key')
             .lean();
         if (!staff.length) return new Map();

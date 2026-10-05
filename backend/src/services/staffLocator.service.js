@@ -42,12 +42,14 @@ const homePoint = (staff) => {
 };
 
 class StaffLocatorService {
-    // Staff who can be offered work: verified, not suspended, available
-    _eligibleFilter(role) {
+    // Staff who can be offered work: verified, not suspended, available, and
+    // demo only for demo hospitals
+    _eligibleFilter(role, demo = false) {
         return {
             verificationStatus: 'verified',
             isSuspended: { $ne: true },
             isAvailable: true,
+            isDemo: demo ? true : { $ne: true },
             ...(role && { jobRole: { $regex: `^${escapeRegex(role.trim())}$`, $options: 'i' } })
         };
     }
@@ -122,19 +124,19 @@ class StaffLocatorService {
     // Staff within radiusKm (straight line) of a point. A doctor's fresh live
     // position wins over their home address. No Maps calls.
     // Returns [{ _id, user: { _id }, fullName, jobRole, distance, distanceSource }], nearest first.
-    async findInRadius(center, role, radiusKm, { excludeStaffIds = [] } = {}) {
+    async findInRadius(center, role, radiusKm, { excludeStaffIds = [], demo = false } = {}) {
         const excluded = new Set(excludeStaffIds.map(String));
         const box = boundingBox(center.latitude, center.longitude, radiusKm);
 
         const live = await this._liveNear(center.latitude, center.longitude, radiusKm);
         const [byHome, byLive] = await Promise.all([
             MedicalStaff.find({
-                ...this._eligibleFilter(role),
+                ...this._eligibleFilter(role, demo),
                 'coordinates.coordinates.latitude': { $gte: box.minLat, $lte: box.maxLat },
                 'coordinates.coordinates.longitude': { $gte: box.minLng, $lte: box.maxLng }
             }).select('user fullName jobRole coordinates').lean(),
             live.size
-                ? MedicalStaff.find({ ...this._eligibleFilter(role), user: { $in: [...live.keys()] } })
+                ? MedicalStaff.find({ ...this._eligibleFilter(role, demo), user: { $in: [...live.keys()] } })
                     .select('user fullName jobRole coordinates').lean()
                 : []
         ]);
@@ -192,14 +194,14 @@ class StaffLocatorService {
 
 
     // Staff whose profile city matches (case and spacing ignored)
-    async findInCity(city, role, { excludeStaffIds = [] } = {}) {
+    async findInCity(city, role, { excludeStaffIds = [], demo = false } = {}) {
         const normalized = normalizeCity(city);
         if (!normalized) return [];
         const excluded = new Set(excludeStaffIds.map(String));
 
         const pattern = `^\\s*${normalized.split(' ').map(escapeRegex).join('\\s+')}\\s*$`;
         const staff = await MedicalStaff.find({
-            ...this._eligibleFilter(role),
+            ...this._eligibleFilter(role, demo),
             city: { $regex: pattern, $options: 'i' }
         }).select('user fullName jobRole').lean();
 

@@ -1242,7 +1242,7 @@ class ProfileService {
 
             // Get hospital profile with minimal fields
             const hospital = await Hospital.findOne({ user: hospitalUserId })
-                .select('_id hospitalLegalName coordinates currentAddress city state pincode')
+                .select('_id hospitalLegalName coordinates currentAddress city state pincode isDemo')
                 .lean();
 
             if (!hospital) {
@@ -1266,6 +1266,7 @@ class ProfileService {
             const query = {
                 isAvailable: true,
                 verificationStatus: 'verified',
+                isDemo: hospital.isDemo ? true : { $ne: true },
                 _id: { $nin: await require('./block.service').staffHiddenFrom(hospital._id) },
                 'coordinates.coordinates.latitude': {
                     $gte: hospitalLat - latDelta,

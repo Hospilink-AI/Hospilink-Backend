@@ -117,7 +117,10 @@ exports.createDuty = asyncHandler(async (req, res) => {
         if (!staffUserIds) {
             const matchingStaff = await locationBasedStaffService.getNearbyStaffByRole(
                 hospitalCoords,
-                staff_role
+                staff_role,
+                100,
+                50,
+                { demo: !!hospital.isDemo }
             );
 
             // Convert to user IDs for notification, skipping blocked doctors

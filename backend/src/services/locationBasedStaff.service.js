@@ -41,8 +41,8 @@ class LocationBasedStaffService {
     // straight line (live position when the app is open, else home address),
     // nearest first. No Maps calls: one per doctor made new-duty posts slow
     // and costly.
-    async getNearbyStaffByRole(hospitalCoords, requiredRole, limit = 100, radiusKm = 50) {
-        const cacheKey = `nearby_staff:${requiredRole}:${radiusKm}:${Math.round(hospitalCoords.latitude*1000)}:${Math.round(hospitalCoords.longitude*1000)}`;
+    async getNearbyStaffByRole(hospitalCoords, requiredRole, limit = 100, radiusKm = 50, { demo = false } = {}) {
+        const cacheKey = `nearby_staff:${demo ? 'demo:' : ''}${requiredRole}:${radiusKm}:${Math.round(hospitalCoords.latitude*1000)}:${Math.round(hospitalCoords.longitude*1000)}`;
 
         try {
             const redis = await redisClient.getClientAsync();
@@ -52,7 +52,7 @@ class LocationBasedStaffService {
                 return JSON.parse(cached);
             }
 
-            const staffWithinRadius = (await staffLocator.findInRadius(hospitalCoords, requiredRole, radiusKm)).slice(0, limit);
+            const staffWithinRadius = (await staffLocator.findInRadius(hospitalCoords, requiredRole, radiusKm, { demo })).slice(0, limit);
 
             // Short cache: live positions move
             await redis.setex(cacheKey, 60, JSON.stringify(staffWithinRadius));
@@ -95,6 +95,7 @@ class LocationBasedStaffService {
             // A staff member who cancelled this specific duty can never see
             // or re-accept it again — see autoRelist.service.js guardrail #1.
             'autoRelist.excludedStaff': { $ne: medicalStaff._id },
+            isDemo: medicalStaff.isDemo ? true : { $ne: true },
             // Hospitals blocked by or blocking this doctor
             hospital: { $nin: await blockService.hospitalsHiddenFrom(medicalStaff._id) }
         };

@@ -121,7 +121,7 @@ class DutyOfferService {
     async _openOffer(openTo, hospital, role, settings, now, excludeStaffIds = []) {
         excludeStaffIds = [...excludeStaffIds, ...(await blockService.staffHiddenFrom(hospital._id))];
         if (openTo === 'city') {
-            const recipients = await staffLocator.findInCity(hospital.city, role, { excludeStaffIds });
+            const recipients = await staffLocator.findInCity(hospital.city, role, { excludeStaffIds, demo: !!hospital.isDemo });
             return {
                 recipients,
                 offer: {
@@ -135,7 +135,7 @@ class DutyOfferService {
 
         const center = this._hospitalPoint(hospital);
         const recipients = center
-            ? await staffLocator.findInRadius(center, role, settings.startRadiusKm, { excludeStaffIds })
+            ? await staffLocator.findInRadius(center, role, settings.startRadiusKm, { excludeStaffIds, demo: !!hospital.isDemo })
             : [];
         return {
             recipients,
@@ -158,7 +158,7 @@ class DutyOfferService {
     // Invite window over with nobody accepting: open to the city or first ring
     async _openAfterInvite(duty) {
         const settings = await this.getSettings();
-        const hospital = await Hospital.findById(duty.hospital).select('coordinates city user hospitalLegalName');
+        const hospital = await Hospital.findById(duty.hospital).select('coordinates city user hospitalLegalName isDemo');
         if (!hospital) return false;
 
         const now = new Date();
@@ -284,7 +284,7 @@ class DutyOfferService {
     async _widen(duty) {
         const offer = duty.offer;
         const radiusKm = Math.min(offer.radiusKm + offer.stepKm, offer.maxRadiusKm);
-        const hospital = await Hospital.findById(duty.hospital).select('coordinates city user hospitalLegalName');
+        const hospital = await Hospital.findById(duty.hospital).select('coordinates city user hospitalLegalName isDemo');
         const center = this._hospitalPoint(hospital);
         if (!center) return false;
 
@@ -293,7 +293,7 @@ class DutyOfferService {
             ...(offer.pendingStaff || []).map(p => p.staff),
             ...(await blockService.staffHiddenFrom(hospital._id))
         ].map(String);
-        const found = await staffLocator.findInRadius(center, duty.staffRole, radiusKm, { excludeStaffIds: already });
+        const found = await staffLocator.findInRadius(center, duty.staffRole, radiusKm, { excludeStaffIds: already, demo: !!hospital.isDemo });
         const now = new Date();
         const settings = await this.getSettings();
         const { notifyNow: recipients, pending, releaseAt } = await this._prioritise(found, duty, settings, now);
@@ -376,6 +376,8 @@ class DutyOfferService {
 
     // Eligibility for one duty, loading what it needs
     async isEligible(duty, medicalStaff) {
+        // Store reviewer demo accounts and real ones never meet
+        if (Boolean(duty.isDemo) !== Boolean(medicalStaff.isDemo)) return false;
         if (await blockService.isBlocked(duty.hospital?._id || duty.hospital, medicalStaff._id)) return false;
         if (!this.isStaged(duty)) return true;
         const notified = (await this.notifiedAmong([duty], medicalStaff._id)).has(String(duty._id));
