@@ -4,9 +4,10 @@ const { CATEGORIES } = require('../utils/ticket.constants');
 const { t } = require('../utils/botCopy');
 const knowledgeBaseService = require('./knowledgeBase.service');
 const logger = require('../utils/logger');
+const { geminiModels } = require('../utils/geminiModels');
 
 // Same fallback-list/lazy-client pattern as resumeParsing.service.js.
-const MODELS = [process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_FALLBACK];
+const MODELS = geminiModels();
 
 let genAI = null;
 function getClient() {
