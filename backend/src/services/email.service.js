@@ -1176,6 +1176,42 @@ class EmailService {
             return false;
         }
     }
+
+    async sendAccountDeletionScheduledEmail(email, name, scheduledFor) {
+        try {
+            const when = new Date(scheduledFor).toLocaleDateString('en-IN', {
+                day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata'
+            });
+            const mailOptions = {
+                from: `HospiLink <${process.env.EMAIL_FROM}>`,
+                to: email,
+                subject: 'HospiLink - Account Deletion Scheduled',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: #c0392b; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">Account Deletion Scheduled</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p>Hello <strong>${name}</strong>,</p>
+                            <p>We received your request to delete your HospiLink account. It will be permanently deleted on <strong>${when}</strong>.</p>
+                            <div style="background-color: #fdf2f2; border-left: 4px solid #c0392b; padding: 15px; margin: 20px 0;">
+                                <p style="margin: 0; color: #922b21;">Changed your mind? Just sign in to HospiLink before that date and your account will be kept.</p>
+                            </div>
+                            <p>If you didn't ask for this, sign in now and change your password.</p>
+                            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                        </div>
+                    </div>
+                `
+            };
+            await this._sendWithTimeout(mailOptions);
+            logger.info(`Account deletion scheduled email sent to ${email}`);
+            return true;
+        } catch (error) {
+            logger.error(`Error sending account deletion email to ${email}: ${error.message}`);
+            return false;
+        }
+    }
 }
 
 module.exports = new EmailService();

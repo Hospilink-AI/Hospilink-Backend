@@ -174,7 +174,7 @@ class CancellationService {
 
     
 
-    async cancelDuty(dutyId, user, reason, reasonText) {
+    async cancelDuty(dutyId, user, reason, reasonText, options = {}) {
         // Fetch duty from database
         const duty = await Duty.findById(dutyId)
             .populate({
@@ -234,7 +234,7 @@ class CancellationService {
         }
 
         if (user.role === 'staff') {
-            return await this._finalizeStaffCancellation(duty, user, medicalStaff, reason, reasonText);
+            return await this._finalizeStaffCancellation(duty, user, medicalStaff, reason, reasonText, options);
         }
 
         // Hospital cancellation — unchanged terminal behavior: the duty is
@@ -265,7 +265,7 @@ class CancellationService {
     // auto-relist engine: urgency escalation, the one-time late-band rate
     // boost, and a widened staff broadcast. The cancelling staff member is
     // permanently excluded from this duty either way.
-    async _finalizeStaffCancellation(duty, user, medicalStaff, reason, reasonText) {
+    async _finalizeStaffCancellation(duty, user, medicalStaff, reason, reasonText, options = {}) {
         const minutesUntilStart = this._getMinutesUntilDutyStart(duty);
 
         const relistConfig = await systemConfigService.getManyEffective([
@@ -320,9 +320,12 @@ class CancellationService {
             console.error('Failed to write auto-relist activity log:', err)
         );
 
-        this._checkStaffWatchlist(medicalStaff).catch(err =>
-            console.error('Failed to check staff cancellation watchlist:', err)
-        );
+        // Not when the doctor is deleting their account
+        if (!options.skipWatchlist) {
+            this._checkStaffWatchlist(medicalStaff).catch(err =>
+                console.error('Failed to check staff cancellation watchlist:', err)
+            );
+        }
 
         return duty;
     }

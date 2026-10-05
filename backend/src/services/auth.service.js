@@ -258,6 +258,9 @@ class AuthService {
             }
         }
 
+        // Signing in during the grace period keeps the account
+        const deletionCancelled = await require('./accountDeletion.service').cancelOnSignin(user);
+
         // Generate JWT token
         const token = jwt.sign(
             { id: user._id, role: user.role },
@@ -314,7 +317,8 @@ class AuthService {
                 isEmailVerified: user.isEmailVerified
             },
             onboardingStep,
-            verificationStatus
+            verificationStatus,
+            deletionCancelled
         };
     }
 
