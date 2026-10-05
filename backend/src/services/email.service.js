@@ -3,9 +3,17 @@ const logger = require('../utils/logger');
 
 
 const SEND_TIMEOUT_MS = 15000; // 15 seconds
+const API_TIMEOUT_MS = 10000;
+
+// EMAIL_PROVIDER picks how mail is sent: 'smtp' (default), 'ses' (Amazon SES
+// API, using the AWS keys already used for S3) or 'resend' (RESEND_API_KEY).
+// The APIs go over HTTPS, so they work where outbound SMTP ports are blocked.
+// With an API provider, SMTP is the fallback when EMAIL_HOST is set.
+const PROVIDER = (process.env.EMAIL_PROVIDER || 'smtp').trim().toLowerCase();
 
 class EmailService {
     constructor() {
+        this.provider = ['ses', 'resend'].includes(PROVIDER) ? PROVIDER : 'smtp';
         this.transporter = nodemailer.createTransport({
             host: process.env.EMAIL_HOST,
             port: parseInt(process.env.EMAIL_PORT) || 587,
@@ -25,20 +33,41 @@ class EmailService {
             }
         });
 
+        if (this.provider !== 'smtp') {
+            const missing = this.provider === 'resend'
+                ? (!process.env.RESEND_API_KEY && 'RESEND_API_KEY')
+                : (!(process.env.AWS_SES_REGION || process.env.AWS_REGION) && 'AWS_SES_REGION or AWS_REGION');
+            if (missing) logger.error(`Email provider ${this.provider} is missing ${missing}`);
+            else logger.info(`Email provider: ${this.provider}${process.env.EMAIL_HOST ? ' (SMTP fallback)' : ''}`);
+        }
+
         // Verify connection at startup so misconfiguration shows up in logs immediately
         // rather than silently failing on the first real email send.
-        this.transporter.verify((error) => {
-            if (error) {
-                logger.error(`Email transporter connection failed: ${error.message}`);
-            } else {
-                logger.info('Email transporter ready');
-            }
-        });
+        if (this.provider === 'smtp' || process.env.EMAIL_HOST) {
+            this.transporter.verify((error) => {
+                if (error) {
+                    logger.error(`Email transporter connection failed: ${error.message}`);
+                } else {
+                    logger.info('Email transporter ready');
+                }
+            });
+        }
     }
 
     
 
     async _sendWithTimeout(mailOptions) {
+        if (this.provider === 'smtp') return this._sendSmtp(mailOptions);
+        try {
+            return await this._sendApi(mailOptions);
+        } catch (error) {
+            if (!process.env.EMAIL_HOST) throw error;
+            logger.warn(`Email via ${this.provider} failed (${error.message}), trying SMTP`);
+            return this._sendSmtp(mailOptions);
+        }
+    }
+
+    async _sendSmtp(mailOptions) {
         return Promise.race([
             this.transporter.sendMail(mailOptions),
             new Promise((_, reject) =>
@@ -48,6 +77,55 @@ class EmailService {
                 )
             )
         ]);
+    }
+
+    async _sendApi({ from, to, subject, html, text }) {
+        const recipients = (Array.isArray(to) ? to : String(to).split(','))
+            .map(address => address.trim())
+            .filter(Boolean);
+
+        if (this.provider === 'resend') {
+            const response = await fetch('https://api.resend.com/emails', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ from, to: recipients, subject, html, ...(text && { text }) }),
+                signal: AbortSignal.timeout(API_TIMEOUT_MS)
+            });
+            if (!response.ok) {
+                throw new Error(`Resend ${response.status}: ${(await response.text()).slice(0, 200)}`);
+            }
+            return response.json();
+        }
+
+        const { SendEmailCommand } = require('@aws-sdk/client-sesv2');
+        return this._sesClient().send(new SendEmailCommand({
+            FromEmailAddress: from,
+            Destination: { ToAddresses: recipients },
+            Content: {
+                Simple: {
+                    Subject: { Data: subject, Charset: 'UTF-8' },
+                    Body: {
+                        Html: { Data: html, Charset: 'UTF-8' },
+                        ...(text && { Text: { Data: text, Charset: 'UTF-8' } })
+                    }
+                }
+            }
+        }), { abortSignal: AbortSignal.timeout(API_TIMEOUT_MS) });
+    }
+
+    _sesClient() {
+        if (!this.ses) {
+            const { SESv2Client } = require('@aws-sdk/client-sesv2');
+            const config = { region: process.env.AWS_SES_REGION || process.env.AWS_REGION };
+            if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+                config.credentials = {
+                    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+                };
+            }
+            this.ses = new SESv2Client(config);
+        }
+        return this.ses;
     }
 
     
