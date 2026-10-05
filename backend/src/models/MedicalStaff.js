@@ -207,6 +207,11 @@ const medicalStaffSchema = new mongoose.Schema({
         grantedAt: { type: Date },
         revokedAt: { type: Date }
     },
+    // Hospitals this doctor has blocked (capped in block.service)
+    blockedHospitals: {
+        type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Hospital' }],
+        default: undefined
+    },
     isSuspended: {
         type: Boolean,
         default: false,
@@ -319,6 +324,7 @@ medicalStaffSchema.pre('save', function (next) {
 // Basic single-field indexes
 medicalStaffSchema.index({ user: 1 });
 medicalStaffSchema.index({ city: 1 });
+medicalStaffSchema.index({ blockedHospitals: 1 }, { sparse: true });
 medicalStaffSchema.index({ state: 1 });
 medicalStaffSchema.index({ currentAddress: 1 });
 medicalStaffSchema.index({ jobRole: 1 });

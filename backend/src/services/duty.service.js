@@ -35,6 +35,7 @@ const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const reviewService = require('./review.service');
 const locationBasedStaffService = require('./locationBasedStaff.service');
 const dutyOfferService = require('./dutyOffer.service');
+const blockService = require('./block.service');
 const systemConfigService = require('./systemConfig.service');
 const {
     AppError,
@@ -2245,7 +2246,10 @@ class DutyService {
                 const hospitalCoords = duty.hospital?.coordinates?.coordinates;
                 if (!hospitalCoords?.latitude || !hospitalCoords?.longitude) continue;
 
-                const excludedIds = new Set((duty.autoRelist.excludedStaff || []).map(id => id.toString()));
+                const excludedIds = new Set([
+                    ...(duty.autoRelist.excludedStaff || []).map(id => id.toString()),
+                    ...(await blockService.staffHiddenFrom(duty.hospital._id || duty.hospital))
+                ]);
                 const matchingStaff = await locationBasedStaffService.getNearbyStaffByRole(
                     { latitude: hospitalCoords.latitude, longitude: hospitalCoords.longitude },
                     duty.staffRole,

@@ -3,6 +3,7 @@ const Hospital = require('../models/Hospital');
 const MedicalStaff = require('../models/MedicalStaff');
 const Duty = require('../models/Duty');
 const staffLocator = require('./staffLocator.service');
+const blockService = require('./block.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const s3Service = require('./s3.service');
 const systemConfigService = require('./systemConfig.service');
@@ -63,11 +64,20 @@ class DutyInviteService {
 
     // Checks the doctors a hospital wants to invite to a duty of `role`.
     // Returns [{ _id, user: { _id } }] or throws with what is wrong.
-    async resolveInvitees(staffIds, role) {
+    //   hospital: { hospitalId } or { hospitalUserId }, to leave out blocked doctors
+    async resolveInvitees(staffIds, role, hospital = {}) {
         const unique = [...new Set((staffIds || []).map(String))];
         if (!unique.length) return [];
         if (unique.length > MAX_INVITEES) {
             throw new ValidationError(`You can invite up to ${MAX_INVITEES} doctors to a duty`);
+        }
+
+        const hospitalId = hospital.hospitalId || (hospital.hospitalUserId && (await this._hospitalFor(hospital.hospitalUserId, '_id'))._id);
+        if (hospitalId) {
+            const hidden = new Set(await blockService.staffHiddenFrom(hospitalId));
+            if (unique.some(id => hidden.has(id))) {
+                throw new ValidationError('Some invited doctors can no longer be invited');
+            }
         }
 
         const staff = await MedicalStaff.find({ _id: { $in: unique }, verificationStatus: 'verified', isSuspended: { $ne: true } })
@@ -106,7 +116,8 @@ class DutyInviteService {
         const favouriteIds = (hospital.favouriteStaff || []).map(String);
         const workedIds = workedRows.map(r => String(r._id));
         const nearbyIds = nearby.slice(0, CANDIDATES_PER_GROUP).map(r => String(r._id));
-        const allIds = [...new Set([...favouriteIds, ...workedIds, ...nearbyIds])];
+        const hidden = new Set(await blockService.staffHiddenFrom(hospital._id));
+        const allIds = [...new Set([...favouriteIds, ...workedIds, ...nearbyIds])].filter(id => !hidden.has(id));
 
         const cards = await this._loadCards(allIds, hospital._id, { role, nearby, workedRows });
         const [clashes, availability] = await Promise.all([

@@ -7,6 +7,7 @@ const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
 
 const staffAvailabilityService = require('./staffAvailability.service');
+const blockService = require('./block.service');
 const { istDateKey } = require('../utils/calendar.helper');
 
 const OFFER_KEYS = [
@@ -118,6 +119,7 @@ class DutyOfferService {
     // The offer fields and first recipients for a duty opening to the city
     // (emergency) or the first ring
     async _openOffer(openTo, hospital, role, settings, now, excludeStaffIds = []) {
+        excludeStaffIds = [...excludeStaffIds, ...(await blockService.staffHiddenFrom(hospital._id))];
         if (openTo === 'city') {
             const recipients = await staffLocator.findInCity(hospital.city, role, { excludeStaffIds });
             return {
@@ -288,7 +290,8 @@ class DutyOfferService {
 
         const already = [
             ...(offer.notifiedStaff || []),
-            ...(offer.pendingStaff || []).map(p => p.staff)
+            ...(offer.pendingStaff || []).map(p => p.staff),
+            ...(await blockService.staffHiddenFrom(hospital._id))
         ].map(String);
         const found = await staffLocator.findInRadius(center, duty.staffRole, radiusKm, { excludeStaffIds: already });
         const now = new Date();
@@ -373,6 +376,7 @@ class DutyOfferService {
 
     // Eligibility for one duty, loading what it needs
     async isEligible(duty, medicalStaff) {
+        if (await blockService.isBlocked(duty.hospital?._id || duty.hospital, medicalStaff._id)) return false;
         if (!this.isStaged(duty)) return true;
         const notified = (await this.notifiedAmong([duty], medicalStaff._id)).has(String(duty._id));
         if (notified) return true;

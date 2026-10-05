@@ -33,6 +33,15 @@ router.get(
     reviewController.getHospitalReviews
 );
 
+// Report a review (opens a support ticket)
+router.post(
+    "/:id/report",
+    protect,
+    authorize("hospital", "staff"),
+    validateObjectId('id'),
+    require("../controllers/block.controller").reportReview
+);
+
 // Review Notification
 router.put(
     "/:id/read",
