@@ -147,6 +147,11 @@ const hospitalSchema = new mongoose.Schema({
         type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MedicalStaff' }],
         default: undefined
     },
+    // Doctors this hospital has blocked (capped in block.service)
+    blockedStaff: {
+        type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MedicalStaff' }],
+        default: undefined
+    },
     staffCount: {
         type: String,
         required: [true, 'Staff count is required'],
@@ -236,6 +241,7 @@ hospitalSchema.index({ user: 1 });
 hospitalSchema.index({ 'coordinates.coordinates.longitude': 1 });
 hospitalSchema.index({ 'coordinates.coordinates.latitude': 1 });
 hospitalSchema.index({ servicesAvailable: 1 });
+hospitalSchema.index({ blockedStaff: 1 }, { sparse: true });
 
 // Compound index for verification status queries 
 hospitalSchema.index({ user: 1, verificationStatus: 1 });
