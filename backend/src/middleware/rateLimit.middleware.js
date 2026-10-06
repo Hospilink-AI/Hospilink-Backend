@@ -79,3 +79,16 @@ exports.verifyPhoneOtpRateLimit = createRateLimit(
     3,
     'Too many OTP verification attempts. Please request a new OTP and try again later.'
 );
+// Address search and pin lookups — per signed-in user, so people behind one
+// network don't share a limit. Use after protect.
+exports.mapsRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => `maps:${req.user?._id || req.user?.id}`,
+    handler: (req, res) => res.status(429).json({
+        success: false,
+        message: 'Too many map searches. Please wait a moment and try again.'
+    })
+});

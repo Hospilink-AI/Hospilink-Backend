@@ -116,6 +116,7 @@ app.use("/api/chatbot", require("./routes/chatbot.routes"));
 app.use("/api/admin/knowledge-base", require("./routes/adminKnowledgeBase.routes"));
 app.use("/api/account/deletion", require("./routes/accountDeletion.routes"));
 app.use("/api/blocks", require("./routes/block.routes"));
+app.use("/api/maps", require("./routes/maps.routes"));
 app.use("/api/account", require("./routes/accountStanding.routes"));
 app.use("/api/support/feedback", require("./routes/feedback.routes"));
 app.use("/api/admin/feedback", require("./routes/adminFeedback.routes"));
