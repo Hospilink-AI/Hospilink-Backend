@@ -292,7 +292,26 @@ class GeocodingService {
 
 
     // Get directions between two points using Google Maps Directions API
+    // Cached for 10 minutes: duty screens ask for the same route each time
+    // they open. The start (the doctor) is rounded to about 100 m, the end
+    // (the hospital) to about 10 m.
     async getDirections(originLat, originLng, destLat, destLng) {
+        const key = `directions:${Number(originLat).toFixed(3)}:${Number(originLng).toFixed(3)}:${Number(destLat).toFixed(4)}:${Number(destLng).toFixed(4)}`;
+        let redis = null;
+        try {
+            redis = await redisClient.getClientAsync();
+            const cached = await redis.get(key);
+            if (cached) return JSON.parse(cached);
+        } catch (error) {
+            redis = null;
+        }
+
+        const route = await this._fetchDirections(originLat, originLng, destLat, destLng);
+        if (redis) redis.setex(key, 600, JSON.stringify(route)).catch(() => {});
+        return route;
+    }
+
+    async _fetchDirections(originLat, originLng, destLat, destLng) {
         try {
             if (!this.apiKey) {
 
