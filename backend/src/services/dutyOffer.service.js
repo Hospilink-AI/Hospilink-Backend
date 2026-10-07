@@ -211,6 +211,8 @@ class DutyOfferService {
 
         try {
             const now = new Date();
+            // Only the hidden fields: also naming `offer` would ask MongoDB for a
+            // field and its child at once, which it rejects
             const due = await Duty.find({
                 status: 'available',
                 'offer.mode': { $in: ['radius', 'invite'] },
@@ -218,7 +220,7 @@ class DutyOfferService {
                     { 'offer.nextActionAt': { $lte: now } },
                     { 'offer.pendingReleaseAt': { $lte: now } }
                 ]
-            }).select('+offer.notifiedStaff +offer.pendingStaff staffRole date startTime endTime urgency offeredRate hospital offer');
+            }).select('+offer.notifiedStaff +offer.pendingStaff');
 
             let widened = 0;
             for (const duty of due) {
