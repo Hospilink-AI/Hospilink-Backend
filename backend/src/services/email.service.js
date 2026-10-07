@@ -3,6 +3,9 @@ const logger = require('../utils/logger');
 
 
 const SEND_TIMEOUT_MS = 15000; // 15 seconds
+const COMPANY_NAME = 'Hospilink Private Limited';
+const SUPPORT_EMAIL = 'support@hospilink.in';
+const SUPPORT_LINE = `Need help? Write to <a href="mailto:${SUPPORT_EMAIL}" style="color: #7f8c8d;">${SUPPORT_EMAIL}</a>`;
 const API_TIMEOUT_MS = 10000;
 
 // EMAIL_PROVIDER picks how mail is sent: 'smtp' (default), 'ses' (Amazon SES
@@ -146,7 +149,7 @@ class EmailService {
                         <p>This OTP is valid for ${process.env.OTP_EXPIRY_MINUTES || 10} minutes.</p>
                         <p>If you didn't request this, please ignore this email.</p>
                         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                        <p style="color: #7f8c8d; font-size: 12px;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                        <p style="color: #7f8c8d; font-size: 12px;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                     </div>
                 `
             };
@@ -191,7 +194,7 @@ class EmailService {
                             </div>
 
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -233,7 +236,7 @@ class EmailService {
                             </div>
                             
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -282,7 +285,7 @@ class EmailService {
                             </div>
 
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -341,7 +344,7 @@ class EmailService {
                             
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
                             <p style="color: #7f8c8d; font-size: 12px; text-align: center;">
-                                © ${new Date().getFullYear()} HospiLink. All rights reserved.<br>
+                                © ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}<br>
                                 This is an automated login notification. Please do not reply.
                             </p>
                         </div>
@@ -387,7 +390,7 @@ class EmailService {
                             <p><strong>Created By:</strong> ${createdByName} (${createdByEmail})</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
                             <p style="color: #7f8c8d; font-size: 12px; text-align: center;">
-                                © ${new Date().getFullYear()} HospiLink. All rights reserved.<br>
+                                © ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}<br>
                                 This is an automated security notification. Please do not reply.
                             </p>
                         </div>
@@ -431,7 +434,7 @@ class EmailService {
                             <p><strong>Deactivated By:</strong> ${deactivatedByName} (${deactivatedByEmail})</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
                             <p style="color: #7f8c8d; font-size: 12px; text-align: center;">
-                                © ${new Date().getFullYear()} HospiLink. All rights reserved.<br>
+                                © ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}<br>
                                 This is an automated security notification. Please do not reply.
                             </p>
                         </div>
@@ -475,7 +478,7 @@ class EmailService {
                             <p><strong>Activated By:</strong> ${activatedByName} (${activatedByEmail})</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
                             <p style="color: #7f8c8d; font-size: 12px; text-align: center;">
-                                © ${new Date().getFullYear()} HospiLink. All rights reserved.<br>
+                                © ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}<br>
                                 This is an automated security notification. Please do not reply.
                             </p>
                         </div>
@@ -539,7 +542,7 @@ class EmailService {
                             <p>If you have any questions, please contact the hospital directly.</p>
                             
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. Your medical staffing partner.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. Your medical staffing partner.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -605,7 +608,7 @@ class EmailService {
                             <p>You can view more details in your Hospital Dashboard.</p>
                             
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -677,7 +680,7 @@ class EmailService {
                             <p>Thank you for keeping your duty status updated. This helps hospitals track your progress efficiently.</p>
                             
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. Your medical staffing partner.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. Your medical staffing partner.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -758,7 +761,7 @@ class EmailService {
                             <p>You can view more details and track staff progress in your Hospital Dashboard.</p>
                             
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -822,7 +825,7 @@ class EmailService {
                             <p>If you have any questions, please contact the hospital or HospiLink support.</p>
                             
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. Your medical staffing partner.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. Your medical staffing partner.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -900,7 +903,7 @@ class EmailService {
                             <p>You can view more details in your Hospital Dashboard.</p>
                             
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -940,7 +943,7 @@ class EmailService {
                                 <p style="margin: 0; color: #276749;">Your profile is now live and visible to medical staff on the platform.</p>
                             </div>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -978,9 +981,9 @@ class EmailService {
                                 <li>Update your profile or re-upload the required documents</li>
                                 <li>Our team will re-review your profile once updated</li>
                             </ul>
-                            <p>If you have any questions, please contact our support team.</p>
+                            <p>If you have any questions, please contact our support team at ${SUPPORT_EMAIL}.</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -1019,7 +1022,7 @@ class EmailService {
                                 <p style="margin: 0; color: #276749;">Your account is now live and visible to hospitals on the platform.</p>
                             </div>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -1058,9 +1061,9 @@ class EmailService {
                                 <li>Ensure all information is accurate and complete</li>
                                 <li>Our team will re-review your account once updated</li>
                             </ul>
-                            <p>If you have any questions, please contact our support team.</p>
+                            <p>If you have any questions, please contact our support team at ${SUPPORT_EMAIL}.</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -1113,7 +1116,7 @@ class EmailService {
                             </div>
                             <p style="color: #c0392b; font-weight: bold;">Please log in to the admin panel immediately to take action.</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -1169,10 +1172,10 @@ class EmailService {
                                 `}
                             </ul>
                             
-                            <p>If you have any questions, please contact our support team.</p>
+                            <p>If you have any questions, please contact our support team at ${SUPPORT_EMAIL}.</p>
                             
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -1206,9 +1209,9 @@ class EmailService {
                                 <p style="margin: 0; color: #856404;">${reason}</p>
                             </div>
                             <p>While suspended, you will not be able to access any features of the platform.</p>
-                            <p>If you believe this is an error or wish to appeal, please contact our support team immediately.</p>
+                            <p>If you believe this is an error or wish to appeal, please contact our support team immediately at ${SUPPORT_EMAIL}.</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -1239,9 +1242,9 @@ class EmailService {
                             <div style="background-color: #f0fff4; border-left: 4px solid #27ae60; padding: 15px; margin: 20px 0;">
                                 <p style="margin: 0; color: #276749;">Please log in to continue using HospiLink.</p>
                             </div>
-                            <p>If you have any questions, please contact our support team.</p>
+                            <p>If you have any questions, please contact our support team at ${SUPPORT_EMAIL}.</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
@@ -1277,7 +1280,7 @@ class EmailService {
                             </div>
                             <p>If you didn't ask for this, sign in now and change your password.</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} HospiLink. All rights reserved.</p>
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
                         </div>
                     </div>
                 `
