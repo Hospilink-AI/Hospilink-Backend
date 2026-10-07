@@ -6,8 +6,9 @@ const notificationEmitter = require('../services/notificationEmitter');
 const activityLogEmitter = require('../services/activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 
-// IDfy result statuses that mean the Aadhaar check did not pass
-const IDFY_FAILED_STATUSES = ['failed', 'failure', 'error', 'rejected'];
+// Only a clear success with the Aadhaar details auto-verifies. Any other
+// status (failed, in progress, expired, missing or new) goes to manual review.
+const IDFY_SUCCESS_STATUSES = ['completed', 'success', 'successful', 'verified'];
 
 /**
  * Verify the webhook token embedded in the request URL query string.
@@ -57,10 +58,15 @@ exports.handleAadhaarWebhook = async (req, res) => {
         }
 
         // ── 3. Update document ────────────────────────────────────────────────
-        // A check IDfy reports as failed goes to manual review instead of
+        // Anything short of a clear success goes to manual review instead of
         // being marked verified
-        const reportedStatus = String(data.status || '').toLowerCase();
-        const checkFailed = IDFY_FAILED_STATUSES.includes(reportedStatus);
+        const reportedStatus = String(data.status || '').trim().toLowerCase();
+        const hasDetails = data.parsed_details && typeof data.parsed_details === 'object'
+            && Object.keys(data.parsed_details).length > 0;
+        const checkFailed = !(IDFY_SUCCESS_STATUSES.includes(reportedStatus) && hasDetails);
+        if (checkFailed) {
+            logger.warn(`Aadhaar webhook sent to manual review: referenceId=${requestId}, status=${reportedStatus || 'none'}, details=${hasDetails}`);
+        }
 
         const result = await Document.updateOne(
             {
@@ -71,7 +77,7 @@ exports.handleAadhaarWebhook = async (req, res) => {
                 $set: checkFailed
                     ? {
                         "documents.$.verificationStatus": "manual-pending-verification",
-                        "documents.$.verificationMeta.status": reportedStatus,
+                        "documents.$.verificationMeta.status": reportedStatus || 'unknown',
                         "documents.$.verificationMeta.rawResponse": data
                     }
                     : {
