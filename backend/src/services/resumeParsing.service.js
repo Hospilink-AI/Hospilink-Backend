@@ -2,6 +2,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { z } = require('zod');
 const { ALLOWED_ROLES, SPECIALTY_FAMILIES } = require('../utils/constants');
 const logger = require('../utils/logger');
+const { geminiModels } = require('../utils/geminiModels');
 
 
 const EXPERIENCE_BUCKETS = [
@@ -9,16 +10,9 @@ const EXPERIENCE_BUCKETS = [
     '10-15 years', '15-20 years', '20+ years'
 ];
 
-// Fallback list, same pattern as agent/modules/extractor.js — try the fast/cheap
-// model first, fall back to the heavier one only if it fails.
-// const MODELS = [
-//     process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite',
-//     'gemini-2.5-flash'
-// ];
-
-const MODELS = [
-    process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_FALLBACK,
-];
+// Fallback list, same pattern as agent/modules/extractor.js — each model is
+// tried in turn until one answers.
+const MODELS = geminiModels();
 
 let genAI = null;
 function getClient() {

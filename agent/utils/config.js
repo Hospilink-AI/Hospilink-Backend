@@ -156,7 +156,7 @@ const config = {
   rateLimitMax: 100,
 
   // --- AI Model (Gemini) Settings ---
-  geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
+  geminiModel: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
   geminiBatchSize: 5, // Concurrent prompts for job extraction
 
   // --- Domain Filtering Lists ---
