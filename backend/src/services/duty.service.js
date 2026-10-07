@@ -2718,6 +2718,7 @@ class DutyService {
 
             return {
                 id: duty._id,
+                isDemo: duty.isDemo === true,
                 hospital: {
                     id: duty.hospital?._id,
                     name: duty.hospital?.hospitalLegalName || duty.hospital?.user?.name || 'N/A',

@@ -458,7 +458,7 @@ class AdminService {
             // Get staff within bounding box (reduces dataset significantly)
             const nearbyStaff = await MedicalStaff.find(query)
                 .populate('user', 'name email')
-                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating totalRatings verificationStatus user')
+                .select('fullName jobRole currentAddress city state pincode phoneNumber coordinates isAvailable averageRating totalRatings verificationStatus user isDemo')
                 .sort({ 'coordinates.coordinates.latitude': 1, 'coordinates.coordinates.longitude': 1 })
                 .lean();
 
@@ -559,6 +559,7 @@ class AdminService {
                     rating: s.staff.totalRatings ? s.staff.averageRating : null,
                     effectiveRating: effectiveRatings[index].ratingShown,
                     isAvailable: s.staff.isAvailable,
+                    isDemo: s.staff.isDemo === true,
                     verificationStatus: s.staff.verificationStatus,
                     distance: parseFloat(distanceResult.distance.toFixed(2)),
                     distanceText: distanceResult.distanceText,
@@ -761,12 +762,14 @@ class AdminService {
                         {
                             $project: {
                                 _id: 1,
+                                userId: '$user',
                                 hospitalLegalName: 1,
                                 currentAddress: 1,
                                 city: 1,
                                 state: 1,
                                 pincode: 1,
                                 staffCount: 1,
+                                isDemo: { $eq: ['$isDemo', true] },
                                 verificationStatus: '$verificationStatus',
                                 rejectionReason: '$rejectionReason',
                                 createdAt: 1,
@@ -1228,6 +1231,7 @@ class AdminService {
                                 profilePicture: 1,
                                 completedDuties: { $ifNull: [{ $arrayElemAt: ['$completedDuties.count', 0] }, 0] },
                                 isAvailable: 1,
+                                isDemo: { $eq: ['$isDemo', true] },
                                 verificationStatus: { $ifNull: ['$verificationStatus', 'pending'] },
                                 userId: '$user'
                             }
@@ -1957,6 +1961,7 @@ class AdminService {
                 },
                 duty: {
                     dutyId: duty._id,
+                    isDemo: duty.isDemo === true,
                     dutyRole: duty.staffRole,
                     formattedRole: duty.formattedRole,
                     hospitalName: hospital.hospitalLegalName,
@@ -2082,6 +2087,7 @@ class AdminService {
                 
                 return {
                     id: duty._id,
+                    isDemo: duty.isDemo === true,
                     staffName: staff?.fullName || 'Unknown',
                     staffRole: duty.staffRole,
                     formattedRole: duty.formattedRole,
@@ -2218,6 +2224,7 @@ class AdminService {
                 
                 return {
                     id: duty._id,
+                    isDemo: duty.isDemo === true,
                     staffName: staff?.fullName || 'Unknown',
                     staffEmail: staff?.user?.email || null,
                     staffRole: duty.staffRole,
