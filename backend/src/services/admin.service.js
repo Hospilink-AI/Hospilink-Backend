@@ -2557,10 +2557,15 @@ class AdminService {
         if (invalid) {
             throw new UnprocessableEntityError(invalid);
         }
-        return SystemConfigService.setValue(key, value, {
+        const saved = await SystemConfigService.setValue(key, value, {
             effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : undefined,
             createdBy: adminUserId
         });
+        // Hospital maps are cached for 2 minutes; show privacy changes straight away
+        if (key.startsWith('privacy.')) {
+            await cacheService.invalidatePattern('nearby:staff:*');
+        }
+        return saved;
     }
 
 
