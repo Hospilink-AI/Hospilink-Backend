@@ -158,6 +158,7 @@ const formatActivityMessage = (action, details = {}) => {
         USER_APPROVED: `Approved user ${details.userName || 'unknown'}`,
         USER_REJECTED: `Rejected user ${details.userName || 'unknown'}`,
         DOCUMENT_VERIFIED_BY_ADMIN: `Admin verified ${details.documentType || 'document'}`,
+        IDENTITY_FLAG_DISMISSED: `Admin accepted identity differences (${(details.issues || []).join(', ') || 'none'})`,
         
         // Security activities
         SUSPICIOUS_LOGIN_ATTEMPT: `Suspicious login attempt detected`,
