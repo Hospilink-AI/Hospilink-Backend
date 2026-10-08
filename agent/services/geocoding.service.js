@@ -72,6 +72,59 @@ class GeocodingService {
         }
     }
 
+    // Driving distance from one origin to many points ({ id, latitude, longitude })
+    // in Distance Matrix batches of 25, all at once. Points Maps can't answer
+    // for get a straight-line estimate, so one failure never empties a list.
+    async batchDistances(originLat, originLng, points) {
+        const results = new Map();
+        const batches = [];
+        for (let i = 0; i < points.length; i += 25) batches.push(points.slice(i, i + 25));
+
+        await Promise.all(batches.map(async (batch) => {
+            let elements = null;
+            if (this.apiKey) {
+                try {
+                    const response = await axios.get(this.distanceMatrixUrl, {
+                        params: {
+                            origins: `${originLat},${originLng}`,
+                            destinations: batch.map(p => `${p.latitude},${p.longitude}`).join('|'),
+                            key: this.apiKey,
+                            mode: 'driving',
+                            region: 'in'
+                        },
+                        timeout: 10000
+                    });
+                    if (response.data.status === 'OK') elements = response.data.rows[0]?.elements || null;
+                } catch (error) {
+                    console.error('Batch distance error:', error.message);
+                }
+            }
+            batch.forEach((p, i) => {
+                const element = elements?.[i];
+                if (element?.status === 'OK') {
+                    results.set(p.id, {
+                        distance: Math.round((element.distance.value / 1000) * 100) / 100,
+                        duration: Math.round(element.duration.value / 60),
+                        distanceText: element.distance.text,
+                        durationText: element.duration.text
+                    });
+                } else {
+                    const { distance } = this.calculateDistanceHaversine(originLat, originLng, p.latitude, p.longitude);
+                    const road = Math.round(distance * 1.3 * 100) / 100;
+                    const minutes = Math.max(1, Math.round((road / 25) * 60));
+                    results.set(p.id, {
+                        distance: road,
+                        duration: minutes,
+                        distanceText: `about ${road < 10 ? road.toFixed(1) : Math.round(road)} km`,
+                        durationText: `about ${minutes} mins`,
+                        estimated: true
+                    });
+                }
+            });
+        }));
+        return results;
+    }
+
     // Haversine fallback for when Google Maps API is unavailable
     calculateDistanceHaversine(lat1, lng1, lat2, lng2) {
         const R = 6371;
