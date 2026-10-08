@@ -52,7 +52,8 @@ class DutyCalendarService {
     // on it. Paints both grids; no Maps call and no hospital population.
     async getCounts(user, from, to) {
         const settings = await this.getSettings();
-        const cacheKey = `calendar:counts:${user.id}:${from}:${to}`;
+        const gen = await cacheService.getGeneration(`calendar:counts:${user.id}`);
+        const cacheKey = `calendar:counts:${user.id}:g${gen}:${from}:${to}`;
 
         const cached = await cacheService.get(cacheKey);
         if (cached) return cached;
@@ -100,7 +101,7 @@ class DutyCalendarService {
     // Drop a user's cached counts after they change their own duties
     async invalidateCounts(userId) {
         try {
-            await cacheService.invalidatePattern(`calendar:counts:${userId}:*`);
+            await cacheService.bumpGeneration(`calendar:counts:${userId}`, 24 * 60 * 60);
         } catch (error) {
             logger.error('Error clearing calendar counts cache:', error);
         }

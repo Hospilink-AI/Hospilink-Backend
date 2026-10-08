@@ -2570,7 +2570,7 @@ class AdminService {
         });
         // Hospital maps are cached for 2 minutes; show privacy changes straight away
         if (key.startsWith('privacy.')) {
-            await cacheService.invalidatePattern('nearby:staff:*');
+            await cacheService.invalidateAllNearbyStaff();
         }
         return saved;
     }

@@ -1195,7 +1195,7 @@ class ProfileService {
                 cacheService.invalidateProfile(userId, 'staff'),
                 cacheService.del(`upcoming:duties:${userId}`),
                 // Invalidate nearby staff cache for hospitals
-                cacheService.invalidatePattern('nearby:staff:*'),
+                cacheService.invalidateAllNearbyStaff(),
                 // Update availability cache
                 cacheService.setStaffAvailability(userId, finalAvailability, 60),
                 // Invalidate verification cache to refresh availability status
@@ -1231,7 +1231,7 @@ class ProfileService {
             }
 
             // Check cache first (2 minutes for location-based queries)
-            const cacheKey = `nearby:staff:${hospitalUserId}:${radiusKm}:${role || 'all'}`;
+            const cacheKey = await cacheService.nearbyStaffKey(hospitalUserId, radiusKm, role);
             const cached = await cacheService.get(cacheKey);
             if (cached) {
                 return {

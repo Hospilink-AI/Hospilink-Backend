@@ -43,34 +43,69 @@ class CacheService {
         }
     }
 
+    // Walks the whole keyspace, so keep it for rare admin actions. Hot paths
+    // use a generation counter instead (see bumpGeneration).
     async invalidatePattern(pattern) {
         try {
             const client = await redisClient.getClientAsync();
+            // ioredis adds keyPrefix to keys but not to SCAN patterns, and SCAN
+            // returns full names that DEL would prefix a second time
+            const prefix = client.options?.keyPrefix || '';
 
-            // SCAN instead of KEYS — non-blocking cursor iteration.
-            // KEYS blocks the entire Redis server for the full scan duration.
-            // SCAN processes a small batch per call, keeping Redis responsive.
-            const keys = [];
+            let removed = 0;
             let cursor = '0';
             do {
                 const [nextCursor, batch] = await client.scan(
                     cursor,
-                    'MATCH', pattern,
-                    'COUNT', 100
+                    'MATCH', `${prefix}${pattern}`,
+                    'COUNT', 1000
                 );
                 cursor = nextCursor;
-                keys.push(...batch);
+                if (batch.length > 0) {
+                    const keys = batch.map(key => (prefix && key.startsWith(prefix) ? key.slice(prefix.length) : key));
+                    // UNLINK frees memory in the background, unlike DEL
+                    await client.unlink(...keys);
+                    removed += keys.length;
+                }
             } while (cursor !== '0');
-
-            if (keys.length > 0) {
-                // DEL accepts multiple keys — one round trip regardless of count
-                await client.del(...keys);
-            }
-            return keys.length;
+            return removed;
         } catch (error) {
             logger.error('Cache pattern delete error:', error);
             return 0;
         }
+    }
+
+    // Cache generations: a key family includes its generation number, and
+    // invalidating the family is one INCR. Old entries expire on their TTL.
+    async getGeneration(name) {
+        try {
+            const client = await redisClient.getClientAsync();
+            return (await client.get(`gen:${name}`)) || '0';
+        } catch (error) {
+            return '0';
+        }
+    }
+
+    async bumpGeneration(name, ttlSeconds = 7 * 24 * 60 * 60) {
+        try {
+            const client = await redisClient.getClientAsync();
+            await client.multi().incr(`gen:${name}`).expire(`gen:${name}`, ttlSeconds).exec();
+            return true;
+        } catch (error) {
+            logger.error('Cache generation bump error:', error);
+            return false;
+        }
+    }
+
+    // Hospital staff map: one family for every hospital, since any doctor's
+    // availability or privacy change can show on any hospital's map
+    async nearbyStaffKey(hospitalUserId, radiusKm, role) {
+        const gen = await this.getGeneration('nearby:staff');
+        return `nearby:staff:g${gen}:${hospitalUserId}:${radiusKm}:${role || 'all'}`;
+    }
+
+    async invalidateAllNearbyStaff() {
+        return this.bumpGeneration('nearby:staff');
     }
 
     // Pipeline operations for batch cache operations
@@ -278,17 +313,17 @@ class CacheService {
 
     // Invalidate all availability-related cache for a user
     async invalidateUserAvailabilityCache(userId) {
-        const patterns = [
+        const keys = [
             `availability:${userId}`,
-            `upcoming:duties:${userId}`,
-            `nearby:staff:*`
+            `upcoming:duties:${userId}`
         ];
-        
-        const operations = patterns.map(pattern => ({
+
+        const operations = keys.map(key => ({
             type: 'del',
-            key: pattern
+            key
         }));
-        
+
+        await this.invalidateAllNearbyStaff();
         return await this.pipeline(operations);
     }
 
@@ -356,8 +391,7 @@ class CacheService {
 
     // Invalidate all nearby staff cache for a hospital
     async invalidateNearbyStaffCache(hospitalId) {
-        const pattern = `nearby:staff:${hospitalId}:*`;
-        return await this.invalidatePattern(pattern);
+        return await this.invalidateAllNearbyStaff();
     }
 
     // Invalidate all admin nearby staff cache for a hospital

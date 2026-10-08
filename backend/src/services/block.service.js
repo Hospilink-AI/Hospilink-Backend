@@ -112,7 +112,7 @@ class BlockService {
     }
 
     async _clearMapCache(hospitalUserId) {
-        if (hospitalUserId) await cacheService.invalidatePattern(`nearby:staff:${hospitalUserId}:*`);
+        if (hospitalUserId) await cacheService.invalidateAllNearbyStaff();
     }
 
     async _staffFor(userId, select) {
