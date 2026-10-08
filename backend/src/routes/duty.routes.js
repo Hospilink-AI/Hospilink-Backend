@@ -32,6 +32,9 @@ const {
 router.use(protect);
 router.use(checkSuspension);
 
+// Price rules and market-rate suggestions for posting a duty
+router.get('/hospitals/current/pricing', authorize('hospital', 'admin'), dutyController.getPricing);
+
 router.post(
     '/hospitals/:hospitalId/duties',
     authorize('hospital'),

@@ -62,7 +62,13 @@ const RULES = {
     'offer.stepMinutes': integer(5, 720),
     'offer.maxRadiusKm': integer(5, 200),
     'offer.inviteWindowMinutes': integer(5, 240),
-    'offer.availabilityHeadStartMinutes': integer(0, 60)
+    'offer.availabilityHeadStartMinutes': integer(0, 60),
+
+    // Market-rate suggestions: inside the duty price rules (₹499-₹9,999, 3-24 hours)
+    'pricing.rmoCasualtyTotal': integer(499, 9999),
+    'pricing.rmoCasualtyHours': integer(3, 24),
+    'pricing.rmoIcuTotal': integer(499, 9999),
+    'pricing.rmoIcuHours': integer(3, 24)
 };
 
 // Rules that compare two keys. Checked against the *other* key's current
