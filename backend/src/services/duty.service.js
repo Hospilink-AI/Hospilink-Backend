@@ -12,7 +12,6 @@ const {
 } = require('../utils/helpers');
 const geocodingService = require('./geocoding.service');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
-const { priceRuleError } = require('../utils/dutyPricing');
 const { ALLOWED_ROLES } = require('../utils/constants');
 const User = require('../models/User');
 const {
@@ -38,6 +37,7 @@ const locationBasedStaffService = require('./locationBasedStaff.service');
 const dutyOfferService = require('./dutyOffer.service');
 const blockService = require('./block.service');
 const systemConfigService = require('./systemConfig.service');
+const { priceRuleError } = require('../utils/dutyPricing');
 const {
     AppError,
     ValidationError,
