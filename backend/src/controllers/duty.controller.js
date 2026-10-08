@@ -23,9 +23,8 @@ const dutyOfferService = require('../services/dutyOffer.service');
 const blockService = require('../services/block.service');
 const dutyInviteService = require('../services/dutyInvite.service');
 const systemConfigService = require('../services/systemConfig.service');
-const { anesthesiaFields } = require('../utils/dutyPricing');
 const dutyRateRaiseService = require('../services/dutyRateRaise.service');                    
-const { pricingForHospitals } = require('../utils/dutyPricing');                    
+const { anesthesiaFields, pricingForHospitals } = require('../utils/dutyPricing');
 
 // Extend logger with debug method
 logger.debug = (message) => {
