@@ -14,7 +14,7 @@ jest.mock('../src/services/fcm.service', () => ({
     sendToUsers: async (ids) => { mockPushes.push(...ids); return { successCount: ids.length, failureCount: 0 }; }
 }));
 jest.mock('../src/services/websocketManager', () => ({
-    isUserOnline: () => false, emitToUser: () => {}, sendUnreadCount: () => {}
+    isUserOnline: () => false, onlineAmong: async () => new Set(), emitToUser: () => {}, sendUnreadCount: () => {}
 }));
 
 const MedicalStaff = require('../src/models/MedicalStaff');
