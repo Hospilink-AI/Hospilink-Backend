@@ -94,13 +94,12 @@ describe('app setup', () => {
 
 describe('log levels', () => {
     it('writes debug lines only when LOG_LEVEL asks for them', () => {
-        const real = jest.requireActual('../src/utils/logger');
-        const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
+        const lines = [];
+        const real = jest.requireActual('../src/utils/logger').build({ write: (line) => lines.push(line) });
         real.debug('hidden');
-        expect(spy).not.toHaveBeenCalled();
+        expect(lines).toHaveLength(0);
         real.info('shown');
-        expect(spy).toHaveBeenCalledTimes(1);
-        spy.mockRestore();
+        expect(lines).toHaveLength(1);
     });
 });
 
