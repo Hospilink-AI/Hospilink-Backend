@@ -10,6 +10,17 @@ const { hasDutyStarted, istDayRange } = require('../utils/calendar.helper');
 const staffLocator = require('./staffLocator.service');
 const dutyOfferService = require('./dutyOffer.service');
 const blockService = require('./block.service');
+const ratingAlgorithmService = require('./ratingAlgorithm.service');
+
+// The locality of a hospital address: the last part that isn't the city,
+// state or pincode. "12 MG Road, Kothrud, Pune 411038" gives "Kothrud".
+function areaFromAddress(address, city, state) {
+    const skip = [city, state].filter(Boolean).map(s => s.trim().toLowerCase());
+    const parts = String(address || '').split(',')
+        .map(p => p.replace(/\b\d{6}\b/g, '').trim())
+        .filter(p => p && !/^\d+$/.test(p) && !skip.includes(p.toLowerCase()) && p.toLowerCase() !== 'india');
+    return parts.length > 1 ? parts[parts.length - 1] : null;
+}
 
 class LocationBasedStaffService {
     // Calculate bounding box for 50km radius (in degrees: ~111 km per degree)
@@ -121,7 +132,7 @@ class LocationBasedStaffService {
 
         // Fetch all available duties for this staff's job role — no count cap
         const duties = await Duty.find(query)
-            .populate('hospital', 'hospitalLegalName coordinates city state')
+            .populate('hospital', 'hospitalLegalName coordinates city state currentAddress verificationStatus averageRating totalRatings user')
             .sort({ date: 1, startTime: 1 });
 
         console.log(`[AvailableJobs] Total duties fetched from DB: ${duties.length} (role: ${medicalStaff.jobRole})`);
@@ -288,6 +299,7 @@ class LocationBasedStaffService {
         });
 
         await this.attachSpots(jobsWithDistance);
+        await this.attachHospitalFacts(jobsWithDistance);
 
         console.log(`[AvailableJobs] Summary:`);
         console.log(`  DB fetched            : ${duties.length}`);
@@ -334,6 +346,35 @@ class LocationBasedStaffService {
         return jobs;
     }
 
+    // Locality, verified status and rating of each offer's hospital. Ratings
+    // come from one batched call for all the hospitals in the feed.
+    async attachHospitalFacts(jobs) {
+        const hospitals = new Map();
+        for (const job of jobs) {
+            if (job.hospital?._id) hospitals.set(String(job.hospital._id), job.hospital);
+        }
+        const list = [...hospitals.values()];
+        let ratings = [];
+        try {
+            ratings = await ratingAlgorithmService.getEffectiveRatingsForMany(list, 'staff_to_hospital');
+        } catch (error) {
+            console.error('[AvailableJobs] Hospital ratings unavailable:', error.message);
+        }
+        const facts = new Map(list.map((h, i) => [String(h._id), {
+            area: areaFromAddress(h.currentAddress, h.city, h.state),
+            verificationStatus: h.verificationStatus || null,
+            effectiveRating: ratings[i]?.ratingShown ?? null,
+            totalRatings: h.totalRatings || 0
+        }]));
+
+        for (const job of jobs) {
+            if (!job.hospital?._id) continue;
+            const { user, averageRating, currentAddress, ...hospital } = job.hospital;
+            job.hospital = { ...hospital, ...facts.get(String(job.hospital._id)) };
+        }
+        return jobs;
+    }
+
     // Helper method to get staff current location
     async getStaffCurrentLocation(staffId) {
         try {
@@ -358,3 +399,4 @@ class LocationBasedStaffService {
 }
 
 module.exports = new LocationBasedStaffService();
+module.exports.areaFromAddress = areaFromAddress;
