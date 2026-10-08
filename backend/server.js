@@ -75,27 +75,38 @@ const startServer = async () => {
     }
 };
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-    logger.error(`Uncaught Exception: ${error.message}`);
-    process.exit(1);
+// A promise rejected with no handler (a missed .catch on background work):
+// logged with its stack, and the server keeps serving. Crashing here would
+// drop every request and socket on this task over one stray promise.
+process.on('unhandledRejection', (reason) => {
+    const detail = reason instanceof Error ? reason.stack : String(reason);
+    logger.error(`Unhandled promise rejection (server kept running): ${detail}`);
 });
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-    logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`);
-    process.exit(1);
+// A thrown error nothing caught: the process may be in a broken state, so it
+// stops. In-flight requests finish first, then the task exits with an error
+// and AWS starts a fresh one.
+let running = null;
+let stopping = false;
+process.on('uncaughtException', (error) => {
+    logger.error(`Uncaught exception, shutting down: ${error && error.stack ? error.stack : error}`);
+    if (running && !stopping) {
+        stopping = true;
+        shutdown('uncaughtException', running, 1);
+    } else {
+        process.exit(1);
+    }
 });
 
 // Stop taking requests, let in-flight ones finish, then close sockets and
 // connections. Sockets reconnect to the other tasks during a rolling deploy.
 const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 25000;
 
-function shutdown(signal, { server, io }) {
+function shutdown(signal, { server, io }, exitCode = 0) {
     logger.info(`${signal} received, shutting down gracefully`);
     const force = setTimeout(() => {
         logger.warn('Shutdown timed out, exiting');
-        process.exit(0);
+        process.exit(exitCode);
     }, SHUTDOWN_TIMEOUT_MS);
     force.unref();
 
@@ -107,7 +118,7 @@ function shutdown(signal, { server, io }) {
             require('mongoose').connection.close(),
             require('./src/config/redis').disconnect()
         ]);
-        process.exit(0);
+        process.exit(exitCode);
     });
     // Idle keep-alive connections would otherwise hold the close open
     if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
@@ -115,7 +126,7 @@ function shutdown(signal, { server, io }) {
 
 startServer().then((started) => {
     if (started) {
-        let stopping = false;
+        running = started;
         for (const signal of ['SIGTERM', 'SIGINT']) {
             process.on(signal, () => {
                 if (stopping) return;
