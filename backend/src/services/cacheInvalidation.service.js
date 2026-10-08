@@ -192,10 +192,12 @@ class CacheInvalidationService {
                 .lean();
                 
             if (staff) {
+                // Same shape as getStaffVerification in accountsVerification.middleware
                 const freshData = {
                     verificationStatus: staff.verificationStatus,
-                    rejectionReason: staff.rejectionReason,
-                    isAvailable: staff.isAvailable
+                    status: staff.verificationStatus,
+                    rejectionReason: staff.rejectionReason || null,
+                    isAvailable: staff.isAvailable === true
                 };
                 
                 // Set fresh cache with 5-minute TTL
