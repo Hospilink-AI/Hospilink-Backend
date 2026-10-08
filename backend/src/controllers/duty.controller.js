@@ -582,6 +582,7 @@ exports.verifyEndOtp = asyncHandler(async (req, res) => {
 
         const staffUserId = duty.assignedTo?.user?._id?.toString();
         if (staffUserId) {
+            await notificationEmitter.emitDutyConfirmedToStaff(duty, staffUserId);
             await notificationEmitter.emitRateHospitalPrompt(duty, duty.hospital, staffUserId);
         }
     } catch (error) {
