@@ -314,7 +314,7 @@ const buildActivityLogQuery = (filters = {}) => {
     
     // Location filter (case-insensitive partial match)
     if (filters.location) {
-        query.location = new RegExp(filters.location, 'i');
+        query.location = new RegExp(require('./escapeRegex')(filters.location), 'i');
     }
     
     // IP address filter

@@ -43,6 +43,12 @@ app.options('*', cors(corsOptions));
 app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 
+// Production settings that are missing
+require("./config/startupChecks").warnAtStartup();
+
+// No MongoDB operators ("$ne", "$gt", ...) from request data
+app.use(require("./middleware/stripOperators.middleware").stripOperators);
+
 // Request ID middleware
 app.use((req, res, next) => {
   req.requestId = crypto.randomUUID();

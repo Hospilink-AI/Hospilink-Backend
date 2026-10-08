@@ -210,7 +210,7 @@ activityLogSchema.statics.getFilteredLogs = async function(filters = {}, options
 
     // Location filter
     if (filters.location) {
-        query.location = new RegExp(filters.location, 'i');
+        query.location = new RegExp(require('../utils/escapeRegex')(filters.location), 'i');
     }
 
     // IP address filter
