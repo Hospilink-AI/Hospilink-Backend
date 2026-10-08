@@ -62,9 +62,11 @@ router.get('/duties/:id/fill-progress', authorize('hospital'), requireHospitalVe
 // Favourites, past doctors and nearby doctors a hospital can invite to a duty
 router.get('/duties/invite-candidates', authorize('hospital'), requireHospitalVerification, validateInviteCandidatesQuery, dutyInviteController.getInviteCandidates);
 
-router.get('/duties/my-upcoming', authorize('staff'), requireStaffVerificationandisAvailable, dutyController.getMyUpcomingDuties);
+// Availability only stops new offers. Duties a doctor already accepted stay
+// reachable, and so does every step of working them, while availability is off.
+router.get('/duties/my-upcoming', authorize('staff'), requireVerifiedStaffOnly, dutyController.getMyUpcomingDuties);
 
-router.get('/duties/ongoing', authorize('staff'), requireStaffVerificationandisAvailable, validatePagination, dutyController.getOngoingDuties);
+router.get('/duties/ongoing', authorize('staff'), requireVerifiedStaffOnly, validatePagination, dutyController.getOngoingDuties);
 
 router.post(
     '/staff/accept-duty',
@@ -77,7 +79,7 @@ router.post(
 router.patch(
     '/duties/status',
     authorize('staff'),
-    requireStaffVerificationandisAvailable,
+    requireVerifiedStaffOnly,
     validateDutyStatusChange,
     dutyController.changeDutyStatus
 );
@@ -85,7 +87,7 @@ router.patch(
 router.post(
     '/duties/:id/request-start-otp',
     authorize('staff'),
-    requireStaffVerificationandisAvailable,
+    requireVerifiedStaffOnly,
     validateObjectId('id'),
     validateRequestStartOtp,
     dutyController.requestStartOtp
@@ -94,7 +96,7 @@ router.post(
 router.post(
     '/duties/:id/verify-start-otp',
     authorize('staff'),
-    requireStaffVerificationandisAvailable,
+    requireVerifiedStaffOnly,
     validateObjectId('id'),
     validateVerifyStartOtp,
     dutyController.verifyStartOtp
@@ -103,7 +105,7 @@ router.post(
 router.post(
     '/duties/:id/request-end-otp',
     authorize('staff'),
-    requireStaffVerificationandisAvailable,
+    requireVerifiedStaffOnly,
     validateObjectId('id'),
     dutyController.requestEndOtp
 );
@@ -154,7 +156,7 @@ router.patch(
 router.get(
     '/duties/statement',
     authorize('staff'),
-    requireStaffVerificationandisAvailable, 
+    requireVerifiedStaffOnly,
     validateStatementQuery,
     dutyController.getStatement
 );
@@ -171,7 +173,7 @@ router.get('/duties/auto-relist/month-to-date', authorize('hospital'), requireHo
 
 router.get('/duties/:id', validateObjectId('id'), authorize('staff', 'hospital', 'admin'), dutyController.getDutyDetail);
 
-router.post('/duties/:id/route', authorize('staff'), requireStaffVerificationandisAvailable, dutyController.getDutyRoute);
+router.post('/duties/:id/route', authorize('staff'), requireVerifiedStaffOnly, dutyController.getDutyRoute);
 
 router.patch('/duties/:id/cancel', authorize('hospital', 'staff'), requireHospitalVerification, requireVerifiedStaffOnly, validateDutyCancellation, dutyController.cancelDuty);
 
