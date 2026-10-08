@@ -51,3 +51,21 @@ test('access log lines go through the logger, without query strings', () => {
     expect(app).toContain('stream: logger.stream');
     expect(app).not.toMatch(/morgan\("combined"/);
 });
+
+test('console calls can be sent through the logger', () => {
+    const calls = [];
+    const fake = {};
+    const original = { info: logger.info, error: logger.error };
+    logger.info = (...args) => calls.push(['info', ...args]);
+    logger.error = (...args) => calls.push(['error', ...args]);
+    try {
+        logger.captureConsole(fake);
+        fake.log('Cron jobs scheduled');
+        fake.error('IDFY error:', 'timeout');
+    } finally {
+        Object.assign(logger, original);
+    }
+    expect(calls).toEqual([['info', 'Cron jobs scheduled'], ['error', 'IDFY error:', 'timeout']]);
+    const app = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
+    expect(app).toContain('if (process.env.NODE_ENV !== "test") logger.captureConsole();');
+});

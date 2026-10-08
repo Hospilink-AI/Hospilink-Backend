@@ -76,4 +76,18 @@ const logger = build(pino.destination({ dest: 1, sync: process.env.NODE_ENV === 
 // For tests: the same logger writing somewhere else
 logger.build = build;
 
+/**
+ * Send console.log / info / warn / error / debug through the logger too, so
+ * the many older console calls are also JSON lines written off the request
+ * path (and errors are trimmed the same way). Called once at start-up; not in
+ * tests, which keep the normal console.
+ */
+logger.captureConsole = (target = console) => {
+    target.log = (...args) => logger.info(...args);
+    target.info = (...args) => logger.info(...args);
+    target.warn = (...args) => logger.warn(...args);
+    target.error = (...args) => logger.error(...args);
+    target.debug = (...args) => logger.debug(...args);
+};
+
 module.exports = logger;
