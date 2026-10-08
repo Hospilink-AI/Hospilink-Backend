@@ -271,6 +271,14 @@ class LocationBasedStaffService {
             }
         }
 
+        // The doctor's own distance limit, when they set one
+        const maxDistanceKm = medicalStaff.preferences?.maxDistanceKm;
+        if (maxDistanceKm) {
+            for (let i = jobsWithDistance.length - 1; i >= 0; i--) {
+                if (jobsWithDistance[i].distance > maxDistanceKm) jobsWithDistance.splice(i, 1);
+            }
+        }
+
         // Sort: urgency first (high before low), relisted duties above
         // same-urgency non-relisted ones, distance as the final tiebreaker
         // ("sort position" — relisted duties rank above duties of

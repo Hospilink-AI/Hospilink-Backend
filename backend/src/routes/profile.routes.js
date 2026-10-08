@@ -13,7 +13,8 @@ const {
     validateDashboardLocationPermission,
     validateSendPhoneOTP,
     validateVerifyPhoneOTP,
-    validateResumeStageUpload
+    validateResumeStageUpload,
+    validatePreferencesUpdate
 } = require('../middleware/validation.middleware');
 const { staffAvailabilityRateLimit, phoneOtpRateLimit, verifyPhoneOtpRateLimit } = require('../middleware/rateLimit.middleware');
 const upload = require('../middleware/upload.middleware');
@@ -32,6 +33,10 @@ router.put('/me', validateProfileUpdate, profileController.updateMyProfile);
 
 // Check profile completion status
 router.get('/status', profileController.checkProfileStatus);
+
+// Doctor's notification, language and distance preferences
+router.get('/preferences', authorize('staff'), profileController.getPreferences);
+router.patch('/preferences', authorize('staff'), validatePreferencesUpdate, profileController.updatePreferences);
 
 // Send OTP to phone number — user clicks "Verify" button on the profile form
 router.post('/send-phone-otp',
