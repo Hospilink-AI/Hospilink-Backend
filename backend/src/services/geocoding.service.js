@@ -1,5 +1,12 @@
 const axios = require('axios');
 const redisClient = require('../config/redis');
+const logger = require('../utils/logger');
+
+const DISTANCE_BATCH_SIZE = 25; // Distance Matrix destinations per request
+const DISTANCE_CACHE_SECONDS = 600;
+// Straight-line to road distance, and average city speed, for estimates
+const ROAD_FACTOR = 1.3;
+const ESTIMATED_SPEED_KMH = 25;
 
 class GeocodingService {
     constructor() {
@@ -191,102 +198,117 @@ class GeocodingService {
 
 
 
-    // Calculate batch distance and ETA using Google Maps Distance Matrix API
-    // destinations: array of { id, latitude, longitude }
-    // Returns: Map of id → { distance, duration, distanceText, durationText }
+    // Driving distance and time from one origin to many destinations
+    // ({ id, latitude, longitude }). Returns { resultMap: id -> result, totalApiCalls }.
+    //   - Cached for 10 minutes per pair, both ends rounded to about 100 m, so
+    //     a doctor refreshing the feed or a hospital reopening its map costs
+    //     no Maps call.
+    //   - Uncached destinations go out in batches of 25, all at once.
+    //   - If Maps fails or has no key, each destination gets a straight-line
+    //     estimate (estimated: true) instead of failing the whole screen.
     async calculateBatchDistanceAndETA(originLat, originLng, destinations) {
-        console.log(`Starting batch distance calculation for ${destinations.length} destinations`);
-            
         if (!destinations || destinations.length === 0) {
             return { resultMap: new Map(), totalApiCalls: 0 };
         }
-    
+
+        const resultMap = new Map();
+        const keyFor = (d) => `dm:${Number(originLat).toFixed(3)}:${Number(originLng).toFixed(3)}:${Number(d.latitude).toFixed(3)}:${Number(d.longitude).toFixed(3)}`;
+
+        let redis = null;
+        let missing = destinations;
         try {
-            if (!this.apiKey) {
-                throw new Error('Google Maps API key is required for batch distance calculation');
-            }
-    
-            // Split into batches of 25 (Google Maps free tier limit)
-            const batchSize = 25;
-            const batches = [];
-            for (let i = 0; i < destinations.length; i += batchSize) {
-                batches.push(destinations.slice(i, i + batchSize));
-            }
-    
-            console.log(`Split into ${batches.length} batch(es) of max ${batchSize} destinations each`);
-    
-            const resultMap = new Map();
-            let totalApiCalls = 0;
-    
-            for (const batch of batches) {
-                const destinationCoords = batch.map(d => `${d.latitude},${d.longitude}`).join('|');
-                const destinationIds = batch.map(d => d.id);
-    
-                const requestParams = {
-                    origins: `${originLat},${originLng}`,
-                    destinations: destinationCoords,
-                    key: this.apiKey,
-                    mode: 'driving',
-                    region: 'in',
-                    traffic_model: 'best_guess',
-                    departure_time: 'now'
-                };
-    
-                console.log(`Making batch API call for ${batch.length} destinations`);
-                console.log('Request URL:', this.distanceMatrixUrl);
-                console.log('Request params:', {
-                    ...requestParams,
-                    key: this.apiKey ? 'API_KEY_PRESENT' : 'NO_API_KEY'
-                });
-    
-                const response = await axios.get(this.distanceMatrixUrl, {
-                    params: requestParams,
-                    timeout: 10000,
-                    headers: {
-                        'Accept': 'application/json',
-                        'User-Agent': 'HospiLink-Backend/1.0'
-                    }
-                });
-    
-                totalApiCalls++;
-                console.log(`Response status: ${response.status}`);
-    
-                if (response.data.status === 'OK' && response.data.rows[0]) {
-                    const elements = response.data.rows[0].elements;
-                        
-                    elements.forEach((element, index) => {
-                        if (element.status === 'OK') {
-                            const distance = element.distance.value / 1000; // Convert to km
-                            const duration = element.duration.value / 60; // Convert to minutes
-                                
-                            resultMap.set(destinationIds[index], {
-                                distance: Math.round(distance * 100) / 100, // Round to 2 decimal places
-                                duration: Math.round(duration),
-                                distanceText: element.distance.text,
-                                durationText: element.duration.text
-                            });
-                        } else {
-                            console.warn(`Destination ${destinationIds[index]} returned status: ${element.status}`);
-                        }
+            redis = await redisClient.getClientAsync();
+            const cached = await redis.mget(...destinations.map(keyFor));
+            missing = [];
+            destinations.forEach((d, i) => {
+                if (cached[i]) resultMap.set(d.id, JSON.parse(cached[i]));
+                else missing.push(d);
+            });
+        } catch (error) {
+            redis = null;
+        }
+
+        const batches = [];
+        for (let i = 0; i < missing.length; i += DISTANCE_BATCH_SIZE) {
+            batches.push(missing.slice(i, i + DISTANCE_BATCH_SIZE));
+        }
+
+        let totalApiCalls = 0;
+        const fresh = [];
+        await Promise.all(batches.map(async (batch) => {
+            let elements = null;
+            if (this.apiKey) {
+                try {
+                    totalApiCalls++;
+                    const response = await axios.get(this.distanceMatrixUrl, {
+                        params: {
+                            origins: `${originLat},${originLng}`,
+                            destinations: batch.map(d => `${d.latitude},${d.longitude}`).join('|'),
+                            key: this.apiKey,
+                            mode: 'driving',
+                            region: 'in',
+                            traffic_model: 'best_guess',
+                            departure_time: 'now'
+                        },
+                        timeout: 10000,
+                        headers: { 'Accept': 'application/json', 'User-Agent': 'HospiLink-Backend/1.0' }
                     });
-                        
-                    console.log(`Successfully calculated distances for ${elements.length} destinations in this batch`);
-                } else {
-                    console.error('Google Maps API returned non-OK status:', response.data.status);
+                    if (response.data.status === 'OK' && response.data.rows[0]) {
+                        elements = response.data.rows[0].elements;
+                    } else {
+                        console.error('Google Maps API returned non-OK status:', response.data.status);
+                    }
+                } catch (error) {
+                    console.error('Batch distance calculation error:', error.message);
                 }
             }
-    
-            console.log(`Batch calculation completed: ${resultMap.size}/${destinations.length} successful, ${totalApiCalls} API call(s)`);
-            return { resultMap, totalApiCalls };
-    
-        } catch (error) {
-            console.error('Batch distance calculation error:', error.message);
-            if (error.response) {
-                console.error('Error response status:', error.response.status);
-                console.error('Error response data:', JSON.stringify(error.response.data, null, 2));
-            }
-            throw new Error(`Batch distance calculation error: ${error.message}`);
+
+            batch.forEach((d, index) => {
+                const element = elements?.[index];
+                if (element?.status === 'OK') {
+                    const result = {
+                        distance: Math.round((element.distance.value / 1000) * 100) / 100,
+                        duration: Math.round(element.duration.value / 60),
+                        distanceText: element.distance.text,
+                        durationText: element.duration.text
+                    };
+                    resultMap.set(d.id, result);
+                    fresh.push([keyFor(d), result]);
+                } else if (!elements) {
+                    // Maps unavailable: estimate rather than fail
+                    resultMap.set(d.id, this.estimateDistance(originLat, originLng, d.latitude, d.longitude));
+                }
+                // Otherwise Maps answered but found no route (e.g. ZERO_RESULTS): left out, as before
+            });
+        }));
+
+        if (redis && fresh.length) {
+            const pipeline = redis.pipeline();
+            for (const [key, result] of fresh) pipeline.setex(key, DISTANCE_CACHE_SECONDS, JSON.stringify(result));
+            pipeline.exec().catch(() => {});
         }
+
+        logger.debug(`Batch distances: ${destinations.length} asked, ${destinations.length - missing.length} cached, ${totalApiCalls} Maps call(s)`);
+        return { resultMap, totalApiCalls };
+    }
+
+    // Road distance and time guessed from the straight line, for when Maps is down
+    estimateDistance(originLat, originLng, destLat, destLng) {
+        const R = 6371;
+        const toRad = (deg) => deg * Math.PI / 180;
+        const dLat = toRad(destLat - originLat);
+        const dLng = toRad(destLng - originLng);
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(originLat)) * Math.cos(toRad(destLat)) * Math.sin(dLng / 2) ** 2;
+        const straight = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distance = Math.round(straight * ROAD_FACTOR * 100) / 100;
+        const duration = Math.max(1, Math.round((distance / ESTIMATED_SPEED_KMH) * 60));
+        return {
+            distance,
+            duration,
+            distanceText: `about ${distance < 10 ? distance.toFixed(1) : Math.round(distance)} km`,
+            durationText: `about ${duration} mins`,
+            estimated: true
+        };
     }
 
 
