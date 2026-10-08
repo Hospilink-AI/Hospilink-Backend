@@ -103,3 +103,15 @@ describe('log levels', () => {
         spy.mockRestore();
     });
 });
+
+describe('profile cache', () => {
+    it('lives shorter than the signed links it holds', () => {
+        const fs = require('fs');
+        const path = require('path');
+        const profile = fs.readFileSync(path.join(__dirname, '../src/services/profile.service.js'), 'utf8');
+        const s3 = fs.readFileSync(path.join(__dirname, '../src/services/s3.service.js'), 'utf8');
+        const linkSeconds = Number(s3.match(/expiresIn: (\d+)/)[1]);
+        const cacheSeconds = Number(profile.match(/setProfile\(userId, user\.role, result, (\d+)\)/)[1]);
+        expect(linkSeconds - cacheSeconds).toBeGreaterThanOrEqual(300);
+    });
+});

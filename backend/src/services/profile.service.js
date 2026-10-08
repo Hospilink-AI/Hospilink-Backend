@@ -634,7 +634,9 @@ class ProfileService {
             };
 
             // Cache for 15 minutes
-            await cacheService.setProfile(userId, user.role, result);
+            // Shorter than the 15-minute signed links inside it, so a cached
+            // profile never hands out a link about to expire
+            await cacheService.setProfile(userId, user.role, result, 600);
 
             return result;
         } catch (error) {
