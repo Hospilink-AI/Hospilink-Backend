@@ -1,5 +1,6 @@
 const MedicalStaff = require('../models/MedicalStaff');
 const Duty = require('../models/Duty');
+const mongoose = require('mongoose');
 const Hospital = require('../models/Hospital');
 const geocodingService = require('./geocoding.service');
 const redisClient = require('../config/redis');
@@ -286,6 +287,8 @@ class LocationBasedStaffService {
             return a.distance - b.distance;
         });
 
+        await this.attachSpots(jobsWithDistance);
+
         console.log(`[AvailableJobs] Summary:`);
         console.log(`  DB fetched            : ${duties.length}`);
         console.log(`  Valid (pre-filter)    : ${validDuties.length}`);
@@ -304,6 +307,33 @@ class LocationBasedStaffService {
 
 
     
+    // spotsTotal / spotsOpen on duties from a multi-slot post, in one query
+    async attachSpots(jobs) {
+        const groupIds = [...new Set(jobs.filter(j => j.groupId).map(j => String(j.groupId)))];
+        if (groupIds.length === 0) return jobs;
+
+        const counts = await Duty.aggregate([
+            { $match: { groupId: { $in: groupIds.map(id => new mongoose.Types.ObjectId(id)) } } },
+            {
+                $group: {
+                    _id: '$groupId',
+                    total: { $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 0, 1] } },
+                    open: { $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] } }
+                }
+            }
+        ]);
+        const byGroup = new Map(counts.map(c => [String(c._id), c]));
+
+        for (const job of jobs) {
+            const group = job.groupId && byGroup.get(String(job.groupId));
+            if (group) {
+                job.spotsTotal = group.total;
+                job.spotsOpen = group.open;
+            }
+        }
+        return jobs;
+    }
+
     // Helper method to get staff current location
     async getStaffCurrentLocation(staffId) {
         try {

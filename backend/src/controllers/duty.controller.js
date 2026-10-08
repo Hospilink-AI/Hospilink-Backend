@@ -9,6 +9,7 @@ const User = require('../models/User');
 const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
 const Duty = require('../models/Duty');
+const mongoose = require('mongoose');
 const logger = require('../utils/logger');
 const dutyService = require('../services/duty.service');
 const locationTrackingService = require('../services/locationTracking.service');
@@ -76,6 +77,11 @@ exports.createDuty = asyncHandler(async (req, res) => {
         ...(typeof auto_relist_enabled === 'boolean' && { autoRelist: { enabled: auto_relist_enabled } })
     };
 
+
+    // Slots of one post share a groupId
+    if (numberOfDuties > 1) {
+        dutyData.groupId = new mongoose.Types.ObjectId();
+    }
 
     // Create multiple duties based on staff_count
     const createdDuties = [];
