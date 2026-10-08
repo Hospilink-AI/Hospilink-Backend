@@ -12,6 +12,7 @@ const {
 } = require('../utils/helpers');
 const geocodingService = require('./geocoding.service');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
+const { priceRuleError } = require('../utils/dutyPricing');
 const { ALLOWED_ROLES } = require('../utils/constants');
 const User = require('../models/User');
 const {
@@ -1215,6 +1216,7 @@ class DutyService {
             if (!pricingValidation.allowed) {
                 throw new ValidationError(pricingValidation.reason);
             }
+            this._checkPriceRules(duty, { offeredRate: updateData.offeredRate });
             duty.offeredRate = updateData.offeredRate;
             await duty.save();
             await duty.populate({ path: 'hospital', populate: { path: 'user', select: 'name email' } });
@@ -1271,6 +1273,8 @@ class DutyService {
             }
         }
 
+        this._checkPriceRules(duty, updates);
+
         // Apply updates
         Object.assign(duty, updates);
         await duty.save();
@@ -1288,6 +1292,24 @@ class DutyService {
     }
 
 
+
+    // Price rules on an edit that changes the rate or the times. Edits that leave
+    // them alone don't fail on duties posted before the rules existed.
+    _checkPriceRules(duty, updates) {
+        const priceFields = ['offeredRate', 'date', 'endDate', 'startTime', 'endTime', 'isOvernightDuty'];
+        if (!priceFields.some(field => updates[field] !== undefined)) return;
+
+        const merged = {};
+        for (const field of priceFields) {
+            merged[field] = updates[field] !== undefined ? updates[field] : duty[field];
+        }
+        merged.category = duty.category;
+
+        const error = priceRuleError(merged);
+        if (error) {
+            throw new ValidationError(error);
+        }
+    }
 
     // "stays editable while the duty is available or assigned...
     // turning it off later does not undo a rise already applied" — a status

@@ -20,6 +20,7 @@ const {
 const mongoose = require('mongoose');
 const { isValidDateKey, daysBetweenKeys, istDateKey, addDaysToKey } = require('../utils/calendar.helper');
 const { parsePeriod } = require('../utils/analytics.helper');
+const { priceRuleError } = require('../utils/dutyPricing');
 
 // Longest window one calendar counts call may cover
 const MAX_CALENDAR_WINDOW_DAYS = 100;
@@ -857,6 +858,20 @@ const validateDutyCreation = (req, res, next) => {
         if (bufferTime <= now) {
             errors.push('Duty start time must be at least 15 minutes in the future. Cannot create duties for past or immediate times.');
         }
+    }
+
+    // Total ₹499-₹9,999 and 3-24 hours
+    const priceError = priceRuleError({
+        date,
+        endDate: req.body.end_date,
+        startTime: start_time,
+        endTime: req.body.end_time,
+        isOvernightDuty: req.body.is_overnight_duty,
+        offeredRate: req.body.offered_rate,
+        category: req.body.category
+    });
+    if (priceError) {
+        errors.push(priceError);
     }
     
     if (errors.length > 0) {
