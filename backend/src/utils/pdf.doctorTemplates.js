@@ -1,8 +1,17 @@
 // Doctor earnings statement and duty receipt in the HospiLink brand (navy band,
-// Manrope, payment status per duty). Print with waitUntil 'networkidle0' so
-// Manrope loads; without it the PDF falls back to the system sans.
+// Manrope, payment status per duty). Manrope is embedded in the page from
+// assets/fonts (SIL Open Font License, see OFL.txt there), so printing needs
+// no network.
 const fs = require('fs');
 const path = require('path');
+
+// Manrope variable font (weights 200-800), Latin and Latin Extended (which
+// has the rupee sign), read once
+const fontFile = (name) => fs.readFileSync(path.join(__dirname, '../assets/fonts/manrope', name)).toString('base64');
+const FONT_FACES = [
+    ['manrope-latin-wght-normal.woff2', 'U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD'],
+    ['manrope-latin-ext-wght-normal.woff2', 'U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF']
+].map(([file, range]) => `@font-face { font-family: Manrope; font-style: normal; font-weight: 200 800; src: url(data:font/woff2;base64,${fontFile(file)}) format('woff2'); unicode-range: ${range}; }`).join(' ');
 
 const LOGO = fs.readFileSync(path.join(__dirname, '../assets/brand/hospilink-lockup-horizontal-white.svg'), 'utf8')
     .replace(/width="\d+" height="\d+"/, 'height="34"');
@@ -33,8 +42,8 @@ const ROW_STATUS = { paid: STATUS.Paid, pending: STATUS['Will Pay Later'], uncon
 const METHOD = { upi: 'UPI', cash: 'Cash', bank: 'Bank transfer', bank_transfer: 'Bank transfer', will_pay_later: 'Pay later' };
 
 const BASE = `
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap">
 <style>
+  ${FONT_FACES}
   @page { size: A4; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Manrope, system-ui, -apple-system, 'Segoe UI', sans-serif; color: #0E1E3A; background: #fff; font-size: 12px; line-height: 1.5; }

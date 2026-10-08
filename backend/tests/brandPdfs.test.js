@@ -22,6 +22,7 @@ jest.mock('puppeteer-core', () => ({
                         await new Promise(r => setTimeout(r, 5));
                         if (mockFailNextContent) { mockFailNextContent = false; throw new Error('boom'); }
                     },
+                    evaluate: async () => { page.waitedForFonts = true; return true; },
                     pdf: async () => Buffer.from('%PDF'),
                     close: async () => { page.closed = true; mockOpenNow--; }
                 };
@@ -98,7 +99,9 @@ describe('pdf printing', () => {
     it('waits for the brand font on statements', async () => {
         const r = res();
         await pdf.generateEarningsPDF(r, statement);
-        expect(mockPages[mockPages.length - 1].options.waitUntil).toBe('networkidle0');
+        const page = mockPages[mockPages.length - 1];
+        expect(page.options.waitUntil).toBe('load');
+        expect(page.waitedForFonts).toBe(true);
         expect(r.headers['Content-Type']).toBe('application/pdf');
     });
 
