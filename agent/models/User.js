@@ -23,6 +23,17 @@ const userSchema = new mongoose.Schema({
         enum: ['super_admin', 'operations_manager', 'tech_support'],
         default: undefined
     },
+    // Same fields as the backend's User, for the same sign-in checks
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    deletion: {
+        requestedAt: Date,
+        scheduledFor: Date,
+        reason: String,
+        completedAt: Date
+    },
     password: {
         type: String,
         required: [true, 'Password is required'],
