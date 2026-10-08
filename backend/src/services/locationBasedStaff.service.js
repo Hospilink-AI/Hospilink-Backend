@@ -1,4 +1,3 @@
-const logger = require('../utils/logger');
 const MedicalStaff = require('../models/MedicalStaff');
 const Duty = require('../models/Duty');
 const Hospital = require('../models/Hospital');
@@ -74,11 +73,11 @@ class LocationBasedStaffService {
             throw new Error('Medical staff profile not found');
         }
 
-        logger.debug(`[AvailableJobs] Staff ID: ${staffId} | Job Role: ${medicalStaff.jobRole}`);
+        console.log(`[AvailableJobs] Staff ID: ${staffId} | Job Role: ${medicalStaff.jobRole}`);
 
         // Get staff current location (browser GPS from Redis, falls back to profile)
         const staffLocation = await this.getStaffCurrentLocation(staffId);
-        logger.debug(`[AvailableJobs] Staff location → lat: ${staffLocation.latitude}, lng: ${staffLocation.longitude}`);
+        console.log(`[AvailableJobs] Staff location → lat: ${staffLocation.latitude}, lng: ${staffLocation.longitude}`);
 
         // Widen any staged offers that are due before deciding what this doctor sees
         await dutyOfferService.runDueThrottled();
@@ -124,7 +123,7 @@ class LocationBasedStaffService {
             .populate('hospital', 'hospitalLegalName coordinates city state')
             .sort({ date: 1, startTime: 1 });
 
-        logger.debug(`[AvailableJobs] Total duties fetched from DB: ${duties.length} (role: ${medicalStaff.jobRole})`);
+        console.log(`[AvailableJobs] Total duties fetched from DB: ${duties.length} (role: ${medicalStaff.jobRole})`);
 
         // --- Step 1: Pre-filter before calling Google Maps ---
         // Remove duties missing hospital coordinates or that have already started
@@ -132,22 +131,22 @@ class LocationBasedStaffService {
 
         for (const duty of duties) {
             if (!duty.hospital?.coordinates?.coordinates) {
-                logger.debug(`[AvailableJobs] Skipping duty ${duty._id} — missing hospital coordinates`);
+                console.log(`[AvailableJobs] Skipping duty ${duty._id} — missing hospital coordinates`);
                 continue;
             }
 
             if (hasDutyStarted(duty, currentTime)) {
-                logger.debug(`[AvailableJobs] Skipping duty ${duty._id} — already started at ${duty.startTime} on ${duty.date}`);
+                console.log(`[AvailableJobs] Skipping duty ${duty._id} — already started at ${duty.startTime} on ${duty.date}`);
                 continue;
             }
 
             validDuties.push(duty);
         }
 
-        logger.debug(`[AvailableJobs] Valid duties after pre-filter (has coords + not started): ${validDuties.length}`);
+        console.log(`[AvailableJobs] Valid duties after pre-filter (has coords + not started): ${validDuties.length}`);
 
         if (validDuties.length === 0) {
-            logger.debug(`[AvailableJobs] No valid duties found — returning empty result`);
+            console.log(`[AvailableJobs] No valid duties found — returning empty result`);
             return { jobs: [], staffLocation };
         }
 
@@ -207,7 +206,7 @@ class LocationBasedStaffService {
             );
 
             if (straightLine > HAVERSINE_THRESHOLD_KM) {
-                logger.debug(`[AvailableJobs] Haversine skip: ${duty.hospital.hospitalLegalName} (${duty.hospital.city}) — ${straightLine.toFixed(1)}km straight-line > ${HAVERSINE_THRESHOLD_KM}km threshold`);
+                console.log(`[AvailableJobs] Haversine skip: ${duty.hospital.hospitalLegalName} (${duty.hospital.city}) — ${straightLine.toFixed(1)}km straight-line > ${HAVERSINE_THRESHOLD_KM}km threshold`);
                 skippedHospitals.add(hospitalId);
                 haversineSkippedCount++;
                 continue;
@@ -217,10 +216,10 @@ class LocationBasedStaffService {
             nearbyDuties.push(duty);
         }
 
-        logger.debug(`[AvailableJobs] After haversine pre-filter: ${nearbyDuties.length} duties | ${nearbyHospitals.size} unique nearby hospitals | ${haversineSkippedCount} duties skipped`);
+        console.log(`[AvailableJobs] After haversine pre-filter: ${nearbyDuties.length} duties | ${nearbyHospitals.size} unique nearby hospitals | ${haversineSkippedCount} duties skipped`);
 
         if (nearbyDuties.length === 0) {
-            logger.debug(`[AvailableJobs] No nearby duties — returning empty result`);
+            console.log(`[AvailableJobs] No nearby duties — returning empty result`);
             return { jobs: [], staffLocation };
         }
 
@@ -233,7 +232,7 @@ class LocationBasedStaffService {
 
         const batchSize = 25;
         const expectedApiCalls = Math.ceil(destinations.length / batchSize);
-        logger.debug(`[AvailableJobs] Google Maps batch call — unique hospitals: ${destinations.length} | duties: ${nearbyDuties.length} | expected API calls: ${expectedApiCalls}`);
+        console.log(`[AvailableJobs] Google Maps batch call — unique hospitals: ${destinations.length} | duties: ${nearbyDuties.length} | expected API calls: ${expectedApiCalls}`);
 
         // --- Step 4: Single batch call on unique hospitals only ---
         const { resultMap, totalApiCalls } = await geocodingService.calculateBatchDistanceAndETA(
@@ -242,7 +241,7 @@ class LocationBasedStaffService {
             destinations
         );
 
-        logger.debug(`[AvailableJobs] Google Maps API calls made: ${totalApiCalls} | successful results: ${resultMap.size}/${destinations.length}`);
+        console.log(`[AvailableJobs] Google Maps API calls made: ${totalApiCalls} | successful results: ${resultMap.size}/${destinations.length}`);
 
         // --- Step 5: Filter within 50km and build final result ---
         const jobsWithDistance = [];
@@ -254,7 +253,7 @@ class LocationBasedStaffService {
             const distanceResult = resultMap.get(hospitalId); // lookup by hospitalId
 
             if (!distanceResult) {
-                logger.debug(`[AvailableJobs] No distance result for hospital ${duty.hospital.hospitalLegalName} — skipping`);
+                console.log(`[AvailableJobs] No distance result for hospital ${duty.hospital.hospitalLegalName} — skipping`);
                 noResultCount++;
                 continue;
             }
@@ -287,15 +286,15 @@ class LocationBasedStaffService {
             return a.distance - b.distance;
         });
 
-        logger.debug(`[AvailableJobs] Summary:`);
-        logger.debug(`  DB fetched            : ${duties.length}`);
-        logger.debug(`  Valid (pre-filter)    : ${validDuties.length}`);
-        logger.debug(`  Haversine skipped     : ${haversineSkippedCount} duties (hospital > ${HAVERSINE_THRESHOLD_KM}km straight-line)`);
-        logger.debug(`  Unique hospitals sent : ${destinations.length}`);
-        logger.debug(`  Within 50km           : ${jobsWithDistance.length}`);
-        logger.debug(`  Outside 50km          : ${outsideRadiusCount}`);
-        logger.debug(`  No API result         : ${noResultCount}`);
-        logger.debug(`  Google Maps calls     : ${totalApiCalls}`);
+        console.log(`[AvailableJobs] Summary:`);
+        console.log(`  DB fetched            : ${duties.length}`);
+        console.log(`  Valid (pre-filter)    : ${validDuties.length}`);
+        console.log(`  Haversine skipped     : ${haversineSkippedCount} duties (hospital > ${HAVERSINE_THRESHOLD_KM}km straight-line)`);
+        console.log(`  Unique hospitals sent : ${destinations.length}`);
+        console.log(`  Within 50km           : ${jobsWithDistance.length}`);
+        console.log(`  Outside 50km          : ${outsideRadiusCount}`);
+        console.log(`  No API result         : ${noResultCount}`);
+        console.log(`  Google Maps calls     : ${totalApiCalls}`);
 
         return {
             jobs: jobsWithDistance,
