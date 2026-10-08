@@ -26,6 +26,7 @@ const SystemConfigService = require('./systemConfig.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const JobApplication = require('../models/JobApplication');
 const { ACTIVE_STATUSES } = require('../utils/jobApplication.constants');
+const { maskedExtractedData } = require('../utils/aadhaarMask');
 const {
     ValidationError,
     NotFoundError,
@@ -1380,7 +1381,7 @@ class AdminService {
                     uploadedAt: doc.uploadedAt,
                     verifiedAt: doc.verifiedAt,
                     rejectionReason: doc.rejectionReason,
-                    extractedData: doc.extractedData,
+                    extractedData: maskedExtractedData(doc.documentType, doc.extractedData),
                     url
                 });
             }
@@ -1647,6 +1648,7 @@ class AdminService {
                     try { url = await generatePreSignedURL(doc.s3Key); } catch (_) {}
                 }
                 const { s3Key, ...rest } = doc;
+                rest.extractedData = maskedExtractedData(doc.documentType, doc.extractedData);
                 return { ...rest, url };
             })
         );

@@ -4,6 +4,7 @@ const cacheService = require('../services/cache.service');
 const logger = require('../utils/logger');
 const notificationEmitter = require('../services/notificationEmitter');
 const identityCheck = require('../services/identityCheck.service');
+const { maskAadhaarDeep } = require('../utils/aadhaarMask');
 const activityLogEmitter = require('../services/activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 
@@ -84,6 +85,10 @@ exports.handleAadhaarWebhook = async (req, res) => {
             }
         }
 
+        // Stored with every Aadhaar number masked to its last 4 digits
+        const storedResponse = maskAadhaarDeep(data);
+        const storedDetails = storedResponse.parsed_details;
+
         const result = await Document.updateOne(
             {
                 "documents.verificationMeta.referenceId": requestId,
@@ -94,16 +99,16 @@ exports.handleAadhaarWebhook = async (req, res) => {
                     ? {
                         "documents.$.verificationStatus": "manual-pending-verification",
                         "documents.$.verificationMeta.status": reviewReason,
-                        "documents.$.verificationMeta.rawResponse": data,
+                        "documents.$.verificationMeta.rawResponse": storedResponse,
                         // DigiLocker's details, for the admin who reviews it
-                        ...(hasDetails ? { "documents.$.extractedData": data.parsed_details } : {})
+                        ...(hasDetails ? { "documents.$.extractedData": storedDetails } : {})
                     }
                     : {
                         "documents.$.verificationStatus": "auto-verified",
                         "documents.$.verificationMeta.status": "completed",
-                        "documents.$.verificationMeta.rawResponse": data,
+                        "documents.$.verificationMeta.rawResponse": storedResponse,
                         "documents.$.verificationMeta.verifiedAt": new Date(),
-                        "documents.$.extractedData": data.parsed_details
+                        "documents.$.extractedData": storedDetails
                     }
             }
         );

@@ -9,6 +9,7 @@ const notificationEmitter = require('./notificationEmitter');
 const idfyService = require("./idfy.service");
 const idfyResults = require("./idfyResults.service");
 const identityCheck = require("./identityCheck.service");
+const { maskAadhaarInText, maskAadhaarDeep, maskAadhaarNumber } = require("../utils/aadhaarMask");
 const { extractTextFromPDF } = require("./pdf.service");
 const { isDocumentExpired } = require("../utils/documentExpiryValidator");
 const logger = require('../utils/logger');
@@ -819,12 +820,17 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         throw err;
     }
 
+    // Only the last 4 digits of an Aadhaar number are kept (UIDAI rules);
+    // the full number was needed only for the checks above
+    const isAadhaar = documentType === "aadhaar-card";
     userDocs.documents.push({
         documentType,
         s3Key: key,
         fileName: file.originalname,
-        extractedText,
-        extractedData,
+        extractedText: isAadhaar ? maskAadhaarInText(extractedText) : extractedText,
+        extractedData: isAadhaar
+            ? { ...maskAadhaarDeep(extractedData), aadhaarNumber: maskAadhaarNumber(extractedData?.aadhaarNumber) }
+            : extractedData,
         verificationStatus,
         verificationMeta
     });
