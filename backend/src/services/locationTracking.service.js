@@ -11,6 +11,9 @@ class LocationTrackingService {
         this.LOCATION_TTL = parseInt(process.env.REDIS_TTL_LOCATION) || 7200; // 2 hours
         this.CLEANUP_TTL = parseInt(process.env.REDIS_TTL_CLEANUP) || 60; // 1 minutes
         this.ARRIVAL_THRESHOLD = 0.1; // 100 meters
+        // Road distance and ETA from Maps at most this often per doctor; the
+        // app sends a position every few seconds
+        this.ROUTE_REFRESH_MS = parseInt(process.env.TRACKING_ROUTE_REFRESH_MS, 10) || 60 * 1000;
         this.UPDATE_INTERVAL = 2000; // 2 seconds
 
 
@@ -70,18 +73,27 @@ class LocationTrackingService {
             };
 
 
-            // Calculate distance to hospital
+            // Distance to the hospital: by road from Maps once a minute, kept in
+            // between. The arrival check below uses the straight line.
             const hospitalData = await this.getHospitalLocation(existingData.hospitalId);
             if (hospitalData) {
-                const distanceInfo = await geocodingService.calculateDistanceAndETA(
-                    coordinates.latitude,
-                    coordinates.longitude,
-                    hospitalData.latitude,
-                    hospitalData.longitude
-                );
-
-                updatedData.distanceToHospital = distanceInfo.distance;
-                updatedData.estimatedArrival = Date.now() + (distanceInfo.duration * 60 * 1000);
+                const due = !existingData.routeCheckedAt || Date.now() - existingData.routeCheckedAt >= this.ROUTE_REFRESH_MS;
+                if (due) {
+                    try {
+                        const distanceInfo = await geocodingService.calculateDistanceAndETA(
+                            coordinates.latitude,
+                            coordinates.longitude,
+                            hospitalData.latitude,
+                            hospitalData.longitude
+                        );
+                        updatedData.distanceToHospital = distanceInfo.distance;
+                        updatedData.estimatedArrival = Date.now() + (distanceInfo.duration * 60 * 1000);
+                        updatedData.routeCheckedAt = Date.now();
+                    } catch (error) {
+                        logger.warn(`Route distance unavailable for staff ${staffId}: ${error.message}`);
+                    }
+                }
+                updatedData.straightLineKm = this.straightLineKm(coordinates, hospitalData);
             }
 
             // Update Redis
@@ -176,6 +188,15 @@ class LocationTrackingService {
 
 
 
+    straightLineKm(from, to) {
+        const toRad = (deg) => deg * Math.PI / 180;
+        const dLat = toRad(to.latitude - from.latitude);
+        const dLng = toRad(to.longitude - from.longitude);
+        const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(from.latitude)) * Math.cos(toRad(to.latitude)) * Math.sin(dLng / 2) ** 2;
+        return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
     // Check if staff has arrived at hospital
     async checkArrival(staffId, locationData, hospitalData) {
         try {
@@ -183,14 +204,10 @@ class LocationTrackingService {
                 return;
             }
 
-            const distance = await geocodingService.calculateDistanceAndETA(
-                locationData.latitude,
-                locationData.longitude,
-                hospitalData.latitude,
-                hospitalData.longitude
-            );
+            // A geofence, so the straight line is the right measure, and it needs no Maps call
+            const distanceKm = this.straightLineKm(locationData, hospitalData);
 
-            if (distance.distance <= this.ARRIVAL_THRESHOLD) {
+            if (distanceKm <= this.ARRIVAL_THRESHOLD) {
                 await this.handleStaffArrival(staffId, locationData);
             }
         } catch (error) {

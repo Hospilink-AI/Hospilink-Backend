@@ -112,91 +112,19 @@ class GeocodingService {
 
 
 
-    // Calculate distance and ETA using Google Maps Distance Matrix API
+    // Driving distance and time between two points. Shares the batch call's
+    // 10-minute cache and its straight-line estimate when Maps is down.
+    // Throws only when Maps answers that there is no route.
     async calculateDistanceAndETA(originLat, originLng, destLat, destLng) {
-        logger.debug('Starting distance calculation:', {
-            origin: `${originLat}, ${originLng}`,
-            destination: `${destLat}, ${destLng}`
-        });
-
-        try {
-            if (!this.apiKey) {
-                throw new Error('Google Maps API key is required for distance calculation');
-            }
-
-            logger.debug('Using Google Maps Distance Matrix API...');
-            const requestParams = {
-                origins: `${originLat},${originLng}`,
-                destinations: `${destLat},${destLng}`,
-                key: this.apiKey,
-                mode: 'driving',
-                region: 'in',
-                traffic_model: 'best_guess',
-                departure_time: 'now'  // Current time for traffic-aware calculations
-            };
-
-            logger.debug('Request URL:', this.distanceMatrixUrl);
-            logger.debug('Request params:', {
-                ...requestParams,
-                key: this.apiKey ? 'API_KEY_PRESENT' : 'NO_API_KEY'
-            });
-
-            // Build the full URL for debugging
-            const fullUrl = `${this.distanceMatrixUrl}?origins=${encodeURIComponent(requestParams.origins)}&destinations=${encodeURIComponent(requestParams.destinations)}&key=${requestParams.key}&mode=${requestParams.mode}&region=${requestParams.region}&traffic_model=${requestParams.traffic_model}&departure_time=${requestParams.departure_time}`;
-            logger.debug('Full request URL:', fullUrl);
-
-            const response = await axios.get(this.distanceMatrixUrl, {
-                params: requestParams,
-                timeout: 10000,
-                headers: {
-                    'Accept': 'application/json',
-                    'User-Agent': 'HospiLink-Backend/1.0'
-                }
-            });
-
-            logger.debug('Response status:', response.status);
-            logger.debug('Response data:', JSON.stringify(response.data, null, 2));
-
-            if (response.data.status === 'OK' && 
-                response.data.rows[0].elements[0].status === 'OK') {
-
-                const element = response.data.rows[0].elements[0];
-                const distance = element.distance.value / 1000; // Convert to km
-                const duration = element.duration.value / 60; // Convert to minutes
-
-                const result = {
-                    distance: Math.round(distance * 100) / 100, // Round to 2 decimal places
-                    duration: Math.round(duration),
-                    distanceText: element.distance.text,
-                    durationText: element.duration.text,
-                    source: 'google_maps_api'
-                };
-
-                logger.debug('Distance calculated using Google Maps API:', result);
-                return result;
-            }
-
-            logger.debug('Google Maps API returned non-OK status:', response.data.status);
-            logger.debug('Full response:', JSON.stringify(response.data, null, 2));
-            throw new Error(`Google Maps Distance Matrix API failed: ${response.data.status}`);
-
-        } catch (error) {
-            console.error('Google Maps Distance Matrix API error:', error.message);
-            if (error.response) {
-                console.error('Error response status:', error.response.status);
-                console.error('Error response data:', JSON.stringify(error.response.data, null, 2));
-                console.error('Error response headers:', error.response.headers);
-            } else if (error.request) {
-                console.error('No response received:', error.request);
-            } else {
-                console.error('Request setup error:', error.message);
-            }
-            
-            throw new Error(`Google Maps Distance Matrix API error: ${error.message}`);
+        const { resultMap } = await this.calculateBatchDistanceAndETA(originLat, originLng, [
+            { id: 'single', latitude: destLat, longitude: destLng }
+        ]);
+        const result = resultMap.get('single');
+        if (!result) {
+            throw new Error('Google Maps found no route between these points');
         }
+        return result;
     }
-
-
 
     // Driving distance and time from one origin to many destinations
     // ({ id, latitude, longitude }). Returns { resultMap: id -> result, totalApiCalls }.
