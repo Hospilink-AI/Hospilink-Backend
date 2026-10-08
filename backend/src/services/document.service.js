@@ -7,6 +7,7 @@ const { extractTextFromBuffer } = require("./ocr.service");
 const { paginateArray } = require("../utils/pagination");
 const notificationEmitter = require('./notificationEmitter');
 const idfyService = require("./idfy.service");
+const idfyResults = require("./idfyResults.service");
 const { extractTextFromPDF } = require("./pdf.service");
 const { isDocumentExpired } = require("../utils/documentExpiryValidator");
 const logger = require('../utils/logger');
@@ -188,6 +189,8 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
     let verificationStatus = "pending";
     let verificationMeta = null;
+    // DigiLocker link for an Aadhaar upload, once IDfy has it
+    let aadhaarRedirectUrl = null;
 
     let extractedText = "";
     let extractedData = {};
@@ -512,15 +515,8 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             type: documentType,
                             createdAt: new Date()
                         };
-                        try {
-                            processIdfyResultAsync(
-                                userDocs._id,
-                                idfyResponse.request_id,
-                                documentType
-                            );
-                        } catch (err) {
-                            logger.error(err.message);
-                        }
+                        // The result is fetched by the IDfy results job
+                        idfyResults.checkSoon(user._id, idfyResponse.request_id);
                     } else {
                         logger.warn(`IDFY request_id missing for type=${documentType}`);
                     }
@@ -540,7 +536,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
                     const idfyResponse = await idfyService.verifyAadhaarDigilocker(referenceId);
 
-                    console.log("AADHAAR CREATE RESPONSE:", JSON.stringify(idfyResponse, null, 2));
                     if (idfyResponse && idfyResponse.request_id) {
                         logger.info(`Aadhaar Digilocker task queued: requestId=${idfyResponse.request_id}`);
 
@@ -588,9 +583,11 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                             createdAt: new Date()
                         };
 
-                        for (let i = 0; i < 5; i++) {
+                        // IDfy usually has the DigiLocker link within a few
+                        // seconds; check every second, for up to 10 seconds
+                        for (let i = 0; i < 10; i++) {
 
-                            await new Promise(resolve => setTimeout(resolve, 2000));
+                            await new Promise(resolve => setTimeout(resolve, 1000));
 
                             const taskResult = await idfyService.getTaskResult(
                                 idfyResponse.request_id
@@ -602,6 +599,7 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                                 taskResult?.[0]?.source_output?.redirect_url;
 
                             if (redirectUrl) {
+                                aadhaarRedirectUrl = redirectUrl;
                                 break;
                             }
                         }
@@ -872,9 +870,9 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         }
     }
 
-    let redirectUrl = null;
+    let redirectUrl = aadhaarRedirectUrl;
 
-    if (verificationMeta?.requestId && documentType === "aadhaar-card") {
+    if (!redirectUrl && verificationMeta?.requestId && documentType === "aadhaar-card") {
 
         const result = await idfyService.getTaskResult(
             verificationMeta.requestId
@@ -896,79 +894,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         redirectUrl
     };
 };
-const processIdfyResultAsync = async (userDocId, requestId, documentType) => {
-    let attempts = 0;
-    const maxAttempts = 30;
-
-    const interval = setInterval(async () => {
-        attempts++;
-
-        try {
-            const result = await idfyService.getTaskResult(requestId);
-            const task = result?.[0];
-
-            if (!task) return;
-
-            if (task.status === "completed") {
-                clearInterval(interval);
-
-                const source = task?.result?.source_output;
-
-                const userDoc = await Document.findById(userDocId);
-                if (!userDoc) return;
-
-                const doc = userDoc.documents.find(
-                    d => d.verificationMeta?.requestId === requestId
-                );
-
-                if (!doc) return;
-
-                let isVerified = false;
-
-                if (documentType === "pan-card") {
-                    isVerified = source?.status === "id_found";
-                }
-
-                if (documentType === "gst-certificate") {
-                    isVerified = source?.gstin_status === "Active";
-                }
-
-                if (documentType === "cin-certificate") {
-                    isVerified = source?.company_status === "Active";
-                }
-
-                doc.verificationStatus = isVerified
-                    ? "auto-verified"
-                    : "rejected";
-
-                doc.verificationMeta.status = "completed";
-                doc.verificationMeta.rawResponse = source;
-                doc.verificationMeta.verifiedAt = new Date();
-
-                await userDoc.save();
-
-                // Invalidate profile cache so GET /profile reflects the new status
-                try {
-                    const cacheService = require('./cache.service');
-                    await cacheService.invalidateProfile(userDoc.userId.toString(), userDoc.userRole);
-                } catch (cacheErr) {
-                    console.error('Failed to invalidate profile cache after IDFY result:', cacheErr.message);
-                }
-
-                logger.info(`IDFY verified (event-based): type=${documentType}`);
-            }
-
-            if (attempts >= maxAttempts) {
-                clearInterval(interval);
-                logger.warn(`IDFY max polling attempts reached for requestId=${requestId}`);
-            }
-
-        } catch (err) {
-            console.error(" IDFY polling error:", err.message);
-        }
-    }, 10000); // every 10 sec
-};
-
 exports.getUserDocuments = async (user, options = {}) => {
 
     const userDocs = await Document.findOne({ userId: user._id });
