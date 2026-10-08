@@ -33,7 +33,7 @@ class DutyRateRaiseService {
         }
 
         const duty = await Duty.findById(dutyId)
-            .select('+offer.notifiedStaff hospital status offeredRate totalPayment date endDate startTime endTime isOvernightDuty staffRole urgency category pricing offer.invitedStaff autoRelist.excludedStaff')
+            .select('+offer.notifiedStaff hospital status offeredRate totalPayment date endDate startTime endTime isOvernightDuty staffRole urgency category pricing +offer.invitedStaff autoRelist.excludedStaff')
             .lean();
         if (!duty) {
             throw new NotFoundError('Duty not found');
