@@ -910,7 +910,8 @@ class ProfileService {
         try {
             // Try cache first 
             const cachedStatus = await cacheService.getProfileStatus(userId);
-            if (cachedStatus) {
+            // Entries cached before the checklist existed are rebuilt
+            if (cachedStatus && Array.isArray(cachedStatus.checklist)) {
                 return {
                     ...cachedStatus,
                     fromCache: true,
@@ -929,11 +930,11 @@ class ProfileService {
             let profileDoc = null;
             const [profileResult, docRecord] = await Promise.all([
                 user.role === 'staff'
-                    ? MedicalStaff.findOne({ user: userId }).select('_id isDocumentsUploaded profileSource isProfileComplete').lean()
+                    ? MedicalStaff.findOne({ user: userId }).select('_id isDocumentsUploaded profileSource isProfileComplete isPhoneVerified verificationStatus rejectionReason').lean()
                     : user.role === 'hospital'
-                        ? Hospital.findOne({ user: userId }).select('_id isDocumentsUploaded').lean()
+                        ? Hospital.findOne({ user: userId }).select('_id isDocumentsUploaded isPhoneVerified verificationStatus rejectionReason').lean()
                         : Promise.resolve(null),
-                Document.findOne({ userId }).select('documents').lean()
+                Document.findOne({ userId }).select('documents.documentType documents.isDeleted').lean()
             ]);
 
             const hasProfile = !!profileResult;
@@ -976,9 +977,29 @@ class ProfileService {
                 onboardingStep = 'upload_documents';
             }
 
+            // Where the account is in admin review
+            const phoneVerified = profileResult?.isPhoneVerified === true;
+            let review = 'not_submitted';
+            if (profileResult?.verificationStatus === 'verified') review = 'verified';
+            else if (profileResult?.verificationStatus === 'rejected') review = 'rejected';
+            else if (hasProfile && documentsStatus.hasAllRequired) review = 'pending';
+
+            // Every onboarding step in the order the apps show them
+            const checklist = [
+                { key: 'verify_email', done: user.isEmailVerified === true },
+                { key: 'create_profile', done: hasProfile },
+                { key: 'verify_phone', done: phoneVerified },
+                { key: 'upload_documents', done: documentsStatus.hasAllRequired === true },
+                { key: 'verification', done: review === 'verified' }
+            ];
+
             const result = {
                 success: true,
                 onboardingStep,
+                phoneVerified,
+                review,
+                rejectionReason: review === 'rejected' ? (profileResult?.rejectionReason || null) : null,
+                checklist,
                 isEmailVerified: user.isEmailVerified,
                 hasProfile,
                 documents: documentsStatus,
