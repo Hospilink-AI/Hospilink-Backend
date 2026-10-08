@@ -1,5 +1,6 @@
 const Notification = require('../models/Notification');
 const { describe } = require('../utils/notificationDisplay');
+const logger = require('../utils/logger');
 
 // Adds the in-app display block (title, severity, icon, where to open) to a
 // payload before it is saved. The same object is then delivered, so live
@@ -345,7 +346,7 @@ class NotificationService {
                 { deliveredAt: new Date() }
             );
             
-            console.log(`Marked ${result.modifiedCount} notifications as delivered`);
+            logger.debug(`Marked ${result.modifiedCount} notifications as delivered`);
             return result;
         } catch (error) {
             console.error('Error marking notifications as delivered:', error);

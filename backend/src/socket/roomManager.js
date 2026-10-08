@@ -1,4 +1,5 @@
 const { normalizeRole } = require('../utils/helpers');
+const logger = require('../utils/logger');
 
 
 // handle room management for socket.io
@@ -12,7 +13,7 @@ class RoomManager {
         }
         const roomName = `user:${userId}`;
         socket.join(roomName);
-        console.log(`User ${userId} joined room: ${roomName}`);
+        logger.debug(`User ${userId} joined room: ${roomName}`);
         return roomName;
     }
     
@@ -28,7 +29,7 @@ class RoomManager {
             }
             const roomName = `role:staff:${normalizedRole}`;
             socket.join(roomName);
-            console.log(`Staff member joined role room: ${roomName}`);
+            logger.debug(`Staff member joined role room: ${roomName}`);
             return roomName;
         }
         return null;
@@ -43,7 +44,7 @@ class RoomManager {
         }
         const roomName = `duty:${dutyId}`;
         socket.join(roomName);
-        console.log(`Socket joined duty room: ${roomName}`);
+        logger.debug(`Socket joined duty room: ${roomName}`);
         return roomName;
     }
     
@@ -55,7 +56,7 @@ class RoomManager {
             // Don't leave the socket's own room (socket.id)
             if (room !== socket.id) {
                 socket.leave(room);
-                console.log(`Socket ${socket.id} left room: ${room}`);
+                logger.debug(`Socket ${socket.id} left room: ${room}`);
             }
         });
     }
@@ -75,7 +76,7 @@ class RoomManager {
         }
         const roomName = `tracking:${staffId}:${dutyId}`;
         socket.join(roomName);
-        console.log(`Staff ${staffId} joined tracking room: ${roomName}`);
+        logger.debug(`Staff ${staffId} joined tracking room: ${roomName}`);
         return roomName;
     }
 
@@ -88,7 +89,7 @@ class RoomManager {
         }
         const roomName = `hospital_tracking:${hospitalId}`;
         socket.join(roomName);
-        console.log(`Socket joined hospital tracking room: ${roomName}`);
+        logger.debug(`Socket joined hospital tracking room: ${roomName}`);
         return roomName;
     }
 
@@ -97,7 +98,7 @@ class RoomManager {
     leaveTrackingRoom(socket, staffId, dutyId) {
         const roomName = `tracking:${staffId}:${dutyId}`;
         socket.leave(roomName);
-        console.log(`Staff ${staffId} left tracking room: ${roomName}`);
+        logger.debug(`Staff ${staffId} left tracking room: ${roomName}`);
     }
 }
 

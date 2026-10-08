@@ -156,8 +156,11 @@ class CacheService {
     }
 
     async invalidateProfile(userId, role) {
-        const key = `profile:${userId}:${role}`;
-        return await this.del(key);
+        // The socket sign-in keeps the profile id and job role separately
+        return await this.pipeline([
+            { type: 'del', key: `profile:${userId}:${role}` },
+            { type: 'del', key: `socketprofile:${userId}` }
+        ]);
     }
 
     async invalidateUserProfiles(userId) {
