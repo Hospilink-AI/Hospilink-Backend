@@ -89,7 +89,8 @@ describe('where numbers come in', () => {
     it('the clean-up script is a dry run unless asked, and prints counts only', () => {
         const script = read('scripts/maskAadhaarNumbers.js');
         expect(script).toContain("const APPLY = process.argv.includes('--apply');");
-        expect(script).toContain('if (!APPLY) continue;');
+        expect(script).toContain('if (APPLY) {');
+        expect(script).toContain('if (APPLY && IMAGES) {');
         expect(script).not.toMatch(/console\.log\([^)]*(extracted|entry\.|record\.)/);
     });
 });
