@@ -83,6 +83,12 @@ const dutySchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    // Duties posted together (staff_count > 1) share a groupId, so apps can
+    // show them as one card with "2 of 3 spots open"
+    groupId: {
+        type: mongoose.Schema.Types.ObjectId,
+        default: undefined
+    },
     urgency: {
         type: String,
         required: [true, 'Urgency level is required'],
@@ -623,6 +629,8 @@ dutySchema.pre('save', function (next) {
 
 // Basic single-field indexes
 dutySchema.index({ hospital: 1 });
+// Sparse: only multi-slot posts have a groupId
+dutySchema.index({ groupId: 1 }, { sparse: true });
 dutySchema.index({ staffRole: 1 });
 dutySchema.index({ date: 1 });
 dutySchema.index({ status: 1 });
