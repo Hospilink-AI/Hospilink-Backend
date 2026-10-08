@@ -14,6 +14,32 @@ const {
     ForbiddenError
 } = require('../middleware/error.middleware');
 
+const { istDateKey, istDayStart, addDaysToKey } = require('../utils/calendar.helper');
+const { bucketsBetween, bucketKey } = require('../utils/analytics.helper');
+
+const EARNINGS_DEFAULT_BUCKETS = { week: 8, month: 6 };
+const EARNINGS_MAX_DAYS = 400;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const roundRupees = (n) => Math.round(n * 100) / 100;
+
+// The earnings range for a period, in IST day keys. Without from/to it covers
+// the last 8 weeks or 6 months up to today.
+function earningsRange(period, from, to) {
+    const toKey = to || istDateKey(new Date());
+    if (from) return { from, to: toKey };
+    if (period === 'week') return { from: addDaysToKey(toKey, -(EARNINGS_DEFAULT_BUCKETS.week * 7 - 1)), to: toKey };
+    const [year, month] = toKey.split('-').map(Number);
+    const first = new Date(Date.UTC(year, month - EARNINGS_DEFAULT_BUCKETS.month, 1)).toISOString().slice(0, 10);
+    return { from: first, to: toKey };
+}
+
+// 'Oct 2026' for a month, '5 Oct' for the week starting that Monday
+function bucketLabel(key, period) {
+    const [year, month, day] = key.split('-').map(Number);
+    return period === 'month' ? `${MONTHS[month - 1]} ${year}` : `${day} ${MONTHS[month - 1]}`;
+}
+
 class DashboardService {
     // Get staff overview — rating with month-over-month growth
     async getStaffOverview(userId) {
@@ -151,40 +177,48 @@ class DashboardService {
     }
 
 
-    // Get earnings information with month-over-month growth
-    async getEarnings(staffId) {
+    // Get earnings information with month-over-month growth. With a period
+    // ('week' | 'month', optional from/to IST days) it adds a series and the
+    // paid / pending split for that range.
+    async getEarnings(staffId, options = {}) {
         const now = getCurrentIST();
         const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1); // exclusive
 
-        const [allTime, thisMonth, lastMonth] = await Promise.all([
-            Duty.aggregate([
-                { $match: { assignedTo: staffId, status: 'completed' } },
-                { $group: { _id: null, total: { $sum: '$totalPayment' }, count: { $sum: 1 } } }
-            ]),
-            Duty.aggregate([
-                {
-                    $match: {
-                        assignedTo: staffId,
-                        status: 'completed',
-                        completedAt: { $gte: thisMonthStart }
+        const sumAndCount = { $group: { _id: null, total: { $sum: '$totalPayment' }, count: { $sum: 1 } } };
+        const paidOrPending = {
+            $group: {
+                _id: null,
+                paid: { $sum: { $cond: [{ $eq: ['$isPaid', true] }, '$totalPayment', 0] } },
+                pending: {
+                    $sum: {
+                        $cond: [
+                            { $and: [{ $ne: ['$isPaid', true] }, { $or: [{ $eq: ['$isPaid', false] }, { $eq: ['$paymentMethod', 'will_pay_later'] }] }] },
+                            '$totalPayment',
+                            0
+                        ]
                     }
-                },
-                { $group: { _id: null, total: { $sum: '$totalPayment' }, count: { $sum: 1 } } }
-            ]),
-            Duty.aggregate([
-                {
-                    $match: {
-                        assignedTo: staffId,
-                        status: 'completed',
-                        completedAt: { $gte: lastMonthStart, $lt: lastMonthEnd }
-                    }
-                },
-                { $group: { _id: null, total: { $sum: '$totalPayment' }, count: { $sum: 1 } } }
-            ])
+                }
+            }
+        };
+
+        // One round trip instead of three
+        const [facets] = await Duty.aggregate([
+            { $match: { assignedTo: staffId, status: 'completed' } },
+            {
+                $facet: {
+                    allTime: [sumAndCount],
+                    thisMonth: [{ $match: { completedAt: { $gte: thisMonthStart } } }, sumAndCount],
+                    lastMonth: [{ $match: { completedAt: { $gte: lastMonthStart, $lt: lastMonthEnd } } }, sumAndCount],
+                    payment: [paidOrPending]
+                }
+            }
         ]);
 
+        const allTime = facets?.allTime || [];
+        const thisMonth = facets?.thisMonth || [];
+        const lastMonth = facets?.lastMonth || [];
         const totalEarnings = allTime[0]?.total || 0;
         const totalCount = allTime[0]?.count || 0;
         const thisMonthEarnings = thisMonth[0]?.total || 0;
@@ -201,7 +235,7 @@ class DashboardService {
             growthTrend = 'up';
         }
 
-        return {
+        const result = {
             totalEarnings,
             completedDutiesCount: totalCount,
             averagePerDuty: totalCount > 0 ? parseFloat((totalEarnings / totalCount).toFixed(2)) : 0,
@@ -211,7 +245,56 @@ class DashboardService {
                 percent: Math.abs(growthPercent),
                 trend: growthTrend,
                 label: `${growthPercent >= 0 ? '+' : '-'}${Math.abs(growthPercent)}%`
+            },
+            // All time; with a period these are replaced by the period's own
+            paid: roundRupees(facets?.payment?.[0]?.paid || 0),
+            pending: roundRupees(facets?.payment?.[0]?.pending || 0)
+        };
+
+        if (options.period) {
+            Object.assign(result, await this._earningsSeries(staffId, options));
+        }
+
+        return result;
+    }
+
+    // series: [{ key, label, earnings, duties }] for each week or month in the range
+    async _earningsSeries(staffId, { period, from, to }) {
+        const range = earningsRange(period, from, to);
+        const duties = await Duty.find({
+            assignedTo: staffId,
+            status: 'completed',
+            completedAt: { $gte: istDayStart(range.from), $lt: istDayStart(addDaysToKey(range.to, 1)) }
+        })
+            .select('completedAt totalPayment isPaid paymentMethod')
+            .lean();
+
+        const rows = new Map(bucketsBetween(range.from, range.to, period).map(key => [key, { earnings: 0, duties: 0 }]));
+        let paid = 0;
+        let pending = 0;
+        for (const duty of duties) {
+            const amount = duty.totalPayment || 0;
+            const row = rows.get(bucketKey(duty.completedAt, period));
+            if (row) {
+                row.earnings += amount;
+                row.duties += 1;
             }
+            if (duty.isPaid === true) paid += amount;
+            else if (duty.isPaid === false || duty.paymentMethod === 'will_pay_later') pending += amount;
+        }
+
+        return {
+            period,
+            from: range.from,
+            to: range.to,
+            series: [...rows.entries()].map(([key, row]) => ({
+                key,
+                label: bucketLabel(key, period),
+                earnings: roundRupees(row.earnings),
+                duties: row.duties
+            })),
+            paid: roundRupees(paid),
+            pending: roundRupees(pending)
         };
     }
 
@@ -371,3 +454,5 @@ class DashboardService {
 }
 
 module.exports = new DashboardService();
+module.exports.earningsRange = earningsRange;
+module.exports.EARNINGS_MAX_DAYS = EARNINGS_MAX_DAYS;

@@ -872,6 +872,40 @@ const validateDutyCreation = (req, res, next) => {
 
 
 
+// GET /api/dashboard/earnings?period=week|month&from=YYYY-MM-DD&to=YYYY-MM-DD
+const validateEarningsQuery = (req, res, next) => {
+    const errors = [];
+    const { period, from, to } = req.query;
+    const unexpected = Object.keys(req.query).filter(k => !['period', 'from', 'to'].includes(k));
+    if (unexpected.length > 0) {
+        errors.push(`Unexpected fields: ${unexpected.join(', ')}`);
+    }
+    if (period !== undefined && !['week', 'month'].includes(period)) {
+        errors.push('period must be week or month');
+    }
+    if ((from || to) && period === undefined) {
+        errors.push('from and to need a period');
+    }
+    if (from !== undefined && !isValidDateKey(from)) errors.push('from must be a date in YYYY-MM-DD format');
+    if (to !== undefined && !isValidDateKey(to)) errors.push('to must be a date in YYYY-MM-DD format');
+    if (from && to && isValidDateKey(from) && isValidDateKey(to)) {
+        if (from > to) {
+            errors.push('from cannot be after to');
+        } else if (daysBetweenKeys(from, to) + 1 > 400) {
+            errors.push('The range cannot be longer than 400 days');
+        }
+    }
+    if (from && !to && isValidDateKey(from) && daysBetweenKeys(from, istDateKey(new Date())) + 1 > 400) {
+        errors.push('The range cannot be longer than 400 days');
+    }
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    next();
+};
+
+
+
 // Validation for duty acceptance
 const validateDutyAcceptance = (req, res, next) => {
     const { duty_id } = req.body;
@@ -3108,6 +3142,7 @@ module.exports = {
     validateVerifyStartOtp,
     validateVerifyEndOtp,
     validateResendOtp,
+    validateEarningsQuery,
     validateDutyCancellation,
     validateDutyEdit,
     validateAutoRelistToggle,

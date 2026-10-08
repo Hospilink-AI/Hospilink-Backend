@@ -61,7 +61,8 @@ exports.getEarnings = asyncHandler(async (req, res) => {
         });
     }
     
-    const earnings = await DashboardService.getEarnings(medicalStaff._id);
+    const { period, from, to } = req.query;
+    const earnings = await DashboardService.getEarnings(medicalStaff._id, period ? { period, from, to } : {});
     
     res.status(200).json({
         success: true,
