@@ -2474,7 +2474,7 @@ const validateInviteCandidatesQuery = (req, res, next) => {
 
 // Validation for the calendar day panel
 const validateCalendarDayQuery = (req, res, next) => {
-    const allowedParams = ['date'];
+    const allowedParams = ['date', 'include'];
     const unexpectedParams = Object.keys(req.query).filter(param => !allowedParams.includes(param));
     const errors = [];
 
@@ -2484,6 +2484,10 @@ const validateCalendarDayQuery = (req, res, next) => {
 
     if (!isValidDateKey(req.query.date)) {
         errors.push('date is required in YYYY-MM-DD format');
+    }
+
+    if (req.query.include !== undefined && req.query.include !== 'open') {
+        errors.push('include can only be open');
     }
 
     if (errors.length > 0) {
