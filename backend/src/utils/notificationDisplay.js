@@ -45,6 +45,7 @@ const TYPES = {
     DOCUMENT_VERIFIED: T('Document verified', 'verification', 'success', 'documents', 'file-check'),
     DOCUMENT_AUTO_VERIFIED: T('Document verified', 'verification', 'success', 'documents', 'file-check'),
     DOCUMENT_REJECTED: T('Document rejected', 'verification', 'warning', 'documents', 'file-x'),
+    DOCUMENTS_REMINDER: T('Upload your documents', 'verification', 'info', 'documents', 'file-upload'),
     HOSPITAL_VERIFIED: T('Hospital verified', 'verification', 'success', 'profile', 'badge-check'),
     HOSPITAL_REJECTED: T('Verification not approved', 'verification', 'warning', 'profile', 'x-circle'),
     STAFF_VERIFIED: T('Profile verified', 'verification', 'success', 'profile', 'badge-check'),

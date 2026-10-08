@@ -12,6 +12,7 @@ const analyticsSnapshotService = require('../services/analytics/snapshot.service
 const dutyOfferService = require('../services/dutyOffer.service');
 const staffAvailabilityService = require('../services/staffAvailability.service');
 const accountDeletionService = require('../services/accountDeletion.service');
+const verificationReminderService = require('../services/verificationReminder.service');
 const { istDateKey } = require('./calendar.helper');
 
 /**
@@ -300,6 +301,25 @@ class CronJobs {
             },
             60,
             'Availability reminders'
+        );
+
+        // New doctors missing documents: one reminder a day at most, from 10:00 IST
+        this.scheduleJob(
+            async () => {
+                const dateKey = istDateKey(new Date());
+                const now = new Date();
+                if (new Date(now.getTime() + 5.5 * 60 * 60 * 1000).getUTCHours() < 10) return;
+                const hasLock = await acquireCronLock(`documents-reminders:${dateKey}`, 23 * 60 * 60);
+                if (!hasLock) return;
+                try {
+                    const sent = await verificationReminderService.runDue(now);
+                    if (sent > 0) console.log(`Documents reminders sent: ${sent}`);
+                } catch (err) {
+                    console.error('Documents reminder job failed:', err);
+                }
+            },
+            60,
+            'Documents reminders'
         );
 
         // Staged duty offers — widen rings that are due (the service holds
