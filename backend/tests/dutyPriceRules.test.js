@@ -69,7 +69,10 @@ describe('creating a duty', () => {
     });
 
     it('accepts an anesthesia booking above ₹9,999', () => {
-        expect(create({ staff_role: 'anesthetist', category: 'anesthesia', start_time: '09:00', end_time: '13:00', offered_rate: 3000 }).passed).toBe(true);
+        expect(create({
+            staff_role: 'anesthetist', category: 'anesthesia', pricing_mode: 'fixed', fixed_price: 12000,
+            case_note: 'Total knee replacement', start_time: '09:00', end_time: '13:00', offered_rate: 3000
+        }).passed).toBe(true);
     });
 });
 
