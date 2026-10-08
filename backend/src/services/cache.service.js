@@ -13,6 +13,13 @@ class CacheService {
         }
     }
 
+    // Several keys in one round trip. Does NOT catch errors, like getStrict.
+    async getManyStrict(keys) {
+        const client = await redisClient.getClientAsync();
+        const values = await client.mget(...keys);
+        return values.map(value => (value ? JSON.parse(value) : null));
+    }
+
     // Does NOT catch errors — callers must handle them.
     // Use for security-critical reads where a Redis failure must not be treated as "not found".
     async getStrict(key) {

@@ -24,12 +24,6 @@ const blockService = require('../services/block.service');
 const dutyInviteService = require('../services/dutyInvite.service');
 const systemConfigService = require('../services/systemConfig.service');                    
 
-// Extend logger with debug method
-logger.debug = (message) => {
-    if (process.env.NODE_ENV === 'development') {
-        console.log(`[DEBUG] ${new Date().toISOString()} - ${message}`);
-    }
-};
 
 
 

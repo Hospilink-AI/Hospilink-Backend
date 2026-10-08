@@ -58,7 +58,7 @@ class NotificationDeliveryService {
                 websocketManager.sendUnreadCount(userId, unreadCount);
                 websocketManager.emitToUser(userId, 'notification', payload);
                 
-                logger.info(`Delivered notification to user ${userId} via WebSocket (online)`);
+                logger.debug(`Delivered notification to user ${userId} via WebSocket (online)`);
                 
                 return {
                     success: true,
@@ -81,7 +81,7 @@ class NotificationDeliveryService {
                 const result = await fcmService.sendToUser(userId, title, body, fcmData);
                 
                 if (result.success) {
-                    logger.info(`Delivered notification to user ${userId} via FCM (offline)`);
+                    logger.debug(`Delivered notification to user ${userId} via FCM (offline)`);
                 } else {
                     logger.warn(`Failed to deliver FCM to user ${userId}: ${result.reason || result.error}`);
                 }
@@ -129,7 +129,7 @@ class NotificationDeliveryService {
                 }
             }
 
-            logger.info(`Delivering to ${userIds.length} users: ${onlineIds.length} online, ${offlineIds.length} offline`);
+            logger.debug(`Delivering to ${userIds.length} users: ${onlineIds.length} online, ${offlineIds.length} offline`);
 
             // Deliver to online users via WebSocket
             if (onlineIds.length > 0) {

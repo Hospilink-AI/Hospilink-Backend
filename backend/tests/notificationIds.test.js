@@ -6,7 +6,7 @@ jest.mock('../src/services/websocketManager', () => ({
     sendUnreadCount: () => {}
 }));
 jest.mock('../src/services/fcm.service', () => ({ sendToUser: async () => ({}), sendToUsers: async () => ({}) }));
-jest.mock('../src/utils/logger', () => ({ error: () => {}, info: () => {}, warn: () => {} }));
+jest.mock('../src/utils/logger', () => ({ error: () => {}, info: () => {}, warn: () => {}, debug: () => {} }));
 
 const Notification = require('../src/models/Notification');
 const notificationService = require('../src/services/notificationService');

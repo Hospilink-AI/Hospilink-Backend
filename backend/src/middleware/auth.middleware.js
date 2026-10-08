@@ -19,24 +19,30 @@ exports.protect = asyncHandler(async (req, res, next) => {
         throw new UnauthorizedError('Access denied. No token provided.');
     }
     
-    // Fail-closed: if Redis is unavailable, deny access rather than risk accepting a blacklisted token
+    // Signature first: it needs no I/O, so a bad token never reaches Redis
+    let decoded;
     try {
-        const isBlacklisted = await cacheService.getStrict(`blacklist:${token}`);
+        decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (error) {
+        throw new UnauthorizedError('Invalid token');
+    }
+
+    // Blacklist and cached session in one round trip. Fail-closed: if Redis is
+    // unavailable, deny access rather than risk accepting a blacklisted token
+    const sessionKey = `session:${decoded.id}`;
+    let cachedSession;
+    try {
+        const [isBlacklisted, session] = await cacheService.getManyStrict([`blacklist:${token}`, sessionKey]);
         if (isBlacklisted) {
             throw new UnauthorizedError('Token has been invalidated. Please login again.');
         }
+        cachedSession = session;
     } catch (err) {
         if (err instanceof UnauthorizedError) throw err;
         throw new UnauthorizedError('Authentication service unavailable. Please try again.');
     }
-    
+
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
-        // Check cache for user session
-        const sessionKey = `session:${decoded.id}`;
-        const cachedSession = await cacheService.get(sessionKey);
-        
         if (cachedSession) {
             // Deactivated admins are rejected immediately, even mid-session — the
             // deactivate-admin flow deletes this cache key, so a hit here means either
