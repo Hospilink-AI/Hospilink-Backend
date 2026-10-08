@@ -8,6 +8,13 @@ exports.getStatus = asyncHandler(async (req, res) => {
 });
 
 
+// GET /api/account/deletion/preview — what deleting now would cancel, and when it happens
+exports.getPreview = asyncHandler(async (req, res) => {
+    const preview = await accountDeletionService.preview(req.user._id || req.user.id);
+    res.status(200).json({ success: true, ...preview });
+});
+
+
 // POST /api/account/deletion — cancels upcoming duties, signs out everywhere,
 // and deletes the account after the grace period unless they sign in again
 exports.requestDeletion = asyncHandler(async (req, res) => {
