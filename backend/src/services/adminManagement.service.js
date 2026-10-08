@@ -6,6 +6,7 @@ const redisClient = require('../config/redis');
 const logger = require('../utils/logger');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
 const { NotFoundError, ConflictError, ForbiddenError, UnauthorizedError } = require('../middleware/error.middleware');
+const { maskEmail } = require('../utils/maskPii');
 
 
 const ADMIN_PUBLIC_FIELDS = 'name email role adminSubRole isActive createdAt updatedAt';
@@ -126,7 +127,7 @@ class AdminManagementService {
         EmailService.sendAdminRoleChangeOTPEmail(
             requester.name, requester.email, otp, admin.name, admin.email, newSubRole
         )
-            .then(() => logger.info(`Role-change OTP sent to ${requester.email} for target admin ${admin.email}`))
+            .then(() => logger.info(`Role-change OTP sent to ${maskEmail(requester.email)} for target admin ${maskEmail(admin.email)}`))
             .catch(err => logger.error(`Failed to send role-change OTP email: ${err.message}`));
 
         return {
@@ -268,7 +269,7 @@ class AdminManagementService {
         EmailService.sendAdminRoleChangeOTPEmail(
             requester.name, requester.email, otp, target?.name, target?.email, pending.newSubRole
         )
-            .then(() => logger.info(`Role-change OTP resent to ${requester.email}`))
+            .then(() => logger.info(`Role-change OTP resent to ${maskEmail(requester.email)}`))
             .catch(err => logger.error(`Failed to resend role-change OTP email: ${err.message}`));
 
         return { message: 'OTP resent successfully' };

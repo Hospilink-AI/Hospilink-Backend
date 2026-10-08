@@ -1,5 +1,6 @@
 const twilio = require('twilio');
 const logger = require('../utils/logger');
+const { maskPhone } = require('../utils/maskPii');
 
 const client = twilio(
     process.env.TWILIO_ACCOUNT_SID,
@@ -30,7 +31,7 @@ class SMSService {
             });
 
             logger.info("========== SMS SENT SUCCESSFULLY ==========");
-            logger.info(`Phone      : ${normalizedPhone}`);
+            logger.info(`Phone      : ${maskPhone(normalizedPhone)}`);
             logger.info(`Message SID: ${response.sid}`);
             logger.info(`Status     : ${response.status}`);
             logger.info(`Direction  : ${response.direction}`);
@@ -42,7 +43,7 @@ class SMSService {
 
             logger.error("========== TWILIO SMS ERROR ==========");
 
-            logger.error(`Phone      : ${normalizedPhone}`);
+            logger.error(`Phone      : ${maskPhone(normalizedPhone)}`);
             logger.error(`Code       : ${err.code || "N/A"}`);
             logger.error(`Status     : ${err.status || "N/A"}`);
             logger.error(`Message    : ${err.message || "Unknown Error"}`);

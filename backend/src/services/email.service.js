@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const logger = require('../utils/logger');
+const { maskEmail } = require('../utils/maskPii');
 
 
 const SEND_TIMEOUT_MS = 15000; // 15 seconds
@@ -155,10 +156,10 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`OTP email sent to ${email}`);
+            logger.info(`OTP email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending email to ${email}: ${error.message}`);
+            logger.error(`Error sending email to ${maskEmail(email)}: ${error.message}`);
             throw new Error('Failed to send OTP email');
         }
     }
@@ -201,10 +202,10 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Password reset email sent to ${email}`);
+            logger.info(`Password reset email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending password reset email to ${email}: ${error.message}`);
+            logger.error(`Error sending password reset email to ${maskEmail(email)}: ${error.message}`);
             throw new Error('Failed to send password reset email');
         }
     }
@@ -243,10 +244,10 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Admin OTP email sent to ${email}`);
+            logger.info(`Admin OTP email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending admin email to ${email}: ${error.message}`);
+            logger.error(`Error sending admin email to ${maskEmail(email)}: ${error.message}`);
             throw new Error('Failed to send admin OTP email');
         }
     }
@@ -292,10 +293,10 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Admin role-change OTP email sent to ${requesterEmail}`);
+            logger.info(`Admin role-change OTP email sent to ${maskEmail(requesterEmail)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending admin role-change OTP email to ${requesterEmail}: ${error.message}`);
+            logger.error(`Error sending admin role-change OTP email to ${maskEmail(requesterEmail)}: ${error.message}`);
             throw new Error('Failed to send admin role-change OTP email');
         }
     }
@@ -353,7 +354,7 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Admin login alert email sent to ${alertEmail} for admin ${adminEmail}`);
+            logger.info(`Admin login alert email sent to ${maskEmail(alertEmail)} for admin ${maskEmail(adminEmail)}`);
             return true;
         } catch (error) {
             logger.error(`Error sending admin login alert email: ${error.message}`);
@@ -399,7 +400,7 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Admin account created alert sent to ${alertEmail} for new admin ${newAdminEmail}`);
+            logger.info(`Admin account created alert sent to ${maskEmail(alertEmail)} for new admin ${maskEmail(newAdminEmail)}`);
             return true;
         } catch (error) {
             logger.error(`Error sending admin account created alert email: ${error.message}`);
@@ -443,7 +444,7 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Admin account deactivated alert sent to ${alertEmail} for admin ${deactivatedAdminEmail}`);
+            logger.info(`Admin account deactivated alert sent to ${maskEmail(alertEmail)} for admin ${maskEmail(deactivatedAdminEmail)}`);
             return true;
         } catch (error) {
             logger.error(`Error sending admin account deactivated alert email: ${error.message}`);
@@ -487,7 +488,7 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Admin account activated alert sent to ${alertEmail} for admin ${activatedAdminEmail}`);
+            logger.info(`Admin account activated alert sent to ${maskEmail(alertEmail)} for admin ${maskEmail(activatedAdminEmail)}`);
             return true;
         } catch (error) {
             logger.error(`Error sending admin account activated alert email: ${error.message}`);
@@ -549,10 +550,10 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Duty acceptance email sent to ${email}`);
+            logger.info(`Duty acceptance email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending duty acceptance email to ${email}: ${error.message}`);
+            logger.error(`Error sending duty acceptance email to ${maskEmail(email)}: ${error.message}`);
             // We don't want to throw error here to not break the duty acceptance logic
             return false;
         }
@@ -615,10 +616,10 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Hospital notification email sent to ${hospitalEmail}`);
+            logger.info(`Hospital notification email sent to ${maskEmail(hospitalEmail)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending hospital notification email to ${hospitalEmail}: ${error.message}`);
+            logger.error(`Error sending hospital notification email to ${maskEmail(hospitalEmail)}: ${error.message}`);
             return false;
         }
     }
@@ -687,10 +688,10 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Duty status update email sent to ${email}`);
+            logger.info(`Duty status update email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending duty status update email to ${email}: ${error.message}`);
+            logger.error(`Error sending duty status update email to ${maskEmail(email)}: ${error.message}`);
             return false;
         }
     }
@@ -768,10 +769,10 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Hospital status update email sent to ${hospitalEmail}`);
+            logger.info(`Hospital status update email sent to ${maskEmail(hospitalEmail)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending hospital status update email to ${hospitalEmail}: ${error.message}`);
+            logger.error(`Error sending hospital status update email to ${maskEmail(hospitalEmail)}: ${error.message}`);
             return false;
         }
     }
@@ -832,10 +833,10 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Duty cancellation email sent to staff ${email}`);
+            logger.info(`Duty cancellation email sent to staff ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending duty cancellation email to staff ${email}: ${error.message}`);
+            logger.error(`Error sending duty cancellation email to staff ${maskEmail(email)}: ${error.message}`);
             return false;
         }
     }
@@ -910,10 +911,10 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Duty cancellation email sent to hospital ${hospitalEmail}`);
+            logger.info(`Duty cancellation email sent to hospital ${maskEmail(hospitalEmail)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending duty cancellation email to hospital ${hospitalEmail}: ${error.message}`);
+            logger.error(`Error sending duty cancellation email to hospital ${maskEmail(hospitalEmail)}: ${error.message}`);
             return false;
         }
     }
@@ -949,10 +950,10 @@ class EmailService {
                 `
             };
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Hospital verified email sent to ${email}`);
+            logger.info(`Hospital verified email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending hospital verified email to ${email}: ${error.message}`);
+            logger.error(`Error sending hospital verified email to ${maskEmail(email)}: ${error.message}`);
             return false;
         }
     }
@@ -989,10 +990,10 @@ class EmailService {
                 `
             };
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Hospital rejected email sent to ${email}`);
+            logger.info(`Hospital rejected email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending hospital rejected email to ${email}: ${error.message}`);
+            logger.error(`Error sending hospital rejected email to ${maskEmail(email)}: ${error.message}`);
             return false;
         }
     }
@@ -1028,10 +1029,10 @@ class EmailService {
                 `
             };
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Medical staff verified email sent to ${email}`);
+            logger.info(`Medical staff verified email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending medical staff verified email to ${email}: ${error.message}`);
+            logger.error(`Error sending medical staff verified email to ${maskEmail(email)}: ${error.message}`);
             return false;
         }
     }
@@ -1069,10 +1070,10 @@ class EmailService {
                 `
             };
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Medical staff rejected email sent to ${email}`);
+            logger.info(`Medical staff rejected email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending medical staff rejected email to ${email}: ${error.message}`);
+            logger.error(`Error sending medical staff rejected email to ${maskEmail(email)}: ${error.message}`);
             return false;
         }
     }
@@ -1123,7 +1124,7 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Emergency admin alert email sent to ${adminEmail}`);
+            logger.info(`Emergency admin alert email sent to ${maskEmail(adminEmail)}`);
             return true;
         } catch (error) {
             logger.error(`Error sending emergency admin alert email: ${error.message}`);
@@ -1182,10 +1183,10 @@ class EmailService {
             };
 
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Profile creation confirmation email sent to ${email}`);
+            logger.info(`Profile creation confirmation email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending profile creation confirmation email to ${email}: ${error.message}`);
+            logger.error(`Error sending profile creation confirmation email to ${maskEmail(email)}: ${error.message}`);
             return false;
         }
     }
@@ -1217,10 +1218,10 @@ class EmailService {
                 `
             };
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Account suspended email sent to ${email}`);
+            logger.info(`Account suspended email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending account suspended email to ${email}: ${error.message}`);
+            logger.error(`Error sending account suspended email to ${maskEmail(email)}: ${error.message}`);
             return false;
         }
     }
@@ -1250,10 +1251,10 @@ class EmailService {
                 `
             };
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Account activated email sent to ${email}`);
+            logger.info(`Account activated email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending account activated email to ${email}: ${error.message}`);
+            logger.error(`Error sending account activated email to ${maskEmail(email)}: ${error.message}`);
             return false;
         }
     }
@@ -1286,10 +1287,10 @@ class EmailService {
                 `
             };
             await this._sendWithTimeout(mailOptions);
-            logger.info(`Account deletion scheduled email sent to ${email}`);
+            logger.info(`Account deletion scheduled email sent to ${maskEmail(email)}`);
             return true;
         } catch (error) {
-            logger.error(`Error sending account deletion email to ${email}: ${error.message}`);
+            logger.error(`Error sending account deletion email to ${maskEmail(email)}: ${error.message}`);
             return false;
         }
     }

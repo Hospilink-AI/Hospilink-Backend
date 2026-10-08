@@ -7,6 +7,7 @@ const OTPService = require('../services/otp.service');
 const SMSService = require('../services/sms.service');
 const cacheService = require('../services/cache.service');
 const logger = require('../utils/logger');
+const { maskPhone } = require('../utils/maskPii');
 
 
 // Maps Twilio SMS error codes to user-facing errors.
@@ -156,7 +157,7 @@ class ProfileController {
         try {
             await SMSService.sendOTPSMS(phoneNumber, otp, req.user.name);
         } catch (err) {
-            logger.error(`Failed to send phone OTP to ${normalizedPhone} for user ${userId}: ${err.message}`);
+            logger.error(`Failed to send phone OTP to ${maskPhone(normalizedPhone)} for user ${userId}: ${err.message}`);
             throw mapTwilioError(err);
         }
 
@@ -182,7 +183,7 @@ class ProfileController {
         try {
             otpData = await cacheService.getPhoneOTP(normalizedPhone);
         } catch (err) {
-            logger.error(`Redis error reading phone OTP for ${normalizedPhone}: ${err.message}`);
+            logger.error(`Redis error reading phone OTP for ${maskPhone(normalizedPhone)}: ${err.message}`);
             throw new AppError('Unable to verify OTP right now. Please try again.', 503);
         }
 
