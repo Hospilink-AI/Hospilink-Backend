@@ -32,7 +32,7 @@ class GeocodingService {
                 throw new Error('Google Maps API key is required for geocoding');
             }
 
-            console.log('Geocoding address:', address);
+            logger.debug('Geocoding address:', address);
 
             const response = await axios.get(this.geocodingUrl, {
                 params: {
@@ -54,11 +54,11 @@ class GeocodingService {
                     formattedAddress: result.formatted_address
                 };
 
-                console.log('Geocoding successful:', coords);
+                logger.debug('Geocoding successful:', coords);
                 return coords;
             }
 
-            console.log('Geocoding failed:', response.data.status);
+            logger.debug('Geocoding failed:', response.data.status);
             throw new Error(`Geocoding failed: ${response.data.status}`);
 
         } catch (error) {
@@ -66,7 +66,7 @@ class GeocodingService {
 
             // If API quota exceeded, try with simplified address
             if (error.response?.data?.status === 'OVER_QUERY_LIMIT') {
-                console.log('Query limit reached, trying with simplified address...');
+                logger.debug('Query limit reached, trying with simplified address...');
                 return await this.geocodeWithRetry(address);
             }
 
@@ -81,7 +81,7 @@ class GeocodingService {
         try {
             // Extract just the city name for retry
             const simplifiedAddress = address.split(',')[0].trim();
-            console.log('Retrying with simplified address:', simplifiedAddress);
+            logger.debug('Retrying with simplified address:', simplifiedAddress);
 
             const response = await axios.get(this.geocodingUrl, {
                 params: {
@@ -114,7 +114,7 @@ class GeocodingService {
 
     // Calculate distance and ETA using Google Maps Distance Matrix API
     async calculateDistanceAndETA(originLat, originLng, destLat, destLng) {
-        console.log('Starting distance calculation:', {
+        logger.debug('Starting distance calculation:', {
             origin: `${originLat}, ${originLng}`,
             destination: `${destLat}, ${destLng}`
         });
@@ -124,7 +124,7 @@ class GeocodingService {
                 throw new Error('Google Maps API key is required for distance calculation');
             }
 
-            console.log('Using Google Maps Distance Matrix API...');
+            logger.debug('Using Google Maps Distance Matrix API...');
             const requestParams = {
                 origins: `${originLat},${originLng}`,
                 destinations: `${destLat},${destLng}`,
@@ -135,15 +135,15 @@ class GeocodingService {
                 departure_time: 'now'  // Current time for traffic-aware calculations
             };
 
-            console.log('Request URL:', this.distanceMatrixUrl);
-            console.log('Request params:', {
+            logger.debug('Request URL:', this.distanceMatrixUrl);
+            logger.debug('Request params:', {
                 ...requestParams,
                 key: this.apiKey ? 'API_KEY_PRESENT' : 'NO_API_KEY'
             });
 
             // Build the full URL for debugging
             const fullUrl = `${this.distanceMatrixUrl}?origins=${encodeURIComponent(requestParams.origins)}&destinations=${encodeURIComponent(requestParams.destinations)}&key=${requestParams.key}&mode=${requestParams.mode}&region=${requestParams.region}&traffic_model=${requestParams.traffic_model}&departure_time=${requestParams.departure_time}`;
-            console.log('Full request URL:', fullUrl);
+            logger.debug('Full request URL:', fullUrl);
 
             const response = await axios.get(this.distanceMatrixUrl, {
                 params: requestParams,
@@ -154,8 +154,8 @@ class GeocodingService {
                 }
             });
 
-            console.log('Response status:', response.status);
-            console.log('Response data:', JSON.stringify(response.data, null, 2));
+            logger.debug('Response status:', response.status);
+            logger.debug('Response data:', JSON.stringify(response.data, null, 2));
 
             if (response.data.status === 'OK' && 
                 response.data.rows[0].elements[0].status === 'OK') {
@@ -172,12 +172,12 @@ class GeocodingService {
                     source: 'google_maps_api'
                 };
 
-                console.log('Distance calculated using Google Maps API:', result);
+                logger.debug('Distance calculated using Google Maps API:', result);
                 return result;
             }
 
-            console.log('Google Maps API returned non-OK status:', response.data.status);
-            console.log('Full response:', JSON.stringify(response.data, null, 2));
+            logger.debug('Google Maps API returned non-OK status:', response.data.status);
+            logger.debug('Full response:', JSON.stringify(response.data, null, 2));
             throw new Error(`Google Maps Distance Matrix API failed: ${response.data.status}`);
 
         } catch (error) {
@@ -479,7 +479,7 @@ class GeocodingService {
             // Try to get cached result
             const cached = await redis.get(cacheKey);
             if (cached) {
-                console.log('Using cached distance for:', cacheKey);
+                logger.debug('Using cached distance for:', cacheKey);
                 return JSON.parse(cached);
             }
             
@@ -489,7 +489,7 @@ class GeocodingService {
             );
             
             await redis.setex(cacheKey, 300, JSON.stringify(distanceResult));
-            console.log('Cached distance for:', cacheKey);
+            logger.debug('Cached distance for:', cacheKey);
             return distanceResult;
         } catch (error) {
             console.error('Error in distance caching:', error);
