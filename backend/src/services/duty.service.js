@@ -2994,7 +2994,7 @@ class DutyService {
             throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
         }
 
-        const duty = await Duty.findById(dutyId).populate('hospital');
+        const duty = await Duty.findById(dutyId).select('+startOtp.code').populate('hospital');
         if (!duty) {
             throw new NotFoundError('Duty not found');
         }
@@ -3103,7 +3103,7 @@ class DutyService {
             throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
         }
 
-        const duty = await Duty.findById(dutyId);
+        const duty = await Duty.findById(dutyId).select('+endOtp.code');
         if (!duty) {
             throw new NotFoundError('Duty not found');
         }
@@ -3165,7 +3165,7 @@ class DutyService {
             throw new NotFoundError('Hospital profile not found. Please complete your profile first.');
         }
 
-        const duty = await Duty.findById(dutyId).populate('hospital');
+        const duty = await Duty.findById(dutyId).select('+endOtp.code').populate('hospital');
         if (!duty) {
             throw new NotFoundError('Duty not found');
         }
