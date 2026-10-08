@@ -1135,7 +1135,9 @@ exports.getCompletedDuties = asyncHandler(async (req, res) => {
             totalDutiesCompleted: result.summary.totalDutiesCompleted,
             totalHours: result.summary.totalHours,
             totalEarnings: result.summary.totalEarnings,
-            lastDutyDate: result.summary.lastDutyDate
+            lastDutyDate: result.summary.lastDutyDate,
+            paidEarnings: result.summary.paidEarnings,
+            pendingEarnings: result.summary.pendingEarnings
         },
         duties: result.duties,
         pagination: result.pagination

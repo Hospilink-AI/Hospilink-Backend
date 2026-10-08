@@ -12,6 +12,7 @@ const {
 } = require('../utils/helpers');
 const geocodingService = require('./geocoding.service');
 const { getPaginationParams, getPaginationMeta } = require('../utils/pagination');
+const { istDayStart, addDaysToKey } = require('../utils/calendar.helper');
 const { ALLOWED_ROLES } = require('../utils/constants');
 const User = require('../models/User');
 const {
@@ -45,6 +46,21 @@ const {
     ForbiddenError,
     UnprocessableEntityError
 } = require('../middleware/error.middleware');
+
+// Fields the doctor's statement and receipt read
+const EARNINGS_DUTY_FIELDS = 'hospital assignedTo staffRole dutySubType status date endDate startTime endTime ' +
+    'isOvernightDuty urgency offeredRate totalPayment completedAt paymentMethod isPaid paymentAttestedAt';
+
+// 'paid', 'pending' (will pay later, or marked unpaid) or 'unconfirmed'
+function paymentStatusOf(duty) {
+    if (duty.isPaid === true) return 'paid';
+    if (duty.isPaid === false || duty.paymentMethod === 'will_pay_later') return 'pending';
+    return 'unconfirmed';
+}
+
+function dutyHours(duty) {
+    return calculateDutyDuration(duty.date, duty.startTime, duty.endTime, duty.isOvernightDuty, duty.endDate);
+}
 
 // Per-duty Redis lock TTL in seconds — prevents thundering herd
 const DUTY_ACCEPT_LOCK_TTL = 10;
@@ -1947,6 +1963,10 @@ class DutyService {
 
             const statusQuery = statusFilter ? statusFilter : { $in: TERMINAL_STATUSES };
 
+            // Summary covers every completed duty, not just this page
+            const totalsPromise = this._completedTotals(staff._id);
+            totalsPromise.catch(() => {}); // awaited below; avoids an unhandled rejection if a query before it fails
+
             const totalDuties = await Duty.countDocuments({
                 assignedTo: staff._id,
                 status: statusQuery
@@ -1976,25 +1996,10 @@ class DutyService {
             const dutyIds = duties.map(duty => duty._id);
             const visibleReviewPairs = await reviewService.getVisibleReviewPairsForDuties(dutyIds, 'staff');
 
-            let totalHours = 0;
-            let totalEarnings = 0;
+            const totals = await totalsPromise;
             let lastDutyDate = null;
 
             const dutiesWithDetails = duties.map(duty => {
-                const duration = calculateDutyDuration(
-                    duty.date,
-                    duty.startTime,
-                    duty.endTime,
-                    duty.isOvernightDuty,
-                    duty.endDate
-                );
-
-                // Only accumulate hours and earnings for completed duties
-                if (duty.status === 'completed') {
-                    totalHours += duration;
-                    totalEarnings += duty.totalPayment || 0;
-                }
-
                 // Use the most relevant status timestamp for lastDutyDate
                 const dutyTimestamp = duty.completedAt || duty.cancelledAt || duty.expiredAt || duty.incompleteAt;
                 if (!lastDutyDate || dutyTimestamp > lastDutyDate) {
@@ -2017,6 +2022,9 @@ class DutyService {
                     description: duty.description,
                     offeredRate: duty.offeredRate,
                     totalPayment: duty.totalPayment,
+                    paymentMethod: duty.paymentMethod || null,
+                    isPaid: typeof duty.isPaid === 'boolean' ? duty.isPaid : null,
+                    paymentStatus: duty.status === 'completed' ? paymentStatusOf(duty) : null,
                     duration: formatDuration(
                         duty.startTime,
                         duty.endTime,
@@ -2042,10 +2050,12 @@ class DutyService {
 
             return {
                 summary: {
-                    totalDutiesCompleted: totalDuties,
-                    totalHours: formatDuration(totalHours),
-                    totalEarnings: Math.round(totalEarnings * 100) / 100,
-                    lastDutyDate: lastDutyDate
+                    totalDutiesCompleted: totals.count,
+                    totalHours: formatDuration(totals.hours),
+                    totalEarnings: totals.earnings,
+                    lastDutyDate: lastDutyDate,
+                    paidEarnings: totals.paid,
+                    pendingEarnings: totals.pending
                 },
                 duties: dutiesWithDetails,
                 pagination: getPaginationMeta(totalDuties, page, limit)
@@ -2056,16 +2066,47 @@ class DutyService {
         }
     }
 
+    // Earnings over every completed duty of a doctor. One light query, no paging.
+    async _completedTotals(staffId) {
+        const duties = await Duty.find({ assignedTo: staffId, status: 'completed' })
+            .select('date endDate startTime endTime isOvernightDuty totalPayment paymentMethod isPaid')
+            .lean();
+
+        let hours = 0;
+        let earnings = 0;
+        let paid = 0;
+        let pending = 0;
+        for (const duty of duties) {
+            const amount = duty.totalPayment || 0;
+            hours += dutyHours(duty);
+            earnings += amount;
+            const status = paymentStatusOf(duty);
+            if (status === 'paid') paid += amount;
+            else if (status === 'pending') pending += amount;
+        }
+
+        const round = (n) => Math.round(n * 100) / 100;
+        return { count: duties.length, hours, earnings: round(earnings), paid: round(paid), pending: round(pending) };
+    }
+
     //Generate Statement
     async generateStatement(userId, filters, res) {
         const { dutyId, startDate, endDate } = filters;
 
-        const completed = await this.getCompletedDutiesForStaff(userId);
-        const duties = completed.duties;
+        const staff = await MedicalStaff.findOne({ user: userId }).select('_id').lean();
+        if (!staff) {
+            throw new NotFoundError('Medical staff profile not found');
+        }
+
+        const populateStaffUser = { path: 'assignedTo', select: 'user', populate: { path: 'user', select: 'name email role' } };
 
         // ========= RECEIPT =========
         if (dutyId) {
-            const duty = duties.find(d => d._id.toString() === dutyId);
+            const duty = await Duty.findOne({ _id: dutyId, assignedTo: staff._id, status: 'completed' })
+                .select(EARNINGS_DUTY_FIELDS)
+                .populate('hospital', 'hospitalLegalName')
+                .populate(populateStaffUser)
+                .lean();
             if (!duty) throw new NotFoundError('Duty not found');
 
             const receiptData = {
@@ -2083,10 +2124,11 @@ class DutyService {
                     payment: duty.totalPayment || 0
                 },
                 totalEarning: duty.totalPayment || 0,
+                rate: duty.offeredRate,
                 time: {
                     startTime: duty.startTime,
                     endTime: duty.endTime,
-                    duration: `${duty.duration}`
+                    duration: formatDuration(duty.startTime, duty.endTime, duty.date, duty.isOvernightDuty, duty.endDate)
                 },
                 payment: {
                     method: duty.paymentMethod || 'Unconfirmed',
@@ -2099,26 +2141,38 @@ class DutyService {
         }
 
         // ========= EARNINGS =========
-
-        let filtered = duties;
-
-        if (startDate && endDate) {
-            filtered = duties.filter(d => {
-                const date = new Date(d.completedAt);
-                return date >= new Date(startDate) && date <= new Date(endDate);
-            });
+        // Dates are IST days, both ends included. A duty counts on the day it was completed.
+        const filter = { assignedTo: staff._id, status: 'completed' };
+        if (startDate || endDate) {
+            const range = {};
+            if (startDate) range.$gte = istDayStart(startDate);
+            if (endDate) range.$lt = istDayStart(addDaysToKey(endDate, 1));
+            filter.$or = [{ completedAt: range }, { completedAt: null, date: range }];
         }
 
-        let totalEarnings = 0;
+        const [duties, user] = await Promise.all([
+            Duty.find(filter)
+                .select(EARNINGS_DUTY_FIELDS)
+                .populate('hospital', 'hospitalLegalName')
+                .sort({ completedAt: -1, date: -1 })
+                .lean(),
+            User.findById(userId).select('name email role')
+        ]);
 
-        const data = filtered.map(d => {
+        let totalEarnings = 0;
+        let totalHours = 0;
+
+        const data = duties.map(d => {
             totalEarnings += d.totalPayment || 0;
+            totalHours += dutyHours(d);
 
             return {
-                dutyDate: d.completedAt,
+                dutyDate: d.completedAt || d.date,
                 hospital: d.hospital?.hospitalLegalName,
                 role: d.staffRole,
                 amount: d.totalPayment,
+                rate: d.offeredRate,
+                paymentStatus: paymentStatusOf(d),
                 hours: formatDuration(
                     d.startTime,
                     d.endTime,
@@ -2129,18 +2183,17 @@ class DutyService {
             };
         });
 
-        const user = await User.findById(userId).select('name email role');
-
-        const totalHoursFormatted = completed.summary.totalHours;
+        let period = 'All Time';
+        if (startDate && endDate) period = `${startDate} to ${endDate}`;
+        else if (startDate) period = `From ${startDate}`;
+        else if (endDate) period = `Up to ${endDate}`;
 
         const pdfData = {
             user,
-            period: startDate && endDate
-                ? `${startDate} to ${endDate}`
-                : 'All Time',
-            totalEarnings,
+            period,
+            totalEarnings: Math.round(totalEarnings * 100) / 100,
             totalDuties: data.length,
-            totalHours: totalHoursFormatted,
+            totalHours: formatDuration(totalHours),
             data
         };
 
