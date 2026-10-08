@@ -8,6 +8,7 @@ const notificationService = require('../services/notificationService');
 const Duty = require('../models/Duty');
 const { getPubSubClients } = require('../config/redis');
 const logger = require('../utils/logger');
+const presence = require('../services/presence.service');
 
 let io = null;
 let redisAdapterInitialized = false;
@@ -55,6 +56,9 @@ async function initializeSocket(server) {
     // Apply authentication middleware
     io.use(authMiddleware);
 
+    // Shared online status across server tasks
+    presence.start(io);
+
     // Handle connection events
     io.on('connection', async (socket) => {
         try {
@@ -63,6 +67,7 @@ async function initializeSocket(server) {
 
             // Join user to their personal room
             roomManager.joinUserRoom(socket, user._id.toString());
+            presence.connected(user._id.toString(), socket.id);
 
             // Join staff to role-based room + register dashboard location handlers
             if (user.role === 'staff' && socket.medicalStaff) {
@@ -211,6 +216,7 @@ async function initializeSocket(server) {
             socket.on('disconnect', () => {
                 logger.debug(`User disconnected: ${user._id}`);
                 roomManager.leaveAllRooms(socket);
+                presence.disconnected(user._id.toString(), socket.id);
             });
 
         } catch (error) {

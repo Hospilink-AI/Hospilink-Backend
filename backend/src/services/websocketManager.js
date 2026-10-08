@@ -1,4 +1,5 @@
 const logger = require('../utils/logger');
+const presence = require('./presence.service');
 /**
  * WebSocket Manager Service
  * Handles emitting notifications to Socket.IO rooms
@@ -35,7 +36,7 @@ class WebSocketManager {
             logger.debug(`Emitted ${event} to user room: ${roomName}`);
 
             // Mark notification as delivered if user is online and notificationId provided
-            if (notificationId && this.isUserOnline(userId)) {
+            if (notificationId && await this.isUserOnline(userId)) {
                 const notificationService = require('./notificationService');
                 await notificationService.markAsDelivered([notificationId]);
             }
@@ -45,23 +46,21 @@ class WebSocketManager {
     }
 
     /**
-     * Check if user is currently online
+     * Check if user is currently online, on any server task
      * @param {string} userId - User ID
-     * @returns {boolean} True if user is online
+     * @returns {Promise<boolean>} True if user is online
      */
-    isUserOnline(userId) {
-        try {
-            if (!this.io || !this.io.sockets || !this.io.sockets.adapter) {
-                return false;
-            }
-            
-            const roomName = `user:${userId}`;
-            const room = this.io.sockets.adapter.rooms.get(roomName);
-            return room && room.size > 0;
-        } catch (error) {
-            console.error(`Error checking if user ${userId} is online:`, error);
-            return false;
-        }
+    async isUserOnline(userId) {
+        return presence.isOnline(userId);
+    }
+
+    /**
+     * Online users among `userIds`, on any server task
+     * @param {string[]} userIds - User IDs
+     * @returns {Promise<Set<string>>} Ids of the online users
+     */
+    async onlineAmong(userIds) {
+        return presence.onlineAmong(userIds);
     }
 
     /**

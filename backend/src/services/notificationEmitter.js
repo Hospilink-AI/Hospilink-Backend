@@ -149,12 +149,10 @@ class NotificationEmitter {
                     if (!duty.offer?.mode && !duty.isDemo) websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
 
                     // Phase 3: Smart delivery - WebSocket (online) + FCM (offline)
-                    await notificationDelivery.deliverToUsers(matchingStaffUserIds, notificationType, staffPayload);
+                    const delivery = await notificationDelivery.deliverToUsers(matchingStaffUserIds, notificationType, staffPayload);
 
                     // Phase 2: Mark notifications as delivered for online staff
-                    const onlineStaffIds = matchingStaffUserIds.filter(staffUserId => 
-                        websocketManager.isUserOnline(staffUserId)
-                    );
+                    const onlineStaffIds = delivery.onlineIds || [];
                     
                     if (onlineStaffIds.length > 0) {
                         await notificationService.markDeliveredForUsers(
@@ -783,11 +781,9 @@ class NotificationEmitter {
 
                     await notificationService.createBulkNotifications(matchingStaffUserIds, 'DUTY_RELISTED', staffPayload);
                     if (!duty.offer?.mode && !duty.isDemo) websocketManager.emitToStaffRole(duty.staffRole, 'notification', staffPayload);
-                    await notificationDelivery.deliverToUsers(matchingStaffUserIds, 'DUTY_RELISTED', staffPayload);
+                    const relistDelivery = await notificationDelivery.deliverToUsers(matchingStaffUserIds, 'DUTY_RELISTED', staffPayload);
 
-                    const onlineStaffIds = matchingStaffUserIds.filter(staffUserId =>
-                        websocketManager.isUserOnline(staffUserId)
-                    );
+                    const onlineStaffIds = relistDelivery.onlineIds || [];
                     if (onlineStaffIds.length > 0) {
                         await notificationService.markDeliveredForUsers(
                             onlineStaffIds,

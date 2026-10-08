@@ -51,7 +51,7 @@ class NotificationDeliveryService {
      */
     async deliverToUser(userId, type, payload, unreadCount = 0) {
         try {
-            const isOnline = websocketManager.isUserOnline(userId);
+            const isOnline = await websocketManager.isUserOnline(userId);
 
             if (isOnline) {
                 // User is online - deliver via WebSocket
@@ -114,15 +114,16 @@ class NotificationDeliveryService {
     async deliverToUsers(userIds, type, payload) {
         try {
             if (!userIds || userIds.length === 0) {
-                return { success: true, onlineCount: 0, offlineCount: 0 };
+                return { success: true, onlineCount: 0, offlineCount: 0, onlineIds: [] };
             }
 
-            // Split users into online and offline
+            // Split users into online and offline (one batched check)
+            const online = await websocketManager.onlineAmong(userIds);
             const onlineIds = [];
             const offlineIds = [];
 
             for (const userId of userIds) {
-                if (websocketManager.isUserOnline(userId)) {
+                if (online.has(String(userId))) {
                     onlineIds.push(userId);
                 } else {
                     offlineIds.push(userId);
@@ -157,6 +158,7 @@ class NotificationDeliveryService {
                 success: true,
                 onlineCount: onlineIds.length,
                 offlineCount: offlineIds.length,
+                onlineIds,
                 fcmSuccess: fcmResult.successCount || 0,
                 fcmFailure: fcmResult.failureCount || 0
             };
