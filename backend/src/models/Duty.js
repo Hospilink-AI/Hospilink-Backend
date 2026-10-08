@@ -280,7 +280,11 @@ const dutySchema = new mongoose.Schema({
         nextActionAt: { type: Date },
         // Invite: named doctors first; openAfterInvite lets the duty go to
         // openTo ('radius' or, for emergencies, 'city') once the window ends
-        invitedStaff: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MedicalStaff' }],
+        // Hidden like notifiedStaff: doctors must not see who else was invited
+        invitedStaff: {
+            type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MedicalStaff' }],
+            select: false
+        },
         openAfterInvite: { type: Boolean },
         openTo: { type: String, enum: ['radius', 'city'] },
         notifiedStaff: {
