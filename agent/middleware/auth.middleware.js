@@ -122,12 +122,11 @@ const requireMedicalStaff = async (req, res, next) => {
         // Attach medical staff profile to request
         req.medicalStaff = medicalStaff;
         
-        logger.info('Agent access granted', { 
+        // No name or address in logs
+        logger.info('Agent access granted', {
             userId: req.user._id,
             staffId: medicalStaff._id,
-            name: medicalStaff.fullName,
-            role: medicalStaff.jobRole,
-            location: `${medicalStaff.currentAddress}, ${medicalStaff.city}, ${medicalStaff.state}, ${medicalStaff.pincode}`
+            role: medicalStaff.jobRole
         });
 
         next();
@@ -145,6 +144,23 @@ const requireMedicalStaff = async (req, res, next) => {
         });
     }
 };
+
+/**
+ * Super Admin only: destructive maintenance such as clearing every opening
+ */
+const requireSuperAdmin = (req, res, next) => {
+    if (req.user?.role === 'admin' && req.user.adminSubRole === 'super_admin') {
+        return next();
+    }
+    logger.warn('Agent admin action refused', { userId: req.user?._id, userRole: req.user?.role, path: req.path });
+    return res.status(403).json({
+        status: 'error',
+        code: 'FORBIDDEN',
+        message: 'Only a Super Admin can do this.'
+    });
+};
+
+const authenticateSuperAdmin = [protect, requireSuperAdmin];
 
 /**
  * Combined middleware for agent authentication
@@ -181,6 +197,8 @@ const optionalAuth = async (req, res, next) => {
 };
 
 module.exports = {
+    requireSuperAdmin,
+    authenticateSuperAdmin,
     protect,
     requireMedicalStaff,
     authenticateMedicalStaff,

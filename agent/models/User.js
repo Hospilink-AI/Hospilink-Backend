@@ -17,6 +17,12 @@ const userSchema = new mongoose.Schema({
             message: 'Please select a valid role'
         }
     },
+    // Same field as the backend's User: permission tier of an admin account
+    adminSubRole: {
+        type: String,
+        enum: ['super_admin', 'operations_manager', 'tech_support'],
+        default: undefined
+    },
     password: {
         type: String,
         required: [true, 'Password is required'],
