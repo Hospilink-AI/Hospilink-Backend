@@ -96,6 +96,30 @@ const dutySchema = new mongoose.Schema({
         type: String,
         maxlength: [1000, 'Description cannot exceed 1000 characters']
     },
+    // 'anesthesia': an anesthetist booked for one case at one price
+    category: {
+        type: String,
+        enum: ['standard', 'anesthesia'],
+        default: 'standard'
+    },
+    pricing: {
+        mode: {
+            type: String,
+            enum: ['hourly', 'fixed'],
+            default: 'hourly'
+        }
+    },
+    // The total for the case when pricing.mode is 'fixed'
+    fixedPrice: {
+        type: Number,
+        min: [0, 'Fixed price cannot be negative'],
+        default: undefined
+    },
+    caseNote: {
+        type: String,
+        maxlength: [600, 'Case note cannot exceed 600 characters'],
+        default: undefined
+    },
     offeredRate: {
         type: Number,
         min: [0, 'Offered rate cannot be negative']
@@ -575,9 +599,17 @@ dutySchema.pre('save', function (next) {
             this.isModified('endTime') ||
             this.isModified('date') ||
             this.isModified('endDate') ||
-            this.isModified('isOvernightDuty');
+            this.isModified('isOvernightDuty') ||
+            this.isModified('fixedPrice') ||
+            this.isModified('pricing.mode');
 
         if (isNew || relevantFieldsModified) {
+            // One price for the case, whatever the hours
+            if (this.pricing?.mode === 'fixed' && typeof this.fixedPrice === 'number' && this.fixedPrice > 0) {
+                this.totalPayment = Math.round(this.fixedPrice * 100) / 100;
+                return next();
+            }
+
             // Validate required fields
             if (!this.offeredRate || !this.startTime || !this.endTime || !this.date) {
                 this.totalPayment = 0;

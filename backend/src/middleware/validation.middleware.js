@@ -20,7 +20,7 @@ const {
 const mongoose = require('mongoose');
 const { isValidDateKey, daysBetweenKeys, istDateKey, addDaysToKey } = require('../utils/calendar.helper');
 const { parsePeriod } = require('../utils/analytics.helper');
-const { priceRuleError } = require('../utils/dutyPricing');
+const { priceRuleError, anesthesiaErrors } = require('../utils/dutyPricing');
 
 // Longest window one calendar counts call may cover
 const MAX_CALENDAR_WINDOW_DAYS = 100;
@@ -873,6 +873,8 @@ const validateDutyCreation = (req, res, next) => {
     if (priceError) {
         errors.push(priceError);
     }
+
+    errors.push(...anesthesiaErrors(req.body));
     
     if (errors.length > 0) {
         return res.status(400).json({
