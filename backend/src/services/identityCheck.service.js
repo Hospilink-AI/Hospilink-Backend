@@ -161,7 +161,7 @@ async function findDuplicatePan(userId, role, pan) {
 
 async function staffFindings(userId, docs) {
     const findings = new Findings();
-    const profile = await MedicalStaff.findOne({ user: userId }).select('fullName').lean();
+    const profile = await MedicalStaff.findOne({ user: userId }).select('fullName +dateOfBirth').lean();
     const profileName = profile?.fullName;
 
     for (const type of ['aadhaar-card', 'pan-card', 'license-permit', 'mcim-certificate', 'ncim-certificate']) {
@@ -169,6 +169,9 @@ async function staffFindings(userId, docs) {
     }
 
     const dobSources = ['aadhaar-card', 'pan-card', 'mcim-certificate', 'ncim-certificate'].filter(t => docs[t]?.dob);
+    if (profile?.dateOfBirth) {
+        for (const type of dobSources) findings.dob('profile', profile.dateOfBirth, type, docs[type].dob);
+    }
     for (let i = 0; i < dobSources.length; i++) {
         for (let j = i + 1; j < dobSources.length; j++) {
             findings.dob(dobSources[i], docs[dobSources[i]].dob, dobSources[j], docs[dobSources[j]].dob);
@@ -320,9 +323,12 @@ async function aadhaarDecision(userId, role, details) {
     const docs = currentDocuments(record);
 
     if (role === 'staff') {
-        const profile = await MedicalStaff.findOne({ user: id }).select('fullName').lean();
+        const profile = await MedicalStaff.findOne({ user: id }).select('fullName +dateOfBirth').lean();
         const name = compareNames(profile?.fullName, aadhaar.name);
         if (name !== 'match') return { autoVerify: false, reason: name === 'unknown' ? 'name_unreadable' : `name_${name}` };
+        if (profile?.dateOfBirth && compareDobs(profile.dateOfBirth, aadhaar.dob) === 'mismatch') {
+            return { autoVerify: false, reason: 'dob_mismatch' };
+        }
         for (const type of ['pan-card', 'mcim-certificate', 'ncim-certificate']) {
             if (docs[type]?.dob && compareDobs(aadhaar.dob, docs[type].dob) === 'mismatch') {
                 return { autoVerify: false, reason: 'dob_mismatch' };

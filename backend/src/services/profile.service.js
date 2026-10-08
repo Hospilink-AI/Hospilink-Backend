@@ -34,7 +34,7 @@ const {
 // error message).
 const EDITABLE_PROFILE_FIELDS = {
     staff: ['fullName', 'jobRole', 'experience', 'currentAddress', 'city', 'state', 'pincode',
-        'coordinates', 'profileSummary', 'education', 'skills', 'email', 'phoneNumber'],
+        'coordinates', 'profileSummary', 'education', 'skills', 'email', 'phoneNumber', 'dateOfBirth'],
     hospital: ['hospitalLegalName', 'currentAddress', 'city', 'state', 'pincode', 'coordinates',
         'staffCount', 'servicesAvailable', 'description', 'email', 'phoneNumber']
 };
@@ -146,6 +146,7 @@ class ProfileService {
                 education: profileData.education || [],
                 skills: profileData.skills || [],
                 experience: profileData.experience,
+                ...(profileData.dateOfBirth ? { dateOfBirth: profileData.dateOfBirth } : {}),
                 isAvailable: false,
                 profileSource: staged ? 'resume_reviewed' : 'manual',
                 ...(staged && { resumeAnalysis: this._buildResumeAnalysisBlock(staged.extracted, staged.resumeDocumentId) })
@@ -503,7 +504,7 @@ class ProfileService {
             let profile = null;
 
             if (user.role === 'staff') {
-                const raw = await MedicalStaff.findOne({ user: userId }).lean();
+                const raw = await MedicalStaff.findOne({ user: userId }).select('+dateOfBirth').lean();
                 if (raw) {
                     let profilePictureUrl = null;
 
@@ -547,6 +548,8 @@ class ProfileService {
                     profile = {
                         id: raw._id,
                         fullName: raw.fullName,
+                        // 'YYYY-MM-DD' or null; only in the doctor's own profile
+                        dateOfBirth: raw.dateOfBirth ? new Date(raw.dateOfBirth).toISOString().slice(0, 10) : null,
                         profilePicture: profilePictureUrl,
                         jobRole: raw.jobRole,
                         currentAddress: raw.currentAddress,
@@ -894,7 +897,7 @@ class ProfileService {
             await cacheService.invalidateProfileStatus(userId);
 
             // A new name is compared with the identity documents again
-            if (updateData.fullName || updateData.hospitalLegalName) {
+            if (updateData.fullName || updateData.hospitalLegalName || updateData.dateOfBirth !== undefined) {
                 require('./identityCheck.service').checkSoon(userId);
             }
 

@@ -232,6 +232,13 @@ const medicalStaffSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    // Optional. Compared with the dates of birth on the identity documents.
+    // Hidden from every query unless asked for ('+dateOfBirth'), so hospitals
+    // and lists never see it.
+    dateOfBirth: {
+        type: Date,
+        select: false
+    },
     // Not required — populated from a resume when the parser can confidently
     // bucket it; required for the manual flow via validateMedicalStaffProfile.
     experience: {
