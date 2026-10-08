@@ -29,6 +29,25 @@ const {
     ForbiddenError
 } = require('../middleware/error.middleware');
 
+// Profile fields each role may change through PUT /api/profile/me. Email and
+// phone are read-only (checked separately, so a changed value still gets its
+// error message).
+const EDITABLE_PROFILE_FIELDS = {
+    staff: ['fullName', 'jobRole', 'experience', 'currentAddress', 'city', 'state', 'pincode',
+        'coordinates', 'profileSummary', 'education', 'skills', 'email', 'phoneNumber'],
+    hospital: ['hospitalLegalName', 'currentAddress', 'city', 'state', 'pincode', 'coordinates',
+        'staffCount', 'servicesAvailable', 'description', 'email', 'phoneNumber']
+};
+
+function editableProfileFields(role, body) {
+    const allowed = EDITABLE_PROFILE_FIELDS[role] || [];
+    const picked = {};
+    for (const field of allowed) {
+        if (body && Object.prototype.hasOwnProperty.call(body, field)) picked[field] = body[field];
+    }
+    return picked;
+}
+
 class ProfileService {
     // Returns true if normalizedPhone already belongs to another Hospital or MedicalStaff profile.
     async isPhoneNumberRegistered(normalizedPhone) {
@@ -643,13 +662,18 @@ class ProfileService {
     }
 
     // Update user profile with location handling
-    async updateUserProfile(userId, updateData) {
+    async updateUserProfile(userId, rawUpdateData) {
         try {
             // Get user with lean query
             const user = await User.findById(userId).select('name email role').lean();
             if (!user) {
                 throw new NotFoundError('User not found');
             }
+
+            // Only the fields a user may edit. Anything else in the body
+            // (verificationStatus, isSuspended, averageRating, user, ...) is
+            // dropped, never saved.
+            const updateData = editableProfileFields(user.role, rawUpdateData);
 
             let updatedProfile = null;
             let userUpdateData = {};
@@ -1765,3 +1789,5 @@ class ProfileService {
 }
 
 module.exports = new ProfileService();
+module.exports.EDITABLE_PROFILE_FIELDS = EDITABLE_PROFILE_FIELDS;
+module.exports.editableProfileFields = editableProfileFields;
