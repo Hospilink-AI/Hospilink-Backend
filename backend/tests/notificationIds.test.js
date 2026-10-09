@@ -1,7 +1,8 @@
 // Live pop-ups need the stored notification id to mark it read
 const mockEmitted = [];
 jest.mock('../src/services/websocketManager', () => ({
-    isUserOnline: () => true,
+    isUserOnline: async () => true,
+    onlineAmong: async (ids) => new Set(ids.map(String)),
     emitToUser: (userId, event, payload) => mockEmitted.push({ userId, payload }),
     sendUnreadCount: () => {}
 }));
