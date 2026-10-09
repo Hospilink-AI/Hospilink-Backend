@@ -1533,6 +1533,9 @@ class DutyService {
                 throw new ForbiddenError('Access denied: This duty has expired and is no longer available');
             }
 
+            // Same deadline the feed shows
+            const offerExpiresAt = isAvailable ? dutyOfferService.offerExpiresAt(duty) : null;
+
             // Counts towards "viewed by N" on the hospital's fill tracker
             if (isAvailable) {
                 Duty.updateOne({ _id: duty._id }, { $addToSet: { viewedBy: medicalStaff._id } })
@@ -1584,6 +1587,7 @@ class DutyService {
 
                         // Convert duty to plain object and add distance information
                         const dutyObject = duty.toObject();
+                        dutyObject.offerExpiresAt = offerExpiresAt;
                         dutyObject.distance = distanceInfo.distance;
                         dutyObject.duration = distanceInfo.duration;
                         dutyObject.distanceText = distanceInfo.distanceText;
@@ -1611,6 +1615,7 @@ class DutyService {
 
                         // Add review data even if distance calculation fails
                         const dutyObject = duty.toObject();
+                        dutyObject.offerExpiresAt = offerExpiresAt;
                         dutyObject.review = myReview;
                         dutyObject.hospitalReview = visibleReviews.hospitalToStaff;
                         dutyObject.staffReview = visibleReviews.staffToHospital;
@@ -1625,6 +1630,7 @@ class DutyService {
 
                     // Still add review data even without coordinates
                     const dutyObject = duty.toObject();
+                    dutyObject.offerExpiresAt = offerExpiresAt;
                     dutyObject.review = myReview;
                     dutyObject.hospitalReview = visibleReviews.hospitalToStaff;
                     dutyObject.staffReview = visibleReviews.staffToHospital;
@@ -1636,6 +1642,7 @@ class DutyService {
 
                 // Add review data even if distance calculation fails
                 const dutyObject = duty.toObject();
+                dutyObject.offerExpiresAt = offerExpiresAt;
                 dutyObject.review = myReview;
                 dutyObject.hospitalReview = visibleReviews.hospitalToStaff;
                 dutyObject.staffReview = visibleReviews.staffToHospital;

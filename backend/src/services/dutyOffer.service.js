@@ -8,7 +8,14 @@ const logger = require('../utils/logger');
 
 const staffAvailabilityService = require('./staffAvailability.service');
 const blockService = require('./block.service');
-const { istDateKey } = require('../utils/calendar.helper');
+const { istDateKey, istDayStart } = require('../utils/calendar.helper');
+
+// The duty's start as a real instant (IST day of `date` plus startTime)
+function scheduledStartAt(duty) {
+    if (!duty?.date || !/^\d{1,2}:\d{2}$/.test(duty.startTime || '')) return null;
+    const [hours, minutes] = duty.startTime.split(':').map(Number);
+    return new Date(istDayStart(istDateKey(duty.date)).getTime() + (hours * 60 + minutes) * MINUTE_MS);
+}
 
 const OFFER_KEYS = [
     'offer.featureEnabled', 'offer.startRadiusKm', 'offer.stepKm', 'offer.stepMinutes', 'offer.maxRadiusKm',
@@ -394,6 +401,15 @@ class DutyOfferService {
     }
 
 
+
+    // When the offer to this doctor runs out: the end of the invite window for
+    // an invitee, otherwise the duty's start (accepting closes then)
+    offerExpiresAt(duty) {
+        if (duty.offer?.mode === 'invite' && duty.offer.nextActionAt) {
+            return new Date(duty.offer.nextActionAt);
+        }
+        return scheduledStartAt(duty);
+    }
 
     _plain(duty) {
         return typeof duty.toObject === 'function' ? duty.toObject() : duty;

@@ -274,6 +274,7 @@ class LocationBasedStaffService {
             if (distanceResult.distance <= 50 || stagedEligible.has(duty._id.toString())) {
                 jobsWithDistance.push({
                     ...duty.toObject(),
+                    offerExpiresAt: dutyOfferService.offerExpiresAt(duty),
                     distance: distanceResult.distance,
                     duration: distanceResult.duration,
                     distanceText: distanceResult.distanceText,
