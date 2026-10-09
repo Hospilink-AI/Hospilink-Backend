@@ -1,7 +1,6 @@
-
-class DutyService {
-
-}
+// Duties from posting to payment: lifecycle, the staff and hospital views,
+// detail, scheduled jobs, earnings and the start/end code handshake.
+class DutyService {}
 
 // The methods live in ./duty/, one file per area
 Object.assign(DutyService.prototype,
