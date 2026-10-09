@@ -21,6 +21,8 @@ const notificationRoutes = require("./routes/notification.routes");
 const profileRoutes = require("./routes/profile.routes");
 const ticketRoutes = require("./routes/ticket.routes");
 const logger = require("./utils/logger");
+// Older console.* calls go through the logger as well (not in tests)
+if (process.env.NODE_ENV !== "test") logger.captureConsole();
 // Only run interval-based cron in persistent environments (local dev)
 // On Vercel, cron jobs are handled via api/cron/* endpoints + vercel.json schedules
 
@@ -54,7 +56,12 @@ app.use((req, res, next) => {
 app.use(compression({ threshold: 1024 }));
 
 // Request logging (load balancer health checks left out)
-app.use(morgan("combined", { skip: (req) => req.path === "/health" }));
+// Paths only: query strings can hold the webhook token and address searches
+morgan.token("path-only", (req) => (req.originalUrl || req.url || "").split("?")[0]);
+app.use(morgan(
+  ':remote-addr - :remote-user [:date[clf]] ":method :path-only HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent" :response-time ms',
+  { skip: (req) => req.path === "/health", stream: logger.stream }
+));
 
 // Add specific trust proxy setting
 app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal', '172.16.0.0/12', '192.168.0.0/16', '10.0.0.0/8']);
@@ -161,7 +168,7 @@ app.use((err, req, res, next) => {
   logger.error(`Error: ${err.message}`, {
     requestId: req.requestId,
     stack: err.stack,
-    url: req.originalUrl,
+    url: (req.originalUrl || "").split("?")[0],
     method: req.method,
   });
 

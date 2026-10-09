@@ -43,10 +43,8 @@ class ActivityLogService {
             });
             
             if (!validation.isValid) {
-                logger.error('Invalid activity log data:', validation.errors);
-                logger.error('Actor data:', actorData);
-                logger.error('Action:', action);
-                logger.error('Target data:', targetData);
+                // Actor and target hold names and emails, so only the action
+                logger.error(`Invalid activity log data for ${action}: ${JSON.stringify(validation.errors)}`);
                 return null;
             }
             
