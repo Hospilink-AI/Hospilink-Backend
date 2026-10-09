@@ -343,7 +343,7 @@ class AdminService {
 
         // Filter by jobRole (single or multiple, case-insensitive)
         if (jobRole) {
-            const rolesArray = jobRole.split(',').map(r => new RegExp(`^${r.trim()}$`, 'i'));
+            const rolesArray = String(jobRole).split(',').map(r => new RegExp(`^${escapeRegex(r.trim())}$`, 'i'));
             query.jobRole = { $in: rolesArray };
         }
 
