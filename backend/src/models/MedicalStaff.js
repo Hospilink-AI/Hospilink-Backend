@@ -173,6 +173,13 @@ const medicalStaffSchema = new mongoose.Schema({
         default: false,
         index: true
     },
+    // Reminders sent to a new doctor to upload documents (days 1, 3 and 7)
+    reminders: {
+        documents: {
+            type: [{ _id: false, at: Date, channel: { type: String, enum: ['push', 'email'] } }],
+            default: undefined
+        }
+    },
     isAvailable: {
         type: Boolean,
         default: false,

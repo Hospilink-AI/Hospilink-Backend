@@ -1664,7 +1664,7 @@ class NotificationEmitter {
                     name: staffName,
                     role: staff.jobRole
                 },
-                message: `Your profile "${staffName}" has been verified. You can now apply for duties and access all features.`,
+                message: "You're verified. Turn on availability to get duty offers.",
                 timestamp: new Date().toISOString()
             };
 
@@ -1916,6 +1916,17 @@ class NotificationEmitter {
 
 
     // Document rejection notifications
+    // New doctor still missing required documents (days 1, 3 and 7 after sign-up)
+    async emitDocumentsReminder(userId) {
+        const payload = {
+            type: 'DOCUMENTS_REMINDER',
+            message: 'Upload your documents to start taking duties.',
+            timestamp: new Date().toISOString()
+        };
+        const { unreadCount } = await notificationService.createNotificationWithCount(userId, 'DOCUMENTS_REMINDER', payload);
+        await notificationDelivery.deliverToUser(userId, 'DOCUMENTS_REMINDER', payload, unreadCount);
+    }
+
     async emitDocumentRejected(document, userRole) {
         try {
             if (!document || !document.userId) {

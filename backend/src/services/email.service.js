@@ -1258,6 +1258,38 @@ class EmailService {
         }
     }
 
+    async sendDocumentsReminderEmail(email, name) {
+        try {
+            const mailOptions = {
+                from: `HospiLink <${process.env.EMAIL_FROM}>`,
+                to: email,
+                subject: 'HospiLink - Upload your documents to start taking duties',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 10px; overflow: hidden;">
+                        <div style="background-color: #0b2a4a; padding: 20px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">Upload your documents</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p>Hello <strong>${name}</strong>,</p>
+                            <p>Upload your documents to start taking duties. Once our team has checked them, you can turn on availability and get duty offers near you.</p>
+                            <div style="background-color: #eef5fb; border-left: 4px solid #0b2a4a; padding: 15px; margin: 20px 0;">
+                                <p style="margin: 0; color: #0b2a4a;">Open the HospiLink app and go to Profile, then Documents.</p>
+                            </div>
+                            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                            <p style="color: #7f8c8d; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.<br>${SUPPORT_LINE}</p>
+                        </div>
+                    </div>
+                `
+            };
+            await this._sendWithTimeout(mailOptions);
+            logger.info('Documents reminder email sent');
+            return true;
+        } catch (error) {
+            logger.error(`Error sending documents reminder email: ${error.message}`);
+            return false;
+        }
+    }
+
     async sendAccountDeletionScheduledEmail(email, name, scheduledFor) {
         try {
             const when = new Date(scheduledFor).toLocaleDateString('en-IN', {
