@@ -1149,7 +1149,7 @@ exports.getFillProgress = asyncHandler(async (req, res) => {
 
 // GET /api/duties/calendar-day - duties behind one calendar date
 exports.getCalendarDay = asyncHandler(async (req, res) => {
-    const result = await dutyCalendarService.getDay(req.user, req.query.date);
+    const result = await dutyCalendarService.getDay(req.user, req.query.date, { include: req.query.include });
 
     res.status(200).json({
         success: true,

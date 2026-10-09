@@ -184,40 +184,8 @@ class DutyCalendarService {
         }
 
         if (staffLocation) {
-            const now = new Date();
-            const today = new Date(new Date().setHours(0, 0, 0, 0));
-            const range = istDayRange(lo, hi);
-
-            const openDuties = await Duty.find({
-                status: 'available',
-                staffRole: medicalStaff.jobRole,
-                date: { $gte: range.$gte > today ? range.$gte : today, $lt: range.$lt },
-                'autoRelist.excludedStaff': { $ne: medicalStaff._id },
-                isDemo: medicalStaff.isDemo ? true : { $ne: true },
-                hospital: { $nin: await blockService.hospitalsHiddenFrom(medicalStaff._id) }
-            })
-                .select('date startTime hospital offer.mode offer.radiusKm offer.city')
-                .populate('hospital', 'coordinates city')
-                .lean();
-            const notifiedDuties = await dutyOfferService.notifiedAmong(openDuties, medicalStaff._id);
-
+            const openDuties = await this._openDutiesFor(medicalStaff, staffLocation, lo, hi);
             for (const duty of openDuties) {
-                const coords = duty.hospital?.coordinates?.coordinates;
-                if (!coords || hasDutyStarted(duty, now)) continue;
-
-                // Staged offers count only once offered to this doctor, as in the feed
-                if (dutyOfferService.isStaged(duty)) {
-                    const { eligible } = dutyOfferService.eligibility(duty, medicalStaff, staffLocation, notifiedDuties.has(String(duty._id)));
-                    if (eligible) dayFor(istDateKey(duty.date)).open++;
-                    continue;
-                }
-
-                const distance = locationBasedStaffService.haversineDistance(
-                    staffLocation.latitude, staffLocation.longitude,
-                    coords.latitude, coords.longitude
-                );
-                if (distance > OPEN_DUTY_RADIUS_KM) continue;
-
                 dayFor(istDateKey(duty.date)).open++;
             }
         }
@@ -253,12 +221,103 @@ class DutyCalendarService {
 
 
 
+    // Open duties a doctor can take on lo..hi: same rules as GET /duties/available,
+    // but distance in a straight line, so no Maps call. Each has distanceKm.
+    async _openDutiesFor(medicalStaff, staffLocation, lo, hi, { detailed = false } = {}) {
+        const now = new Date();
+        const today = new Date(new Date().setHours(0, 0, 0, 0));
+        const range = istDayRange(lo, hi);
+
+        const select = detailed
+            ? 'date endDate startTime endTime isOvernightDuty staffRole dutySubType urgency offeredRate totalPayment hospital offer.mode offer.radiusKm offer.city offer.nextActionAt'
+            : 'date startTime hospital offer.mode offer.radiusKm offer.city';
+        const hospitalFields = detailed ? 'hospitalLegalName coordinates city state' : 'coordinates city';
+
+        const openDuties = await Duty.find({
+            status: 'available',
+            staffRole: medicalStaff.jobRole,
+            date: { $gte: range.$gte > today ? range.$gte : today, $lt: range.$lt },
+            'autoRelist.excludedStaff': { $ne: medicalStaff._id },
+            isDemo: medicalStaff.isDemo ? true : { $ne: true },
+            hospital: { $nin: await blockService.hospitalsHiddenFrom(medicalStaff._id) }
+        })
+            .select(select)
+            .populate('hospital', hospitalFields)
+            .lean();
+        const notifiedDuties = await dutyOfferService.notifiedAmong(openDuties, medicalStaff._id);
+
+        const result = [];
+        for (const duty of openDuties) {
+            const coords = duty.hospital?.coordinates?.coordinates;
+            if (!coords || hasDutyStarted(duty, now)) continue;
+
+            const distance = locationBasedStaffService.haversineDistance(
+                staffLocation.latitude, staffLocation.longitude,
+                coords.latitude, coords.longitude
+            );
+
+            // Staged offers count only once offered to this doctor, as in the feed
+            if (dutyOfferService.isStaged(duty)) {
+                const { eligible } = dutyOfferService.eligibility(duty, medicalStaff, staffLocation, notifiedDuties.has(String(duty._id)));
+                if (!eligible) continue;
+            } else if (distance > OPEN_DUTY_RADIUS_KM) {
+                continue;
+            }
+
+            result.push({ ...duty, distanceKm: Math.round(distance * 10) / 10 });
+        }
+        return result;
+    }
+
+
+
     // GET /api/duties/calendar-day — the duties behind one date's counts.
     // Uses the same date rules as getCounts so the list matches the badge.
-    async getDay(user, date) {
-        return user.role === 'hospital'
-            ? this._hospitalDay(user.id, date)
-            : this._staffDay(user.id, date);
+    // include 'open' adds that date's open duties for a doctor.
+    async getDay(user, date, { include } = {}) {
+        if (user.role === 'hospital') return this._hospitalDay(user.id, date);
+        const day = await this._staffDay(user.id, date);
+        if (include === 'open') {
+            day.open = await this._staffOpenDay(user.id, date);
+        }
+        return day;
+    }
+
+    async _staffOpenDay(staffUserId, date) {
+        const medicalStaff = await MedicalStaff.findOne({ user: staffUserId }).select('_id jobRole city isDemo').lean();
+        if (!medicalStaff) {
+            throw new NotFoundError('Medical staff profile not found');
+        }
+        let staffLocation = null;
+        try {
+            staffLocation = await locationBasedStaffService.getStaffCurrentLocation(staffUserId);
+        } catch (error) {
+            staffLocation = null;
+        }
+        if (!staffLocation) return [];
+
+        const duties = await this._openDutiesFor(medicalStaff, staffLocation, date, date, { detailed: true });
+        return duties
+            .sort((a, b) => a.startTime.localeCompare(b.startTime) || a.distanceKm - b.distanceKm)
+            .map(duty => ({
+                dutyId: duty._id,
+                status: 'available',
+                staffRole: duty.staffRole,
+                dutySubType: duty.dutySubType || null,
+                startTime: duty.startTime,
+                endTime: duty.endTime,
+                isOvernightDuty: duty.isOvernightDuty || false,
+                urgency: duty.urgency,
+                offeredRate: duty.offeredRate,
+                totalPayment: duty.totalPayment,
+                distanceKm: duty.distanceKm,
+                hospital: duty.hospital ? {
+                    id: duty.hospital._id,
+                    name: duty.hospital.hospitalLegalName,
+                    city: duty.hospital.city,
+                    state: duty.hospital.state
+                } : null
+            }));
     }
 
 
