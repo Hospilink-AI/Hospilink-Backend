@@ -19,6 +19,7 @@ process.env.TZ = "Asia/Kolkata";
 const {
   authenticateMedicalStaff,
   optionalAuth,
+  authenticateSuperAdmin,
 } = require("./middleware/auth.middleware");
 
 const cacheService = require("./services/cache.service");
@@ -513,7 +514,8 @@ app.get("/v1/jobs/:id", authenticateMedicalStaff, async (req, res) => {
 });
 
 // Clear all jobs
-app.delete("/v1/jobs/clear", authenticateMedicalStaff, async (req, res) => {
+// Wipes every stored opening: Super Admin only
+app.delete("/v1/jobs/clear", authenticateSuperAdmin, async (req, res) => {
   try {
     const result = await clearAllJobs();
     await Promise.all([invalidateStatsCache(), invalidateJobsCache()]).catch(
