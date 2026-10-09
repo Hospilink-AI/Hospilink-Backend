@@ -19,7 +19,8 @@ exports.extractQRFromBuffer = async (buffer) => {
 
             const uint8Array = new Uint8Array(buffer);
 
-            const pdf = await getDocument({ data: uint8Array }).promise;
+            // isEvalSupported: never run code from a PDF's fonts (CVE-2024-4367)
+            const pdf = await getDocument({ data: uint8Array, isEvalSupported: false }).promise;
 
             const maxPages = Math.min(pdf.numPages, 3);
 

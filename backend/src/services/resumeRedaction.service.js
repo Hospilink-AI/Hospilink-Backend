@@ -96,6 +96,8 @@ class ResumeRedactionService {
         const uint8Array = new Uint8Array(sourceBuffer);
         const pdf = await pdfjsLib.getDocument({
             data: uint8Array,
+            // Never run code from a PDF's fonts (CVE-2024-4367)
+            isEvalSupported: false,
             standardFontDataUrl: STANDARD_FONT_DATA_URL,
             cMapUrl: CMAP_URL,
             cMapPacked: true
