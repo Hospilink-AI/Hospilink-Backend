@@ -173,37 +173,10 @@ app.use((req, res, next) => {
   });
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  logger.error(`Error: ${err.message}`, {
-    requestId: req.requestId,
-    stack: err.stack,
-    url: (req.originalUrl || "").split("?")[0],
-    method: req.method,
-  });
+// One error handler for every route: status, safe message, one log line
+app.use(require("./middleware/error.middleware").errorHandler);
 
-  const statusCode = err.statusCode || 500;
-  const message = process.env.NODE_ENV === 'production' && statusCode === 500
-    ? 'Internal server error'
-    : err.message;
-
-  res.status(statusCode).json({
-    success: false,
-    message: message,
-    
-    ...(err.isOperational && err.code && { code: err.code }),
-    ...(process.env.NODE_ENV !== "production" && { stack: err.stack }),
-    requestId: req.requestId,
-  });
-});
-
-// Graceful shutdown handler
-const gracefulShutdown = () => {
-  logger.info("Received shutdown signal, shutting down gracefully...");
-  process.exit(0);
-};
-
-process.on("SIGTERM", gracefulShutdown);
-process.on("SIGINT", gracefulShutdown);
+// Shutdown is handled in server.js (finishes in-flight requests and closes
+// sockets first). A handler here that exits at once would cut that short.
 
 module.exports = app;
