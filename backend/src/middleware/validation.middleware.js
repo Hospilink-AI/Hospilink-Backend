@@ -248,6 +248,20 @@ const validateResetPassword = (req, res, next) => {
 
 
 
+// Optional date of birth: 'YYYY-MM-DD', a real date, age 18 to 80. null
+// clears it on an update.
+function dateOfBirthError(value) {
+    if (value === undefined || value === null || value === '') return null;
+    const match = typeof value === 'string' && value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const date = match ? new Date(Date.UTC(+match[1], +match[2] - 1, +match[3])) : null;
+    if (!date || date.getUTCMonth() !== +match[2] - 1 || date.getUTCDate() !== +match[3]) {
+        return 'Date of birth must be a date in YYYY-MM-DD format';
+    }
+    const age = (Date.now() - date.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+    if (age < 18 || age > 80) return 'Date of birth must be for an age between 18 and 80';
+    return null;
+}
+
 const validateMedicalStaffProfile = (req, res, next) => {
     const { fullName, jobRole, currentAddress, city, state, pincode, phoneNumber, email, profileSummary, education, skills, experience } = req.body;
     const errors = [];
@@ -265,7 +279,8 @@ const validateMedicalStaffProfile = (req, res, next) => {
         'profileSummary',
         'education',
         'skills',
-        'experience'
+        'experience',
+        'dateOfBirth'
     ];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
@@ -273,6 +288,9 @@ const validateMedicalStaffProfile = (req, res, next) => {
     if (unexpectedFields.length > 0) {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}. Only allowed fields: ${allowedFields.join(', ')}`);
     }
+
+    const createDobError = dateOfBirthError(req.body.dateOfBirth);
+    if (createDobError) errors.push(createDobError);
 
     // Full name validation
     if (!fullName || fullName.trim().length === 0) {
@@ -680,6 +698,9 @@ const validateProfileUpdate = (req, res, next) => {
             errors.push('Pincode must be a valid 6-digit Indian postal code');
         }
         
+        const dobError = dateOfBirthError(req.body.dateOfBirth);
+        if (dobError) errors.push(dobError);
+
         // Experience validation
         if (experience) {
             const validExperienceValues = ['0-1 year', '1-3 years', '3-5 years', '5-10 years', '10-15 years', '15-20 years', '20+ years'];
