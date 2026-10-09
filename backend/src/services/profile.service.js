@@ -7,7 +7,6 @@ const { approximatePoint } = require('../utils/privacy.helper');
 const geocodingService = require('../services/geocoding.service');
 const cacheService = require('./cache.service');
 const documentService = require('./document.service');
-const Review = require('../models/Review');
 const path = require('path');
 const { uploadToS3, deleteFromS3, generatePreSignedURL } = require('./s3.service');
 const notificationEmitter = require('./notificationEmitter');
@@ -63,144 +62,140 @@ class ProfileService {
     
     // Create medical staff profile
     async createMedicalStaffProfile(userId, profileData) {
-        try {
-            // Check if user exists and has staff role
-            const user = await User.findById(userId);
-            if (!user) {
-                throw new NotFoundError('User not found');
-            }
-
-            if (user.role !== 'staff') {
-                throw new ForbiddenError('User must have staff role to create medical staff profile');
-            }
-
-            // Email must match signup email
-            if (profileData.email && profileData.email !== user.email) {
-                throw new ValidationError('Email must match the email used during signup');
-            }
-
-            // Full name must match signup name
-            if (profileData.fullName && profileData.fullName.trim() !== user.name.trim()) {
-                throw new ValidationError(`Full name "${profileData.fullName}" must match the name used during signup "${user.name}"`);
-            }
-
-            // Use signup email for profile
-            profileData.email = user.email;
-
-            // Check if profile already exists
-            const existingProfile = await MedicalStaff.findOne({ user: userId });
-            if (existingProfile) {
-                throw new ConflictError('Medical staff profile already exists');
-            }
-
-            // Phone must be OTP-verified before profile creation
-            const normalizedStaffPhone = SMSService.normalizePhone(profileData.phoneNumber);
-            const staffPhoneVerified = await cacheService.getPhoneVerified(userId, normalizedStaffPhone);
-            if (!staffPhoneVerified) {
-                throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
-            }
-
-            // Phone number must be unique across all hospital and staff accounts
-            if (await this.isPhoneNumberRegistered(normalizedStaffPhone)) {
-                throw new ConflictError('Phone number already registered with another account');
-            }
-
-            let coordinates = null;
-
-            // Always geocode from address - no location permission during profile creation
-            const address = `${profileData.currentAddress}, ${profileData.city}, ${profileData.state}, ${profileData.pincode}`;
-            try {
-                const geocoded = await geocodingService.geocodeAddress(address);
-                coordinates = {
-                    type: 'Point',
-                    coordinates: {
-                        latitude: geocoded.latitude,
-                        longitude: geocoded.longitude
-                    }
-                };
-                console.log('Geocoded from address for staff profile:', coordinates);
-            } catch (error) {
-                console.error('Geocoding failed for staff profile:', error.message);
-                throw new ValidationError('Failed to geocode location. Please provide valid city and area.');
-            }
-
-            // Validate coordinates
-            geocodingService.validateCoordinates(coordinates.coordinates.latitude, coordinates.coordinates.longitude);
-
-            const staged = await cacheService.getParsedResumeStage(userId);
-
-            // Create medical staff profile with all required fields
-            const medicalStaffProfile = new MedicalStaff({
-                user: userId,
-                fullName: profileData.fullName || user.name,
-                jobRole: profileData.jobRole,
-                currentAddress: profileData.currentAddress,
-                city: profileData.city,
-                state: profileData.state,
-                pincode: profileData.pincode,
-                phoneNumber: profileData.phoneNumber,
-                normalizedPhone: normalizedStaffPhone,
-                isPhoneVerified: true,
-                email: profileData.email,
-                coordinates: coordinates,
-                profileSummary: profileData.profileSummary || '',
-                education: profileData.education || [],
-                skills: profileData.skills || [],
-                experience: profileData.experience,
-                ...(profileData.dateOfBirth ? { dateOfBirth: profileData.dateOfBirth } : {}),
-                isAvailable: false,
-                profileSource: staged ? 'resume_reviewed' : 'manual',
-                ...(staged && { resumeAnalysis: this._buildResumeAnalysisBlock(staged.extracted, staged.resumeDocumentId) })
-            });
-
-            await medicalStaffProfile.save();
-
-            // Consume the verified flag — single-use, clean up immediately after save
-            await cacheService.deletePhoneVerified(userId, normalizedStaffPhone);
-
-            // Consume the staged resume — single-use, same as the phone-verified flag above
-            if (staged) {
-                await cacheService.deleteParsedResumeStage(userId);
-            }
-
-            // Populate user data
-            await medicalStaffProfile.populate('user', 'name email role isEmailVerified');
-
-            
-            await cacheService.invalidateProfile(userId, 'staff');
-
-            // Invalidate profile status cache
-            await cacheService.invalidateProfileStatus(userId);
-
-            // Invalidate location permission cache
-            await cacheService.del(`location:permission:${userId}`);
-
-            // Emit notification to admins about new staff registration
-            try {
-                const user = await User.findById(userId);
-                await notificationEmitter.emitNewStaffRegistration(medicalStaffProfile, user);
-            } catch (notifError) {
-                console.error('Error sending staff registration notification:', notifError);
-                // Don't fail the registration if notification fails
-            }
-
-            // Send profile creation confirmation email — fire-and-forget,
-            // profile is already saved so SMTP latency should not affect the response.
-            emailService.sendProfileCreatedConfirmationEmail(
-                user.email,
-                medicalStaffProfile.fullName || user.name,
-                'staff'
-            ).catch(err => logger.error(`Failed to send staff profile confirmation email to ${maskEmail(user.email)}: ${err.message}`));
-
-            return {
-                success: true,
-                profile: medicalStaffProfile,
-                locationSource: 'address_geocoded',
-                message: 'Medical staff profile created successfully'
-            };
-        } catch (error) {
-            throw error;
+        // Check if user exists and has staff role
+        const user = await User.findById(userId);
+        if (!user) {
+            throw new NotFoundError('User not found');
         }
+
+        if (user.role !== 'staff') {
+            throw new ForbiddenError('User must have staff role to create medical staff profile');
+        }
+
+        // Email must match signup email
+        if (profileData.email && profileData.email !== user.email) {
+            throw new ValidationError('Email must match the email used during signup');
+        }
+
+        // Full name must match signup name
+        if (profileData.fullName && profileData.fullName.trim() !== user.name.trim()) {
+            throw new ValidationError(`Full name "${profileData.fullName}" must match the name used during signup "${user.name}"`);
+        }
+
+        // Use signup email for profile
+        profileData.email = user.email;
+
+        // Check if profile already exists
+        const existingProfile = await MedicalStaff.findOne({ user: userId });
+        if (existingProfile) {
+            throw new ConflictError('Medical staff profile already exists');
+        }
+
+        // Phone must be OTP-verified before profile creation
+        const normalizedStaffPhone = SMSService.normalizePhone(profileData.phoneNumber);
+        const staffPhoneVerified = await cacheService.getPhoneVerified(userId, normalizedStaffPhone);
+        if (!staffPhoneVerified) {
+            throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
+        }
+
+        // Phone number must be unique across all hospital and staff accounts
+        if (await this.isPhoneNumberRegistered(normalizedStaffPhone)) {
+            throw new ConflictError('Phone number already registered with another account');
+        }
+
+        let coordinates = null;
+
+        // Always geocode from address - no location permission during profile creation
+        const address = `${profileData.currentAddress}, ${profileData.city}, ${profileData.state}, ${profileData.pincode}`;
+        try {
+            const geocoded = await geocodingService.geocodeAddress(address);
+            coordinates = {
+                type: 'Point',
+                coordinates: {
+                    latitude: geocoded.latitude,
+                    longitude: geocoded.longitude
+                }
+            };
+            console.log('Geocoded from address for staff profile:', coordinates);
+        } catch (error) {
+            console.error('Geocoding failed for staff profile:', error.message);
+            throw new ValidationError('Failed to geocode location. Please provide valid city and area.');
+        }
+
+        // Validate coordinates
+        geocodingService.validateCoordinates(coordinates.coordinates.latitude, coordinates.coordinates.longitude);
+
+        const staged = await cacheService.getParsedResumeStage(userId);
+
+        // Create medical staff profile with all required fields
+        const medicalStaffProfile = new MedicalStaff({
+            user: userId,
+            fullName: profileData.fullName || user.name,
+            jobRole: profileData.jobRole,
+            currentAddress: profileData.currentAddress,
+            city: profileData.city,
+            state: profileData.state,
+            pincode: profileData.pincode,
+            phoneNumber: profileData.phoneNumber,
+            normalizedPhone: normalizedStaffPhone,
+            isPhoneVerified: true,
+            email: profileData.email,
+            coordinates: coordinates,
+            profileSummary: profileData.profileSummary || '',
+            education: profileData.education || [],
+            skills: profileData.skills || [],
+            experience: profileData.experience,
+            ...(profileData.dateOfBirth ? { dateOfBirth: profileData.dateOfBirth } : {}),
+            isAvailable: false,
+            profileSource: staged ? 'resume_reviewed' : 'manual',
+            ...(staged && { resumeAnalysis: this._buildResumeAnalysisBlock(staged.extracted, staged.resumeDocumentId) })
+        });
+
+        await medicalStaffProfile.save();
+
+        // Consume the verified flag — single-use, clean up immediately after save
+        await cacheService.deletePhoneVerified(userId, normalizedStaffPhone);
+
+        // Consume the staged resume — single-use, same as the phone-verified flag above
+        if (staged) {
+            await cacheService.deleteParsedResumeStage(userId);
+        }
+
+        // Populate user data
+        await medicalStaffProfile.populate('user', 'name email role isEmailVerified');
+
+        
+        await cacheService.invalidateProfile(userId, 'staff');
+
+        // Invalidate profile status cache
+        await cacheService.invalidateProfileStatus(userId);
+
+        // Invalidate location permission cache
+        await cacheService.del(`location:permission:${userId}`);
+
+        // Emit notification to admins about new staff registration
+        try {
+            const user = await User.findById(userId);
+            await notificationEmitter.emitNewStaffRegistration(medicalStaffProfile, user);
+        } catch (notifError) {
+            console.error('Error sending staff registration notification:', notifError);
+            // Don't fail the registration if notification fails
+        }
+
+        // Send profile creation confirmation email — fire-and-forget,
+        // profile is already saved so SMTP latency should not affect the response.
+        emailService.sendProfileCreatedConfirmationEmail(
+            user.email,
+            medicalStaffProfile.fullName || user.name,
+            'staff'
+        ).catch(err => logger.error(`Failed to send staff profile confirmation email to ${maskEmail(user.email)}: ${err.message}`));
+
+        return {
+            success: true,
+            profile: medicalStaffProfile,
+            locationSource: 'address_geocoded',
+            message: 'Medical staff profile created successfully'
+        };
     }
 
     
@@ -319,67 +314,83 @@ class ProfileService {
 
     // Create hospital profile
     async createHospitalProfile(userId, profileData) {
+        // Check if user exists and has hospital role
+        const user = await User.findById(userId);
+        if (!user) {
+            throw new NotFoundError('User not found');
+        }
+
+        if (user.role !== 'hospital') {
+            throw new ForbiddenError('User must have hospital role to create hospital profile');
+        }
+
+        // Email must match signup email
+        if (profileData.email && profileData.email !== user.email) {
+            throw new ValidationError('Email must match the email used during signup');
+        }
+
+        // Hospital name must match signup name
+        if (profileData.hospitalLegalName && profileData.hospitalLegalName.trim() !== user.name.trim()) {
+            throw new ValidationError(`Hospital name "${profileData.hospitalLegalName}" must match the name used during signup "${user.name}"`);
+        }
+
+        // Use signup email for profile
+        profileData.email = user.email;
+
+        // Check if profile already exists
+        const existingProfile = await Hospital.findOne({ user: userId });
+        if (existingProfile) {
+            throw new ConflictError('Hospital profile already exists');
+        }
+
+        // Phone must be OTP-verified before profile creation
+        const normalizedHospitalPhone = SMSService.normalizePhone(profileData.phoneNumber);
+        const hospitalPhoneVerified = await cacheService.getPhoneVerified(userId, normalizedHospitalPhone);
+        if (!hospitalPhoneVerified) {
+            throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
+        }
+
+        // Phone number must be unique across all hospital and staff accounts
+        if (await this.isPhoneNumberRegistered(normalizedHospitalPhone)) {
+            throw new ConflictError('Phone number already registered with another account');
+        }
+
+        let coordinates;
+        let geocodingAddress;
+        let geocodingSource = 'google_maps_api';
+
+        // Build comprehensive address for geocoding using new fields
+        const addressParts = [
+            profileData.hospitalLegalName,
+            profileData.currentAddress,
+            profileData.city,
+            profileData.state,
+            profileData.pincode
+        ].filter(part => part && part.trim() !== '');
+
+        geocodingAddress = addressParts.join(', ');
+        console.log('Comprehensive geocoding address:', geocodingAddress);
+
+        // Geocode the hospital address
         try {
-            // Check if user exists and has hospital role
-            const user = await User.findById(userId);
-            if (!user) {
-                throw new NotFoundError('User not found');
-            }
+            const geocoded = await geocodingService.geocodeAddress(geocodingAddress);
+            coordinates = {
+                type: 'Point',
+                coordinates: {
+                    longitude: geocoded.longitude,
+                    latitude: geocoded.latitude
+                }
+            };
+            console.log('Hospital geocoded successfully:', coordinates);
+        } catch (error) {
+            console.error('Hospital geocoding failed:', error.message);
 
-            if (user.role !== 'hospital') {
-                throw new ForbiddenError('User must have hospital role to create hospital profile');
-            }
-
-            // Email must match signup email
-            if (profileData.email && profileData.email !== user.email) {
-                throw new ValidationError('Email must match the email used during signup');
-            }
-
-            // Hospital name must match signup name
-            if (profileData.hospitalLegalName && profileData.hospitalLegalName.trim() !== user.name.trim()) {
-                throw new ValidationError(`Hospital name "${profileData.hospitalLegalName}" must match the name used during signup "${user.name}"`);
-            }
-
-            // Use signup email for profile
-            profileData.email = user.email;
-
-            // Check if profile already exists
-            const existingProfile = await Hospital.findOne({ user: userId });
-            if (existingProfile) {
-                throw new ConflictError('Hospital profile already exists');
-            }
-
-            // Phone must be OTP-verified before profile creation
-            const normalizedHospitalPhone = SMSService.normalizePhone(profileData.phoneNumber);
-            const hospitalPhoneVerified = await cacheService.getPhoneVerified(userId, normalizedHospitalPhone);
-            if (!hospitalPhoneVerified) {
-                throw new ValidationError('Phone number not verified. Please verify your phone number with OTP first.');
-            }
-
-            // Phone number must be unique across all hospital and staff accounts
-            if (await this.isPhoneNumberRegistered(normalizedHospitalPhone)) {
-                throw new ConflictError('Phone number already registered with another account');
-            }
-
-            let coordinates;
-            let geocodingAddress;
-            let geocodingSource = 'google_maps_api';
-
-            // Build comprehensive address for geocoding using new fields
-            const addressParts = [
-                profileData.hospitalLegalName,
-                profileData.currentAddress,
-                profileData.city,
-                profileData.state,
-                profileData.pincode
-            ].filter(part => part && part.trim() !== '');
-
-            geocodingAddress = addressParts.join(', ');
-            console.log('Comprehensive geocoding address:', geocodingAddress);
-
-            // Geocode the hospital address
+            // Try with simplified address (hospital name + city + state)
             try {
-                const geocoded = await geocodingService.geocodeAddress(geocodingAddress);
+                const simplifiedAddress = `${profileData.hospitalLegalName}, ${profileData.city}, ${profileData.state}`;
+                console.log('Retrying with simplified address:', simplifiedAddress);
+
+                const geocoded = await geocodingService.geocodeAddress(simplifiedAddress);
                 coordinates = {
                     type: 'Point',
                     coordinates: {
@@ -387,16 +398,17 @@ class ProfileService {
                         latitude: geocoded.latitude
                     }
                 };
-                console.log('Hospital geocoded successfully:', coordinates);
-            } catch (error) {
-                console.error('Hospital geocoding failed:', error.message);
+                console.log('Retry geocoding successful:', coordinates);
+                geocodingAddress = simplifiedAddress;
+            } catch (retryError) {
+                console.error('Retry geocoding also failed:', retryError.message);
 
-                // Try with simplified address (hospital name + city + state)
+                // Final fallback - just hospital name + city
                 try {
-                    const simplifiedAddress = `${profileData.hospitalLegalName}, ${profileData.city}, ${profileData.state}`;
-                    console.log('Retrying with simplified address:', simplifiedAddress);
+                    const fallbackAddress = `${profileData.hospitalLegalName}, ${profileData.city || 'India'}, ${profileData.state || 'India'}`;
+                    console.log('Final fallback with:', fallbackAddress);
 
-                    const geocoded = await geocodingService.geocodeAddress(simplifiedAddress);
+                    const geocoded = await geocodingService.geocodeAddress(fallbackAddress);
                     coordinates = {
                         type: 'Point',
                         coordinates: {
@@ -404,545 +416,515 @@ class ProfileService {
                             latitude: geocoded.latitude
                         }
                     };
-                    console.log('Retry geocoding successful:', coordinates);
-                    geocodingAddress = simplifiedAddress;
-                } catch (retryError) {
-                    console.error('Retry geocoding also failed:', retryError.message);
-
-                    // Final fallback - just hospital name + city
-                    try {
-                        const fallbackAddress = `${profileData.hospitalLegalName}, ${profileData.city || 'India'}, ${profileData.state || 'India'}`;
-                        console.log('Final fallback with:', fallbackAddress);
-
-                        const geocoded = await geocodingService.geocodeAddress(fallbackAddress);
-                        coordinates = {
-                            type: 'Point',
-                            coordinates: {
-                                longitude: geocoded.longitude,
-                                latitude: geocoded.latitude
-                            }
-                        };
-                        console.log('Fallback geocoding successful:', coordinates);
-                        geocodingAddress = fallbackAddress;
-                    } catch (finalError) {
-                        console.error('All geocoding attempts failed:', finalError.message);
-                        throw new ValidationError("Couldn't verify that address. Check the city and area and try again.");
-                    }
+                    console.log('Fallback geocoding successful:', coordinates);
+                    geocodingAddress = fallbackAddress;
+                } catch (finalError) {
+                    console.error('All geocoding attempts failed:', finalError.message);
+                    throw new ValidationError("Couldn't verify that address. Check the city and area and try again.");
                 }
             }
-
-            // Create hospital profile with both location string and coordinates
-            const hospitalProfile = new Hospital({
-                user: userId,
-                hospitalLegalName: profileData.hospitalLegalName,
-                email: profileData.email,
-                currentAddress: profileData.currentAddress,
-                city: profileData.city,
-                state: profileData.state,
-                pincode: profileData.pincode,
-                phoneNumber: profileData.phoneNumber,
-                normalizedPhone: normalizedHospitalPhone,
-                isPhoneVerified: true,
-                servicesAvailable: profileData.servicesAvailable,
-                staffCount: profileData.staffCount,
-                description: profileData.description || '',
-                coordinates: coordinates
-            });
-
-            await hospitalProfile.save();
-
-            // Consume the verified flag — single-use, clean up immediately after save
-            await cacheService.deletePhoneVerified(userId, normalizedHospitalPhone);
-
-            // Populate user data
-            await hospitalProfile.populate('user', 'name email role isEmailVerified');
-
-            await cacheService.setProfile(userId, 'hospital', hospitalProfile.toObject());
-
-            // Invalidate profile status cache
-            await cacheService.invalidateProfileStatus(userId);
-
-            // Emit notification to admins about new hospital registration
-            try {
-                const user = await User.findById(userId);
-                await notificationEmitter.emitNewHospitalRegistration(hospitalProfile, user);
-            } catch (notifError) {
-                console.error('Error sending hospital registration notification:', notifError);
-                // Don't fail the registration if notification fails
-            }
-
-            // Send profile creation confirmation email — fire-and-forget,
-            // profile is already saved so SMTP latency should not affect the response.
-            emailService.sendProfileCreatedConfirmationEmail(
-                user.email,
-                hospitalProfile.hospitalLegalName || user.name,
-                'hospital'
-            ).catch(err => logger.error(`Failed to send hospital profile confirmation email to ${maskEmail(user.email)}: ${err.message}`));
-
-            return {
-                success: true,
-                profile: hospitalProfile,
-                geocodingAddress: geocodingAddress,
-                geocodingSource: geocodingSource,
-                message: 'Hospital profile created successfully'
-            };
-        } catch (error) {
-            throw error;
         }
+
+        // Create hospital profile with both location string and coordinates
+        const hospitalProfile = new Hospital({
+            user: userId,
+            hospitalLegalName: profileData.hospitalLegalName,
+            email: profileData.email,
+            currentAddress: profileData.currentAddress,
+            city: profileData.city,
+            state: profileData.state,
+            pincode: profileData.pincode,
+            phoneNumber: profileData.phoneNumber,
+            normalizedPhone: normalizedHospitalPhone,
+            isPhoneVerified: true,
+            servicesAvailable: profileData.servicesAvailable,
+            staffCount: profileData.staffCount,
+            description: profileData.description || '',
+            coordinates: coordinates
+        });
+
+        await hospitalProfile.save();
+
+        // Consume the verified flag — single-use, clean up immediately after save
+        await cacheService.deletePhoneVerified(userId, normalizedHospitalPhone);
+
+        // Populate user data
+        await hospitalProfile.populate('user', 'name email role isEmailVerified');
+
+        await cacheService.setProfile(userId, 'hospital', hospitalProfile.toObject());
+
+        // Invalidate profile status cache
+        await cacheService.invalidateProfileStatus(userId);
+
+        // Emit notification to admins about new hospital registration
+        try {
+            const user = await User.findById(userId);
+            await notificationEmitter.emitNewHospitalRegistration(hospitalProfile, user);
+        } catch (notifError) {
+            console.error('Error sending hospital registration notification:', notifError);
+            // Don't fail the registration if notification fails
+        }
+
+        // Send profile creation confirmation email — fire-and-forget,
+        // profile is already saved so SMTP latency should not affect the response.
+        emailService.sendProfileCreatedConfirmationEmail(
+            user.email,
+            hospitalProfile.hospitalLegalName || user.name,
+            'hospital'
+        ).catch(err => logger.error(`Failed to send hospital profile confirmation email to ${maskEmail(user.email)}: ${err.message}`));
+
+        return {
+            success: true,
+            profile: hospitalProfile,
+            geocodingAddress: geocodingAddress,
+            geocodingSource: geocodingSource,
+            message: 'Hospital profile created successfully'
+        };
     }
 
     // Get user profile based on role
     async getUserProfile(userId) {
-        try {
-            const user = await User.findById(userId).select('name email role isEmailVerified').lean();
-            if (!user) throw new NotFoundError('User not found');
+        const user = await User.findById(userId).select('name email role isEmailVerified').lean();
+        if (!user) throw new NotFoundError('User not found');
 
-            // Check cache first
-            const cachedProfile = await cacheService.getProfile(userId, user.role);
-            if (cachedProfile) return cachedProfile;
+        // Check cache first
+        const cachedProfile = await cacheService.getProfile(userId, user.role);
+        if (cachedProfile) return cachedProfile;
 
-            // Use aggregation for single query
-            let profile = null;
+        // Use aggregation for single query
+        let profile = null;
 
-            if (user.role === 'staff') {
-                const raw = await MedicalStaff.findOne({ user: userId }).select('+dateOfBirth').lean();
-                if (raw) {
-                    let profilePictureUrl = null;
+        if (user.role === 'staff') {
+            const raw = await MedicalStaff.findOne({ user: userId }).select('+dateOfBirth').lean();
+            if (raw) {
+                let profilePictureUrl = null;
 
-                    // Generate presigned URL for profile picture
-                    if (raw.profilePicture?.s3Key) {
-                        try {
-                            profilePictureUrl = await generatePreSignedURL(raw.profilePicture.s3Key);
-                        } catch (error) {
-                            console.error('Failed to generate profile picture URL:', error.message);
-                        }
+                // Generate presigned URL for profile picture
+                if (raw.profilePicture?.s3Key) {
+                    try {
+                        profilePictureUrl = await generatePreSignedURL(raw.profilePicture.s3Key);
+                    } catch (error) {
+                        console.error('Failed to generate profile picture URL:', error.message);
                     }
-
-                    const [activeApplications, docRecord] = await Promise.all([
-                        Duty.countDocuments({
-                            assignedTo: raw._id,
-                            status: { $in: ['assigned', 'enroute', 'in-progress'] }
-                        }),
-                        Document.findOne({ userId })
-                            .select('documents.isDeleted documents.verificationStatus')
-                            .lean()
-                    ]);
-
-                    // Verified docs count
-                    const verifiedDocs = docRecord
-                        ? docRecord.documents.filter(
-                            d => !d.isDeleted && d.verificationStatus === 'verified'
-                        ).length
-                        : 0;
-
-                    // Profile completion %
-                    const completionFields = [
-                        raw.fullName, raw.jobRole, raw.currentAddress, raw.city,
-                        raw.state, raw.pincode, raw.phoneNumber, raw.profileSummary,
-                        raw.education?.length > 0,
-                        raw.skills?.length > 0,
-                        raw.coordinates?.coordinates?.latitude
-                    ];
-                    const filled = completionFields.filter(Boolean).length;
-                    const profileCompletion = Math.round((filled / completionFields.length) * 100);
-
-                    const { ratingShown, breakdown } = await ratingAlgorithmService.getEffectiveRating(raw, 'hospital_to_staff');
-
-                    profile = {
-                        id: raw._id,
-                        fullName: raw.fullName,
-                        // 'YYYY-MM-DD' or null; only in the doctor's own profile
-                        dateOfBirth: raw.dateOfBirth ? new Date(raw.dateOfBirth).toISOString().slice(0, 10) : null,
-                        profilePicture: profilePictureUrl,
-                        jobRole: raw.jobRole,
-                        currentAddress: raw.currentAddress,
-                        city: raw.city,
-                        state: raw.state,
-                        pincode: raw.pincode,
-                        phoneNumber: raw.phoneNumber,
-                        email: user.email, // Get from user collection
-                        profileSummary: raw.profileSummary || '',
-                        education: raw.education || [],
-                        skills: raw.skills || [],
-                        experience: raw.experience,
-                        isAvailable: raw.isAvailable,
-                        isProfileComplete: raw.isProfileComplete,
-                        isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
-                        verificationStatus: raw.verificationStatus,
-                        isPhoneVerified: raw.isPhoneVerified === true,
-                        rejectionReason: raw.verificationStatus === 'rejected' ? (raw.rejectionReason || null) : null,
-                        verifiedAt: raw.verifiedAt || null,
-                        resumeAnalysis: raw.resumeAnalysis?.analyzedAt ? raw.resumeAnalysis : null,
-                        profileCompletion,
-                        activeApplications,
-                        verifiedDocs,
-                        averageRating: raw.averageRating,
-                        totalRatings: raw.totalRatings,
-                        effectiveRating: ratingShown,
-                        ratingBreakdown: breakdown,
-                        location: {
-                            latitude: raw.coordinates?.coordinates?.latitude,
-                            longitude: raw.coordinates?.coordinates?.longitude
-                        },
-                        createdAt: raw.createdAt,
-                        updatedAt: raw.updatedAt
-                    };
                 }
-            } else if (user.role === 'hospital') {
-                const raw = await Hospital.findOne({ user: userId }).lean();
-                if (raw) {
-                    let profilePictureUrl = null;
 
-                    // Generate presigned URL for profile picture
-                    if (raw.profilePicture?.s3Key) {
-                        try {
-                            profilePictureUrl = await generatePreSignedURL(raw.profilePicture.s3Key);
-                        } catch (error) {
-                            console.error('Failed to generate profile picture URL:', error.message);
-                        }
+                const [activeApplications, docRecord] = await Promise.all([
+                    Duty.countDocuments({
+                        assignedTo: raw._id,
+                        status: { $in: ['assigned', 'enroute', 'in-progress'] }
+                    }),
+                    Document.findOne({ userId })
+                        .select('documents.isDeleted documents.verificationStatus')
+                        .lean()
+                ]);
+
+                // Verified docs count
+                const verifiedDocs = docRecord
+                    ? docRecord.documents.filter(
+                        d => !d.isDeleted && d.verificationStatus === 'verified'
+                    ).length
+                    : 0;
+
+                // Profile completion %
+                const completionFields = [
+                    raw.fullName, raw.jobRole, raw.currentAddress, raw.city,
+                    raw.state, raw.pincode, raw.phoneNumber, raw.profileSummary,
+                    raw.education?.length > 0,
+                    raw.skills?.length > 0,
+                    raw.coordinates?.coordinates?.latitude
+                ];
+                const filled = completionFields.filter(Boolean).length;
+                const profileCompletion = Math.round((filled / completionFields.length) * 100);
+
+                const { ratingShown, breakdown } = await ratingAlgorithmService.getEffectiveRating(raw, 'hospital_to_staff');
+
+                profile = {
+                    id: raw._id,
+                    fullName: raw.fullName,
+                    // 'YYYY-MM-DD' or null; only in the doctor's own profile
+                    dateOfBirth: raw.dateOfBirth ? new Date(raw.dateOfBirth).toISOString().slice(0, 10) : null,
+                    profilePicture: profilePictureUrl,
+                    jobRole: raw.jobRole,
+                    currentAddress: raw.currentAddress,
+                    city: raw.city,
+                    state: raw.state,
+                    pincode: raw.pincode,
+                    phoneNumber: raw.phoneNumber,
+                    email: user.email, // Get from user collection
+                    profileSummary: raw.profileSummary || '',
+                    education: raw.education || [],
+                    skills: raw.skills || [],
+                    experience: raw.experience,
+                    isAvailable: raw.isAvailable,
+                    isProfileComplete: raw.isProfileComplete,
+                    isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
+                    verificationStatus: raw.verificationStatus,
+                    isPhoneVerified: raw.isPhoneVerified === true,
+                    rejectionReason: raw.verificationStatus === 'rejected' ? (raw.rejectionReason || null) : null,
+                    verifiedAt: raw.verifiedAt || null,
+                    resumeAnalysis: raw.resumeAnalysis?.analyzedAt ? raw.resumeAnalysis : null,
+                    profileCompletion,
+                    activeApplications,
+                    verifiedDocs,
+                    averageRating: raw.averageRating,
+                    totalRatings: raw.totalRatings,
+                    effectiveRating: ratingShown,
+                    ratingBreakdown: breakdown,
+                    location: {
+                        latitude: raw.coordinates?.coordinates?.latitude,
+                        longitude: raw.coordinates?.coordinates?.longitude
+                    },
+                    createdAt: raw.createdAt,
+                    updatedAt: raw.updatedAt
+                };
+            }
+        } else if (user.role === 'hospital') {
+            const raw = await Hospital.findOne({ user: userId }).lean();
+            if (raw) {
+                let profilePictureUrl = null;
+
+                // Generate presigned URL for profile picture
+                if (raw.profilePicture?.s3Key) {
+                    try {
+                        profilePictureUrl = await generatePreSignedURL(raw.profilePicture.s3Key);
+                    } catch (error) {
+                        console.error('Failed to generate profile picture URL:', error.message);
                     }
-
-                    const { ratingShown, breakdown } = await ratingAlgorithmService.getEffectiveRating(raw, 'staff_to_hospital');
-
-                    profile = {
-                        id: raw._id,
-                        hospitalLegalName: raw.hospitalLegalName,
-                        email: user.email, // Get from user collection (already fetched above)
-                        profilePicture: profilePictureUrl,
-                        currentAddress: raw.currentAddress,
-                        city: raw.city,
-                        state: raw.state,
-                        pincode: raw.pincode,
-                        phoneNumber: raw.phoneNumber,
-                        servicesAvailable: raw.servicesAvailable,
-                        isProfileComplete: raw.isProfileComplete,
-                        isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
-                        verificationStatus: raw.verificationStatus,
-                        staffCount: raw.staffCount,
-                        description: raw.description || '',
-                        averageRating: raw.averageRating,
-                        totalRatings: raw.totalRatings,
-                        effectiveRating: ratingShown,
-                        ratingBreakdown: breakdown,
-                        coordinates: {
-                            latitude: raw.coordinates?.coordinates?.latitude,
-                            longitude: raw.coordinates?.coordinates?.longitude
-                        },
-                        createdAt: raw.createdAt,
-                        updatedAt: raw.updatedAt
-                    };
                 }
+
+                const { ratingShown, breakdown } = await ratingAlgorithmService.getEffectiveRating(raw, 'staff_to_hospital');
+
+                profile = {
+                    id: raw._id,
+                    hospitalLegalName: raw.hospitalLegalName,
+                    email: user.email, // Get from user collection (already fetched above)
+                    profilePicture: profilePictureUrl,
+                    currentAddress: raw.currentAddress,
+                    city: raw.city,
+                    state: raw.state,
+                    pincode: raw.pincode,
+                    phoneNumber: raw.phoneNumber,
+                    servicesAvailable: raw.servicesAvailable,
+                    isProfileComplete: raw.isProfileComplete,
+                    isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
+                    verificationStatus: raw.verificationStatus,
+                    staffCount: raw.staffCount,
+                    description: raw.description || '',
+                    averageRating: raw.averageRating,
+                    totalRatings: raw.totalRatings,
+                    effectiveRating: ratingShown,
+                    ratingBreakdown: breakdown,
+                    coordinates: {
+                        latitude: raw.coordinates?.coordinates?.latitude,
+                        longitude: raw.coordinates?.coordinates?.longitude
+                    },
+                    createdAt: raw.createdAt,
+                    updatedAt: raw.updatedAt
+                };
             }
-
-            let documents = [];
-            try {
-                const documentsData = await documentService.getUserDocuments(user, { page: 1, limit: 50 });
-                documents = documentsData.documents.map(doc => ({
-                    id: doc.documentId,
-                    documentType: doc.documentType,
-                    verificationStatus: doc.verificationStatus,
-                    fileName: doc.fileName,
-                    uploadedAt: doc.uploadedAt,
-                    url: doc.url
-                }));
-            } catch (err) {
-                console.error("Error fetching documents:", err.message);
-            }
-
-            const result = {
-                user: {
-                    id: user._id,
-                    name: user.name,
-                    email: user.email,
-                    role: user.role,
-                    isEmailVerified: user.isEmailVerified
-                },
-                profile,
-                documents
-            };
-
-            // Cache for 15 minutes
-            // Shorter than the 15-minute signed links inside it, so a cached
-            // profile never hands out a link about to expire
-            await cacheService.setProfile(userId, user.role, result, 600);
-
-            return result;
-        } catch (error) {
-            throw error;
         }
+
+        let documents = [];
+        try {
+            const documentsData = await documentService.getUserDocuments(user, { page: 1, limit: 50 });
+            documents = documentsData.documents.map(doc => ({
+                id: doc.documentId,
+                documentType: doc.documentType,
+                verificationStatus: doc.verificationStatus,
+                fileName: doc.fileName,
+                uploadedAt: doc.uploadedAt,
+                url: doc.url
+            }));
+        } catch (err) {
+            console.error("Error fetching documents:", err.message);
+        }
+
+        const result = {
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                isEmailVerified: user.isEmailVerified
+            },
+            profile,
+            documents
+        };
+
+        // Cache for 15 minutes
+        // Shorter than the 15-minute signed links inside it, so a cached
+        // profile never hands out a link about to expire
+        await cacheService.setProfile(userId, user.role, result, 600);
+
+        return result;
     }
 
     // Update user profile with location handling
     async updateUserProfile(userId, rawUpdateData) {
-        try {
-            // Get user with lean query
-            const user = await User.findById(userId).select('name email role').lean();
-            if (!user) {
-                throw new NotFoundError('User not found');
-            }
-
-            // Only the fields a user may edit. Anything else in the body
-            // (verificationStatus, isSuspended, averageRating, user, ...) is
-            // dropped, never saved.
-            const updateData = editableProfileFields(user.role, rawUpdateData);
-
-            let updatedProfile = null;
-            let userUpdateData = {};
-
-            if (user.role === 'staff') {
-                // Get current staff profile with lean query
-                const currentProfile = await MedicalStaff.findOne({ user: userId }).lean();
-
-                if (!currentProfile) {
-                    throw new NotFoundError('Staff profile not found');
-                }
-
-                // Prevent email changes (read-only after creation)
-                if (updateData.email && updateData.email !== user.email) {
-                    throw new ValidationError('Email cannot be changed after profile creation');
-                }
-
-                // Prevent phone number changes (read-only after creation)
-                if (updateData.phoneNumber && updateData.phoneNumber !== currentProfile.phoneNumber) {
-                    throw new ValidationError('Phone number cannot be changed after profile creation');
-                }
-
-                // Remove read-only fields from update data
-                delete updateData.email;
-                delete updateData.phoneNumber;
-
-                let finalUpdateData = { ...updateData };
-
-                // Check if location fields changed
-                const cityChanged = updateData.city && updateData.city !== currentProfile.city;
-                const areaChanged = updateData.area && updateData.area !== currentProfile.area;
-                const currentAddressChanged = updateData.currentAddress && updateData.currentAddress !== currentProfile.currentAddress;
-                const stateChanged = updateData.state && updateData.state !== currentProfile.state;
-                const pincodeChanged = updateData.pincode && updateData.pincode !== currentProfile.pincode;
-
-                // Handle optional fields update safely
-                if (updateData.profileSummary !== undefined) {
-                    finalUpdateData.profileSummary = updateData.profileSummary;
-                }
-
-                if (Array.isArray(updateData.education)) {
-                    finalUpdateData.education = updateData.education;
-                }
-
-                if (Array.isArray(updateData.skills)) {
-                    finalUpdateData.skills = updateData.skills;
-                }
-
-                if (updateData.experience !== undefined) {
-                    finalUpdateData.experience = updateData.experience;
-                }
-
-                // Only geocode if location fields actually changed
-                if (cityChanged || currentAddressChanged || stateChanged || pincodeChanged) {
-                    if (!updateData.coordinates || !updateData.coordinates.latitude || !updateData.coordinates.longitude) {
-                        const address = `${updateData.currentAddress || currentProfile.currentAddress}, ${updateData.city || currentProfile.city}, ${updateData.state || currentProfile.state}, ${updateData.pincode || currentProfile.pincode}`;
-
-                        // Try cache first
-                        const cachedGeocoding = await cacheService.getGeocoding(address);
-                        if (cachedGeocoding) {
-                            finalUpdateData.coordinates = {
-                                type: 'Point',
-                                coordinates: {
-                                    latitude: cachedGeocoding.latitude,
-                                    longitude: cachedGeocoding.longitude
-                                }
-                            };
-                        } else {
-                            // Geocode and cache result
-                            const geocoded = await geocodingService.geocodeAddress(address);
-                            finalUpdateData.coordinates = {
-                                type: 'Point',
-                                coordinates: {
-                                    latitude: geocoded.latitude,
-                                    longitude: geocoded.longitude
-                                }
-                            };
-
-                            // Cache geocoding result
-                            await cacheService.setGeocoding(address, geocoded);
-                        }
-                    } else {
-                        // Validate provided coordinates
-                        geocodingService.validateCoordinates(
-                            updateData.coordinates.latitude,
-                            updateData.coordinates.longitude
-                        );
-                    }
-                }
-
-                // Update profile with lean options
-                updatedProfile = await MedicalStaff.findOneAndUpdate(
-                    { user: userId },
-                    { ...finalUpdateData, updatedAt: new Date() },
-                    {
-                        new: true,
-                        runValidators: true,
-                        lean: true
-                    }
-                );
-
-                // Update user name if changed
-                if (updateData.fullName && updateData.fullName !== user.name) {
-                    userUpdateData.name = updateData.fullName;
-                }
-
-            } else if (user.role === 'hospital') {
-                // Similar optimized approach for hospital profiles
-                const currentProfile = await Hospital.findOne({ user: userId }).lean();
-
-                if (!currentProfile) {
-                    throw new NotFoundError('Hospital profile not found');
-                }
-
-                let finalUpdateData = { ...updateData };
-
-                // Prevent email changes (read-only after creation)
-                if (updateData.email && updateData.email !== user.email) {
-                    throw new ValidationError('Email cannot be changed after profile creation');
-                }
-
-                // Prevent phone number changes (read-only after creation)
-                if (updateData.phoneNumber && updateData.phoneNumber !== currentProfile.phoneNumber) {
-                    throw new ValidationError('Phone number cannot be changed after profile creation');
-                }
-
-                // Remove read-only fields from update data
-                delete finalUpdateData.email;
-                delete finalUpdateData.phoneNumber;
-
-                // Handle location changes with caching
-                const cityChanged = updateData.city && updateData.city !== currentProfile.city;
-                const stateChanged = updateData.state && updateData.state !== currentProfile.state;
-                const pincodeChanged = updateData.pincode && updateData.pincode !== currentProfile.pincode;
-
-                if (cityChanged || stateChanged || pincodeChanged) {
-                    const addressParts = [
-                        updateData.hospitalLegalName || currentProfile.hospitalLegalName,
-                        updateData.currentAddress || currentProfile.currentAddress,
-                        updateData.city || currentProfile.city,
-                        updateData.state || currentProfile.state,
-                        updateData.pincode || currentProfile.pincode
-                    ].filter(part => part && part.trim() !== '');
-
-                    const locationToGeocode = addressParts.join(', ');
-
-                    if (locationToGeocode) {
-                        // Try cache first
-                        const cachedGeocoding = await cacheService.getGeocoding(locationToGeocode);
-                        if (cachedGeocoding) {
-                            finalUpdateData.coordinates = {
-                                type: 'Point',
-                                coordinates: {
-                                    latitude: cachedGeocoding.latitude,
-                                    longitude: cachedGeocoding.longitude
-                                }
-                            };
-                        } else {
-                            // Geocode and cache              
-                            const geocoded = await geocodingService.geocodeAddress(locationToGeocode);
-                            finalUpdateData.coordinates = {
-                                type: 'Point',
-                                coordinates: {
-                                    latitude: geocoded.latitude,
-                                    longitude: geocoded.longitude
-                                }
-                            };
-
-                            await cacheService.setGeocoding(locationToGeocode, geocoded);
-                        }
-                    }
-                }
-
-                // Skip phone number update (read-only after creation)
-                // Remove email from update data (read-only)
-                delete finalUpdateData.phoneNumber;
-                delete finalUpdateData.email;
-
-                // Update hospital profile
-                updatedProfile = await Hospital.findOneAndUpdate(
-                    { user: userId },
-                    { ...finalUpdateData, updatedAt: new Date() },
-                    {
-                        new: true,
-                        runValidators: true,
-                        lean: true
-                    }
-                );
-
-                // Update user name if changed
-                if (updateData.hospitalLegalName && updateData.hospitalLegalName !== user.name) {
-                    userUpdateData.name = updateData.hospitalLegalName;
-                }
-            }
-
-            if (!updatedProfile) {
-                throw new NotFoundError('Profile not found');
-            }
-
-            // Update user collection if needed
-            if (userUpdateData.name) {
-                await User.findByIdAndUpdate(
-                    userId,
-                    { name: userUpdateData.name },
-                    { lean: true }
-                );
-
-                console.log(`Updated User name from "${user.name}" to "${userUpdateData.name}"`);
-
-                // Re-populate the profile with updated user data
-                await updatedProfile.populate('user', 'name email role isEmailVerified');
-            }
-
-            // Invalidate cache for this user
-            await cacheService.invalidateUserProfiles(userId);
-
-            // Invalidate profile status cache
-            await cacheService.invalidateProfileStatus(userId);
-
-            // A new name is compared with the identity documents again
-            if (updateData.fullName || updateData.hospitalLegalName || updateData.dateOfBirth !== undefined) {
-                require('./identityCheck.service').checkSoon(userId);
-            }
-
-            // Get fresh data for response
-            const freshProfile = await this.getUserProfile(userId);
-
-            // Ensure email and phone are always included in response
-            if (freshProfile.profile) {
-                if (user.role === 'hospital') {
-                    // Email comes from user collection (always available)
-                    freshProfile.profile.email = user.email;
-
-                    // Phone comes from hospital profile (read-only)
-                    const hospitalProfile = await Hospital.findOne({ user: userId }).lean();
-                    if (hospitalProfile) {
-                        freshProfile.profile.phoneNumber = hospitalProfile.phoneNumber;
-                    }
-                } else if (user.role === 'staff') {
-                    // Email comes from user collection (always available)
-                    freshProfile.profile.email = user.email;
-
-                    // Phone comes from staff profile (read-only)
-                    const staffProfile = await MedicalStaff.findOne({ user: userId }).lean();
-                    if (staffProfile) {
-                        freshProfile.profile.phoneNumber = staffProfile.phoneNumber;
-                    }
-                }
-            }
-
-            return {
-                success: true,
-                profile: freshProfile.profile,
-                message: 'Profile updated successfully'
-            };
-        } catch (error) {
-            throw error;
+        // Get user with lean query
+        const user = await User.findById(userId).select('name email role').lean();
+        if (!user) {
+            throw new NotFoundError('User not found');
         }
+
+        // Only the fields a user may edit. Anything else in the body
+        // (verificationStatus, isSuspended, averageRating, user, ...) is
+        // dropped, never saved.
+        const updateData = editableProfileFields(user.role, rawUpdateData);
+
+        let updatedProfile = null;
+        let userUpdateData = {};
+
+        if (user.role === 'staff') {
+            // Get current staff profile with lean query
+            const currentProfile = await MedicalStaff.findOne({ user: userId }).lean();
+
+            if (!currentProfile) {
+                throw new NotFoundError('Staff profile not found');
+            }
+
+            // Prevent email changes (read-only after creation)
+            if (updateData.email && updateData.email !== user.email) {
+                throw new ValidationError('Email cannot be changed after profile creation');
+            }
+
+            // Prevent phone number changes (read-only after creation)
+            if (updateData.phoneNumber && updateData.phoneNumber !== currentProfile.phoneNumber) {
+                throw new ValidationError('Phone number cannot be changed after profile creation');
+            }
+
+            // Remove read-only fields from update data
+            delete updateData.email;
+            delete updateData.phoneNumber;
+
+            let finalUpdateData = { ...updateData };
+
+            // Check if location fields changed
+            const cityChanged = updateData.city && updateData.city !== currentProfile.city;
+            const currentAddressChanged = updateData.currentAddress && updateData.currentAddress !== currentProfile.currentAddress;
+            const stateChanged = updateData.state && updateData.state !== currentProfile.state;
+            const pincodeChanged = updateData.pincode && updateData.pincode !== currentProfile.pincode;
+
+            // Handle optional fields update safely
+            if (updateData.profileSummary !== undefined) {
+                finalUpdateData.profileSummary = updateData.profileSummary;
+            }
+
+            if (Array.isArray(updateData.education)) {
+                finalUpdateData.education = updateData.education;
+            }
+
+            if (Array.isArray(updateData.skills)) {
+                finalUpdateData.skills = updateData.skills;
+            }
+
+            if (updateData.experience !== undefined) {
+                finalUpdateData.experience = updateData.experience;
+            }
+
+            // Only geocode if location fields actually changed
+            if (cityChanged || currentAddressChanged || stateChanged || pincodeChanged) {
+                if (!updateData.coordinates || !updateData.coordinates.latitude || !updateData.coordinates.longitude) {
+                    const address = `${updateData.currentAddress || currentProfile.currentAddress}, ${updateData.city || currentProfile.city}, ${updateData.state || currentProfile.state}, ${updateData.pincode || currentProfile.pincode}`;
+
+                    // Try cache first
+                    const cachedGeocoding = await cacheService.getGeocoding(address);
+                    if (cachedGeocoding) {
+                        finalUpdateData.coordinates = {
+                            type: 'Point',
+                            coordinates: {
+                                latitude: cachedGeocoding.latitude,
+                                longitude: cachedGeocoding.longitude
+                            }
+                        };
+                    } else {
+                        // Geocode and cache result
+                        const geocoded = await geocodingService.geocodeAddress(address);
+                        finalUpdateData.coordinates = {
+                            type: 'Point',
+                            coordinates: {
+                                latitude: geocoded.latitude,
+                                longitude: geocoded.longitude
+                            }
+                        };
+
+                        // Cache geocoding result
+                        await cacheService.setGeocoding(address, geocoded);
+                    }
+                } else {
+                    // Validate provided coordinates
+                    geocodingService.validateCoordinates(
+                        updateData.coordinates.latitude,
+                        updateData.coordinates.longitude
+                    );
+                }
+            }
+
+            // Update profile with lean options
+            updatedProfile = await MedicalStaff.findOneAndUpdate(
+                { user: userId },
+                { ...finalUpdateData, updatedAt: new Date() },
+                {
+                    new: true,
+                    runValidators: true,
+                    lean: true
+                }
+            );
+
+            // Update user name if changed
+            if (updateData.fullName && updateData.fullName !== user.name) {
+                userUpdateData.name = updateData.fullName;
+            }
+
+        } else if (user.role === 'hospital') {
+            // Similar optimized approach for hospital profiles
+            const currentProfile = await Hospital.findOne({ user: userId }).lean();
+
+            if (!currentProfile) {
+                throw new NotFoundError('Hospital profile not found');
+            }
+
+            let finalUpdateData = { ...updateData };
+
+            // Prevent email changes (read-only after creation)
+            if (updateData.email && updateData.email !== user.email) {
+                throw new ValidationError('Email cannot be changed after profile creation');
+            }
+
+            // Prevent phone number changes (read-only after creation)
+            if (updateData.phoneNumber && updateData.phoneNumber !== currentProfile.phoneNumber) {
+                throw new ValidationError('Phone number cannot be changed after profile creation');
+            }
+
+            // Remove read-only fields from update data
+            delete finalUpdateData.email;
+            delete finalUpdateData.phoneNumber;
+
+            // Handle location changes with caching
+            const cityChanged = updateData.city && updateData.city !== currentProfile.city;
+            const stateChanged = updateData.state && updateData.state !== currentProfile.state;
+            const pincodeChanged = updateData.pincode && updateData.pincode !== currentProfile.pincode;
+
+            if (cityChanged || stateChanged || pincodeChanged) {
+                const addressParts = [
+                    updateData.hospitalLegalName || currentProfile.hospitalLegalName,
+                    updateData.currentAddress || currentProfile.currentAddress,
+                    updateData.city || currentProfile.city,
+                    updateData.state || currentProfile.state,
+                    updateData.pincode || currentProfile.pincode
+                ].filter(part => part && part.trim() !== '');
+
+                const locationToGeocode = addressParts.join(', ');
+
+                if (locationToGeocode) {
+                    // Try cache first
+                    const cachedGeocoding = await cacheService.getGeocoding(locationToGeocode);
+                    if (cachedGeocoding) {
+                        finalUpdateData.coordinates = {
+                            type: 'Point',
+                            coordinates: {
+                                latitude: cachedGeocoding.latitude,
+                                longitude: cachedGeocoding.longitude
+                            }
+                        };
+                    } else {
+                        // Geocode and cache              
+                        const geocoded = await geocodingService.geocodeAddress(locationToGeocode);
+                        finalUpdateData.coordinates = {
+                            type: 'Point',
+                            coordinates: {
+                                latitude: geocoded.latitude,
+                                longitude: geocoded.longitude
+                            }
+                        };
+
+                        await cacheService.setGeocoding(locationToGeocode, geocoded);
+                    }
+                }
+            }
+
+            // Skip phone number update (read-only after creation)
+            // Remove email from update data (read-only)
+            delete finalUpdateData.phoneNumber;
+            delete finalUpdateData.email;
+
+            // Update hospital profile
+            updatedProfile = await Hospital.findOneAndUpdate(
+                { user: userId },
+                { ...finalUpdateData, updatedAt: new Date() },
+                {
+                    new: true,
+                    runValidators: true,
+                    lean: true
+                }
+            );
+
+            // Update user name if changed
+            if (updateData.hospitalLegalName && updateData.hospitalLegalName !== user.name) {
+                userUpdateData.name = updateData.hospitalLegalName;
+            }
+        }
+
+        if (!updatedProfile) {
+            throw new NotFoundError('Profile not found');
+        }
+
+        // Update user collection if needed
+        if (userUpdateData.name) {
+            await User.findByIdAndUpdate(
+                userId,
+                { name: userUpdateData.name },
+                { lean: true }
+            );
+
+            console.log(`Updated User name from "${user.name}" to "${userUpdateData.name}"`);
+
+            // Re-populate the profile with updated user data
+            await updatedProfile.populate('user', 'name email role isEmailVerified');
+        }
+
+        // Invalidate cache for this user
+        await cacheService.invalidateUserProfiles(userId);
+
+        // Invalidate profile status cache
+        await cacheService.invalidateProfileStatus(userId);
+
+        // A new name is compared with the identity documents again
+        if (updateData.fullName || updateData.hospitalLegalName || updateData.dateOfBirth !== undefined) {
+            require('./identityCheck.service').checkSoon(userId);
+        }
+
+        // Get fresh data for response
+        const freshProfile = await this.getUserProfile(userId);
+
+        // Ensure email and phone are always included in response
+        if (freshProfile.profile) {
+            if (user.role === 'hospital') {
+                // Email comes from user collection (always available)
+                freshProfile.profile.email = user.email;
+
+                // Phone comes from hospital profile (read-only)
+                const hospitalProfile = await Hospital.findOne({ user: userId }).lean();
+                if (hospitalProfile) {
+                    freshProfile.profile.phoneNumber = hospitalProfile.phoneNumber;
+                }
+            } else if (user.role === 'staff') {
+                // Email comes from user collection (always available)
+                freshProfile.profile.email = user.email;
+
+                // Phone comes from staff profile (read-only)
+                const staffProfile = await MedicalStaff.findOne({ user: userId }).lean();
+                if (staffProfile) {
+                    freshProfile.profile.phoneNumber = staffProfile.phoneNumber;
+                }
+            }
+        }
+
+        return {
+            success: true,
+            profile: freshProfile.profile,
+            message: 'Profile updated successfully'
+        };
     }
 
     // Check if user has completed profile - OPTIMIZED VERSION
@@ -967,7 +949,6 @@ class ProfileService {
 
 
             // Run profile + document checks in parallel
-            let profileDoc = null;
             const [profileResult, docRecord] = await Promise.all([
                 user.role === 'staff'
                     ? MedicalStaff.findOne({ user: userId }).select('_id isDocumentsUploaded profileSource isProfileComplete isPhoneVerified verificationStatus rejectionReason').lean()
@@ -1059,226 +1040,218 @@ class ProfileService {
 
     // Batch profile status check for admin dashboard - NEW METHOD
     async checkMultipleProfileCompletion(userIds) {
-        try {
-            // 1. Get cached statuses first
-            const cachedResults = await cacheService.getMultipleProfileStatus(userIds);
+        // 1. Get cached statuses first
+        const cachedResults = await cacheService.getMultipleProfileStatus(userIds);
 
-            // 2. Identify uncached users
-            const uncachedUserIds = cachedResults
-                .filter(result => !result.data)
-                .map(result => result.userId);
+        // 2. Identify uncached users
+        const uncachedUserIds = cachedResults
+            .filter(result => !result.data)
+            .map(result => result.userId);
 
-            if (uncachedUserIds.length === 0) {
-                return cachedResults.map(result => ({
-                    userId: result.userId,
-                    ...result.data,
+        if (uncachedUserIds.length === 0) {
+            return cachedResults.map(result => ({
+                userId: result.userId,
+                ...result.data,
+                fromCache: true
+            }));
+        }
+
+        // 3. Batch fetch uncached users
+        const users = await User.find({
+            _id: { $in: uncachedUserIds }
+        })
+            .select('role isEmailVerified _id')
+            .lean();
+
+        // 4. Batch fetch profiles
+        const staffProfiles = await MedicalStaff.find({
+            user: { $in: users.filter(u => u.role === 'staff').map(u => u._id) }
+        })
+            .select('user _id')
+            .lean();
+
+        const hospitalProfiles = await Hospital.find({
+            user: { $in: users.filter(u => u.role === 'hospital').map(u => u._id) }
+        })
+            .select('user _id')
+            .lean();
+
+        // 5. Combine results
+        const staffProfileUserIds = new Set(staffProfiles.map(p => p.user.toString()));
+        const hospitalProfileUserIds = new Set(hospitalProfiles.map(p => p.user.toString()));
+
+        const finalResults = userIds.map(userId => {
+            const cached = cachedResults.find(r => r.userId === userId);
+            if (cached && cached.data) {
+                return {
+                    userId,
+                    ...cached.data,
                     fromCache: true
-                }));
+                };
             }
 
-            // 3. Batch fetch uncached users
-            const users = await User.find({
-                _id: { $in: uncachedUserIds }
-            })
-                .select('role isEmailVerified _id')
-                .lean();
-
-            // 4. Batch fetch profiles
-            const staffProfiles = await MedicalStaff.find({
-                user: { $in: users.filter(u => u.role === 'staff').map(u => u._id) }
-            })
-                .select('user _id')
-                .lean();
-
-            const hospitalProfiles = await Hospital.find({
-                user: { $in: users.filter(u => u.role === 'hospital').map(u => u._id) }
-            })
-                .select('user _id')
-                .lean();
-
-            // 5. Combine results
-            const staffProfileUserIds = new Set(staffProfiles.map(p => p.user.toString()));
-            const hospitalProfileUserIds = new Set(hospitalProfiles.map(p => p.user.toString()));
-
-            const finalResults = userIds.map(userId => {
-                const cached = cachedResults.find(r => r.userId === userId);
-                if (cached && cached.data) {
-                    return {
-                        userId,
-                        ...cached.data,
-                        fromCache: true
-                    };
-                }
-
-                const user = users.find(u => u._id.toString() === userId);
-                if (!user) {
-                    return {
-                        userId,
-                        success: false,
-                        error: 'User not found'
-                    };
-                }
-
-                const hasProfile = user.role === 'staff'
-                    ? staffProfileUserIds.has(userId)
-                    : user.role === 'hospital'
-                        ? hospitalProfileUserIds.has(userId)
-                        : false;
-
-                const result = {
-                    success: true,
-                    hasProfile,
-                    userRole: user.role,
-                    isEmailVerified: user.isEmailVerified,
-                    fromCache: false
+            const user = users.find(u => u._id.toString() === userId);
+            if (!user) {
+                return {
+                    userId,
+                    success: false,
+                    error: 'User not found'
                 };
+            }
 
-                // Cache individual results
-                cacheService.setProfileStatus(userId, result);
+            const hasProfile = user.role === 'staff'
+                ? staffProfileUserIds.has(userId)
+                : user.role === 'hospital'
+                    ? hospitalProfileUserIds.has(userId)
+                    : false;
 
-                return result;
-            });
+            const result = {
+                success: true,
+                hasProfile,
+                userRole: user.role,
+                isEmailVerified: user.isEmailVerified,
+                fromCache: false
+            };
 
-            return finalResults;
-        } catch (error) {
-            throw error;
-        }
+            // Cache individual results
+            cacheService.setProfileStatus(userId, result);
+
+            return result;
+        });
+
+        return finalResults;
     }
 
 
     // Toggle medical staff availability status
     async toggleMedicalStaffAvailability(userId, isAvailable) {
-        try {
-            // Input validation
-            if (typeof isAvailable !== 'boolean') {
-                throw new ValidationError('isAvailable must be a boolean value');
-            }
+        // Input validation
+        if (typeof isAvailable !== 'boolean') {
+            throw new ValidationError('isAvailable must be a boolean value');
+        }
 
-            // Parallel database queries for better performance
-            const [user, medicalStaff] = await Promise.all([
-                User.findById(userId).select('role _id').lean(),
-                MedicalStaff.findOne({ user: userId }).select('verificationStatus isAvailable isProfileComplete _id').lean()
-            ]);
+        // Parallel database queries for better performance
+        const [user, medicalStaff] = await Promise.all([
+            User.findById(userId).select('role _id').lean(),
+            MedicalStaff.findOne({ user: userId }).select('verificationStatus isAvailable isProfileComplete _id').lean()
+        ]);
 
-            if (!user) {
-                throw new NotFoundError('User not found');
-            }
+        if (!user) {
+            throw new NotFoundError('User not found');
+        }
 
-            if (user.role !== 'staff') {
-                throw new ForbiddenError('Only medical staff can toggle availability status');
-            }
+        if (user.role !== 'staff') {
+            throw new ForbiddenError('Only medical staff can toggle availability status');
+        }
 
-            if (!medicalStaff) {
-                throw new NotFoundError('Medical staff profile not found');
-            }
+        if (!medicalStaff) {
+            throw new NotFoundError('Medical staff profile not found');
+        }
 
-            // Check verification status for availability toggle
-            if (medicalStaff.verificationStatus === 'pending') {
-                const availabilityMessage = isAvailable
-                    ? 'You cannot set availability to ON until your profile has been verified.'
-                    : 'You won\'t receive duty requests unless your profile has been verified.';
-
-                return {
-                    success: false,
-                    message: availabilityMessage,
-                    verificationStatus: medicalStaff.verificationStatus,
-                    canToggleAvailability: false
-                };
-            }
-
-            if (medicalStaff.verificationStatus === 'rejected') {
-                return {
-                    success: false,
-                    message: `Your profile has been rejected. Reason: ${medicalStaff.rejectionReason || 'Not specified'}. Please contact support for assistance.`,
-                    verificationStatus: medicalStaff.verificationStatus,
-                    canToggleAvailability: false
-                };
-            }
-
-        
-            if (isAvailable && medicalStaff.isProfileComplete !== true) {
-                return {
-                    success: false,
-                    message: 'Complete your profile (address, phone number, experience) before turning availability on for duty shifts.',
-                    verificationStatus: medicalStaff.verificationStatus,
-                    canToggleAvailability: false
-                };
-            }
-
-            // Auto-enable availability when verified and setting to ON
-            let finalAvailability = isAvailable;
-            if (isAvailable && medicalStaff.verificationStatus === 'verified') {
-                finalAvailability = true;
-            }
-
-            // Optimized duty check with caching
-            if (!finalAvailability) {
-                const cacheKey = `upcoming:duties:${userId}`;
-                let upcomingDuties = await cacheService.get(cacheKey);
-
-                if (!upcomingDuties) {
-                    // Use lean query with minimal fields
-                    upcomingDuties = await Duty.find({
-                        assignedTo: medicalStaff._id,
-                        status: 'assigned',
-                        date: { $gte: new Date() }
-                    }).select('_id date startTime endTime').lean();
-
-                    // Cache for 5 minutes
-                    await cacheService.set(cacheKey, upcomingDuties, 300);
-                }
-
-                if (upcomingDuties.length > 0) {
-                    throw new ConflictError('Cannot set unavailable while you have upcoming duties');
-                }
-            }
-
-            // Atomic update with lean options
-            const updatedStaff = await MedicalStaff.findOneAndUpdate(
-                { user: userId },
-                {
-                    isAvailable: finalAvailability,
-                    updatedAt: new Date()
-                },
-                {
-                    new: true,
-                    runValidators: true,
-                    lean: true // Return plain object for better performance
-                }
-            );
-
-            if (!updatedStaff) {
-                throw new NotFoundError('Medical staff profile not found');
-            }
-
-            // Selective cache invalidation
-            await Promise.all([
-                cacheService.invalidateProfile(userId, 'staff'),
-                cacheService.del(`upcoming:duties:${userId}`),
-                // Invalidate nearby staff cache for hospitals
-                cacheService.invalidateAllNearbyStaff(),
-                // Update availability cache
-                cacheService.setStaffAvailability(userId, finalAvailability, 60),
-                // Invalidate verification cache to refresh availability status
-                cacheService.del(`staff_verification:${userId}`)
-            ]);
-
-            // Return appropriate response based on verification status
-            const successMessage = medicalStaff.verificationStatus === 'verified' && finalAvailability
-                ? 'Ready to receive new duties'
-                : 'Availability status updated successfully';
+        // Check verification status for availability toggle
+        if (medicalStaff.verificationStatus === 'pending') {
+            const availabilityMessage = isAvailable
+                ? 'You cannot set availability to ON until your profile has been verified.'
+                : 'You won\'t receive duty requests unless your profile has been verified.';
 
             return {
-                success: true,
-                isAvailable: finalAvailability,
-                updatedAt: updatedStaff.updatedAt,
-                message: successMessage,
+                success: false,
+                message: availabilityMessage,
                 verificationStatus: medicalStaff.verificationStatus,
-                canToggleAvailability: medicalStaff.verificationStatus === 'verified'
+                canToggleAvailability: false
             };
-        } catch (error) {
-            throw error;
         }
+
+        if (medicalStaff.verificationStatus === 'rejected') {
+            return {
+                success: false,
+                message: `Your profile has been rejected. Reason: ${medicalStaff.rejectionReason || 'Not specified'}. Please contact support for assistance.`,
+                verificationStatus: medicalStaff.verificationStatus,
+                canToggleAvailability: false
+            };
+        }
+
+    
+        if (isAvailable && medicalStaff.isProfileComplete !== true) {
+            return {
+                success: false,
+                message: 'Complete your profile (address, phone number, experience) before turning availability on for duty shifts.',
+                verificationStatus: medicalStaff.verificationStatus,
+                canToggleAvailability: false
+            };
+        }
+
+        // Auto-enable availability when verified and setting to ON
+        let finalAvailability = isAvailable;
+        if (isAvailable && medicalStaff.verificationStatus === 'verified') {
+            finalAvailability = true;
+        }
+
+        // Optimized duty check with caching
+        if (!finalAvailability) {
+            const cacheKey = `upcoming:duties:${userId}`;
+            let upcomingDuties = await cacheService.get(cacheKey);
+
+            if (!upcomingDuties) {
+                // Use lean query with minimal fields
+                upcomingDuties = await Duty.find({
+                    assignedTo: medicalStaff._id,
+                    status: 'assigned',
+                    date: { $gte: new Date() }
+                }).select('_id date startTime endTime').lean();
+
+                // Cache for 5 minutes
+                await cacheService.set(cacheKey, upcomingDuties, 300);
+            }
+
+            if (upcomingDuties.length > 0) {
+                throw new ConflictError('Cannot set unavailable while you have upcoming duties');
+            }
+        }
+
+        // Atomic update with lean options
+        const updatedStaff = await MedicalStaff.findOneAndUpdate(
+            { user: userId },
+            {
+                isAvailable: finalAvailability,
+                updatedAt: new Date()
+            },
+            {
+                new: true,
+                runValidators: true,
+                lean: true // Return plain object for better performance
+            }
+        );
+
+        if (!updatedStaff) {
+            throw new NotFoundError('Medical staff profile not found');
+        }
+
+        // Selective cache invalidation
+        await Promise.all([
+            cacheService.invalidateProfile(userId, 'staff'),
+            cacheService.del(`upcoming:duties:${userId}`),
+            // Invalidate nearby staff cache for hospitals
+            cacheService.invalidateAllNearbyStaff(),
+            // Update availability cache
+            cacheService.setStaffAvailability(userId, finalAvailability, 60),
+            // Invalidate verification cache to refresh availability status
+            cacheService.del(`staff_verification:${userId}`)
+        ]);
+
+        // Return appropriate response based on verification status
+        const successMessage = medicalStaff.verificationStatus === 'verified' && finalAvailability
+            ? 'Ready to receive new duties'
+            : 'Availability status updated successfully';
+
+        return {
+            success: true,
+            isAvailable: finalAvailability,
+            updatedAt: updatedStaff.updatedAt,
+            message: successMessage,
+            verificationStatus: medicalStaff.verificationStatus,
+            canToggleAvailability: medicalStaff.verificationStatus === 'verified'
+        };
     }
 
 
@@ -1572,177 +1545,169 @@ class ProfileService {
 
 
     async uploadProfilePicture(userId, file) {
-        try {
-            // Validate file exists
-            if (!file) {
-                throw new ValidationError("No file uploaded");
-            }
-
-            // Validate file type
-            const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png'];
-            if (!allowedMimeTypes.includes(file.mimetype)) {
-                throw new ValidationError('Invalid file type. Only JPG, JPEG, and PNG are allowed');
-            }
-
-            // Validate file size (5MB)
-            if (file.size > 5 * 1024 * 1024) {
-                throw new ValidationError('File too large. Maximum size is 5MB');
-            }
-
-            const user = await User.findById(userId).lean();
-            if (!user) throw new NotFoundError("User not found");
-
-            let model;
-
-            // Fix: Use correct role names
-            if (user.role === 'staff') {
-                model = MedicalStaff;
-            } else if (user.role === 'hospital') {
-                model = Hospital;
-            } else {
-                throw new ForbiddenError("Invalid user role");
-            }
-
-            const profile = await model.findOne({ user: userId });
-            if (!profile) throw new NotFoundError("Profile not found");
-
-            // Delete old image if exists
-            if (profile.profilePicture?.s3Key) {
-                try {
-                    await deleteFromS3(profile.profilePicture.s3Key);
-                } catch (deleteError) {
-                    // Log but don't fail - old file might already be deleted
-                    console.error('Failed to delete old profile picture:', deleteError.message);
-                }
-            }
-
-            // Get name based on role
-            let fileName = '';
-
-            if (user.role === 'staff') {
-                fileName = profile.fullName;
-            } else if (user.role === 'hospital') {
-                fileName = profile.hospitalLegalName;
-            }
-
-            // Fallback if name missing
-            if (!fileName) {
-                fileName = userId;
-            }
-
-            // Clean name 
-            fileName = fileName
-                .toLowerCase()
-                .replace(/\s+/g, '-')
-                .replace(/[^a-z0-9\-]/g, '');
-
-            // Extension
-            const ext = path.extname(file.originalname);
-
-            // Final key
-            const key = `profile-pictures/${user.role}/${fileName}-${Date.now()}${ext}`;
-
-            let uploadSuccess = false;
-
-            try {
-                // Upload to S3
-                await uploadToS3(file.buffer, key, file.mimetype);
-                uploadSuccess = true;
-
-                // Save metadata in DB
-                await model.findOneAndUpdate(
-                    { user: userId },
-                    {
-                        profilePicture: {
-                            s3Key: key,
-                            uploadedAt: new Date(),
-                            fileSize: file.size,
-                            mimeType: file.mimetype
-                        }
-                    },
-                    { new: true }
-                );
-
-                // Generate presigned URL
-                const url = await generatePreSignedURL(key);
-
-                // Clear cache
-                await cacheService.invalidateProfile(userId, user.role);
-
-                return {
-                    success: true,
-                    profilePicture: url,
-                    message: "Profile picture uploaded successfully"
-                };
-
-            } catch (error) {
-                // Rollback: delete from S3 if DB update failed
-                if (uploadSuccess) {
-                    try {
-                        await deleteFromS3(key);
-                    } catch (cleanupError) {
-                        console.error('Failed to cleanup S3 after error:', cleanupError.message);
-                    }
-                }
-                throw error;
-            }
-
-        } catch (error) {
-            throw error;
+        // Validate file exists
+        if (!file) {
+            throw new ValidationError("No file uploaded");
         }
-    }
 
+        // Validate file type
+        const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+        if (!allowedMimeTypes.includes(file.mimetype)) {
+            throw new ValidationError('Invalid file type. Only JPG, JPEG, and PNG are allowed');
+        }
 
+        // Validate file size (5MB)
+        if (file.size > 5 * 1024 * 1024) {
+            throw new ValidationError('File too large. Maximum size is 5MB');
+        }
 
-    async deleteProfilePicture(userId) {
-        try {
-            const user = await User.findById(userId).lean();
-            if (!user) throw new NotFoundError("User not found");
+        const user = await User.findById(userId).lean();
+        if (!user) throw new NotFoundError("User not found");
 
-            let model;
+        let model;
 
-            // Fix: Use correct role names
-            if (user.role === 'staff') {
-                model = MedicalStaff;
-            } else if (user.role === 'hospital') {
-                model = Hospital;
-            } else {
-                throw new ForbiddenError("Invalid user role");
-            }
+        // Fix: Use correct role names
+        if (user.role === 'staff') {
+            model = MedicalStaff;
+        } else if (user.role === 'hospital') {
+            model = Hospital;
+        } else {
+            throw new ForbiddenError("Invalid user role");
+        }
 
-            const profile = await model.findOne({ user: userId });
-            if (!profile) throw new NotFoundError("Profile not found");
+        const profile = await model.findOne({ user: userId });
+        if (!profile) throw new NotFoundError("Profile not found");
 
-            if (!profile.profilePicture?.s3Key) {
-                throw new NotFoundError("No profile picture found");
-            }
-
-            // Delete from S3
+        // Delete old image if exists
+        if (profile.profilePicture?.s3Key) {
             try {
                 await deleteFromS3(profile.profilePicture.s3Key);
             } catch (deleteError) {
-                console.error('Failed to delete from S3:', deleteError.message);
-                // Continue to remove from DB even if S3 delete fails
+                // Log but don't fail - old file might already be deleted
+                console.error('Failed to delete old profile picture:', deleteError.message);
             }
+        }
 
-            // Remove from DB
+        // Get name based on role
+        let fileName = '';
+
+        if (user.role === 'staff') {
+            fileName = profile.fullName;
+        } else if (user.role === 'hospital') {
+            fileName = profile.hospitalLegalName;
+        }
+
+        // Fallback if name missing
+        if (!fileName) {
+            fileName = userId;
+        }
+
+        // Clean name 
+        fileName = fileName
+            .toLowerCase()
+            .replace(/\s+/g, '-')
+            .replace(/[^a-z0-9\-]/g, '');
+
+        // Extension
+        const ext = path.extname(file.originalname);
+
+        // Final key
+        const key = `profile-pictures/${user.role}/${fileName}-${Date.now()}${ext}`;
+
+        let uploadSuccess = false;
+
+        try {
+            // Upload to S3
+            await uploadToS3(file.buffer, key, file.mimetype);
+            uploadSuccess = true;
+
+            // Save metadata in DB
             await model.findOneAndUpdate(
                 { user: userId },
-                { profilePicture: null },
+                {
+                    profilePicture: {
+                        s3Key: key,
+                        uploadedAt: new Date(),
+                        fileSize: file.size,
+                        mimeType: file.mimetype
+                    }
+                },
                 { new: true }
             );
+
+            // Generate presigned URL
+            const url = await generatePreSignedURL(key);
 
             // Clear cache
             await cacheService.invalidateProfile(userId, user.role);
 
             return {
                 success: true,
-                message: "Profile picture deleted successfully"
+                profilePicture: url,
+                message: "Profile picture uploaded successfully"
             };
 
         } catch (error) {
+            // Rollback: delete from S3 if DB update failed
+            if (uploadSuccess) {
+                try {
+                    await deleteFromS3(key);
+                } catch (cleanupError) {
+                    console.error('Failed to cleanup S3 after error:', cleanupError.message);
+                }
+            }
             throw error;
         }
+
+    }
+
+
+
+    async deleteProfilePicture(userId) {
+        const user = await User.findById(userId).lean();
+        if (!user) throw new NotFoundError("User not found");
+
+        let model;
+
+        // Fix: Use correct role names
+        if (user.role === 'staff') {
+            model = MedicalStaff;
+        } else if (user.role === 'hospital') {
+            model = Hospital;
+        } else {
+            throw new ForbiddenError("Invalid user role");
+        }
+
+        const profile = await model.findOne({ user: userId });
+        if (!profile) throw new NotFoundError("Profile not found");
+
+        if (!profile.profilePicture?.s3Key) {
+            throw new NotFoundError("No profile picture found");
+        }
+
+        // Delete from S3
+        try {
+            await deleteFromS3(profile.profilePicture.s3Key);
+        } catch (deleteError) {
+            console.error('Failed to delete from S3:', deleteError.message);
+            // Continue to remove from DB even if S3 delete fails
+        }
+
+        // Remove from DB
+        await model.findOneAndUpdate(
+            { user: userId },
+            { profilePicture: null },
+            { new: true }
+        );
+
+        // Clear cache
+        await cacheService.invalidateProfile(userId, user.role);
+
+        return {
+            success: true,
+            message: "Profile picture deleted successfully"
+        };
+
     }
 
 

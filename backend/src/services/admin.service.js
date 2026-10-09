@@ -2,7 +2,6 @@ const mongoose = require('mongoose');
 const Duty = require('../models/Duty');
 const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
-const Review = require('../models/Review');
 const Document = require('../models/Document');
 const User = require('../models/User');
 const { generatePreSignedURL } = require('./s3.service');
@@ -121,128 +120,124 @@ class AdminService {
 
     // GET /api/admin/dashboard-stats - Get dashboard overview statistics
     async getDashboardStats() {
-        try {
-            const pipeline = [
-                {
-                    $facet: {
-                        // Total Hospitals
-                        totalHospitals: [
-                            { $count: 'count' }
-                        ],
-                        
-                        // Previous period hospitals (for percentage change)
-                        previousHospitals: [
-                            {
-                                $match: {
-                                    createdAt: {
-                                        $gte: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000), // 60 days ago
-                                        $lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)   // 30 days ago
-                                    }
+        const pipeline = [
+            {
+                $facet: {
+                    // Total Hospitals
+                    totalHospitals: [
+                        { $count: 'count' }
+                    ],
+                    
+                    // Previous period hospitals (for percentage change)
+                    previousHospitals: [
+                        {
+                            $match: {
+                                createdAt: {
+                                    $gte: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000), // 60 days ago
+                                    $lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)   // 30 days ago
                                 }
-                            },
-                            { $count: 'count' }
-                        ],
-                        
-                        // Recent hospitals (last 30 days)
-                        recentHospitals: [
-                            {
-                                $match: {
-                                    createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-                                }
-                            },
-                            { $count: 'count' }
-                        ]
-                    }
+                            }
+                        },
+                        { $count: 'count' }
+                    ],
+                    
+                    // Recent hospitals (last 30 days)
+                    recentHospitals: [
+                        {
+                            $match: {
+                                createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+                            }
+                        },
+                        { $count: 'count' }
+                    ]
                 }
-            ];
+            }
+        ];
 
-            const [hospitalStats] = await Hospital.aggregate(pipeline);
+        const [hospitalStats] = await Hospital.aggregate(pipeline);
 
-            // Medical Staff stats
-            const staffPipeline = [
-                {
-                    $facet: {
-                        totalStaff: [{ $count: 'count' }],
-                        previousStaff: [
-                            {
-                                $match: {
-                                    createdAt: {
-                                        $gte: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000),
-                                        $lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-                                    }
+        // Medical Staff stats
+        const staffPipeline = [
+            {
+                $facet: {
+                    totalStaff: [{ $count: 'count' }],
+                    previousStaff: [
+                        {
+                            $match: {
+                                createdAt: {
+                                    $gte: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000),
+                                    $lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
                                 }
-                            },
-                            { $count: 'count' }
-                        ],
-                        recentStaff: [
-                            {
-                                $match: {
-                                    createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-                                }
-                            },
-                            { $count: 'count' }
-                        ]
-                    }
+                            }
+                        },
+                        { $count: 'count' }
+                    ],
+                    recentStaff: [
+                        {
+                            $match: {
+                                createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+                            }
+                        },
+                        { $count: 'count' }
+                    ]
                 }
-            ];
+            }
+        ];
 
-            const [staffStats] = await MedicalStaff.aggregate(staffPipeline);
+        const [staffStats] = await MedicalStaff.aggregate(staffPipeline);
 
-            // Pending Verifications (hospitals + medical staff with pending status)
-            const pendingHospitals = await Hospital.countDocuments({ verificationStatus: 'pending' });
-            const pendingStaff = await MedicalStaff.countDocuments({ verificationStatus: 'pending' });
-            const totalPendingVerifications = pendingHospitals + pendingStaff;
+        // Pending Verifications (hospitals + medical staff with pending status)
+        const pendingHospitals = await Hospital.countDocuments({ verificationStatus: 'pending' });
+        const pendingStaff = await MedicalStaff.countDocuments({ verificationStatus: 'pending' });
+        const totalPendingVerifications = pendingHospitals + pendingStaff;
 
-            // Active Duties (assigned, enroute, in-progress)
-            const activeDuties = await Duty.countDocuments({
-                status: { $in: ['assigned', 'enroute', 'in-progress'] }
-            });
+        // Active Duties (assigned, enroute, in-progress)
+        const activeDuties = await Duty.countDocuments({
+            status: { $in: ['assigned', 'enroute', 'in-progress'] }
+        });
 
-            // Calculate percentage changes
-            const totalHospitals = hospitalStats.totalHospitals[0]?.count || 0;
-            const previousHospitals = hospitalStats.previousHospitals[0]?.count || 0;
-            const recentHospitals = hospitalStats.recentHospitals[0]?.count || 0;
-            
-            const totalStaff = staffStats.totalStaff[0]?.count || 0;
-            const previousStaff = staffStats.previousStaff[0]?.count || 0;
-            const recentStaff = staffStats.recentStaff[0]?.count || 0;
+        // Calculate percentage changes
+        const totalHospitals = hospitalStats.totalHospitals[0]?.count || 0;
+        const previousHospitals = hospitalStats.previousHospitals[0]?.count || 0;
+        const recentHospitals = hospitalStats.recentHospitals[0]?.count || 0;
+        
+        const totalStaff = staffStats.totalStaff[0]?.count || 0;
+        const previousStaff = staffStats.previousStaff[0]?.count || 0;
+        const recentStaff = staffStats.recentStaff[0]?.count || 0;
 
-            // Calculate percentage change (comparing recent 30 days vs previous 30 days)
-            const hospitalChange = previousHospitals > 0 
-                ? Math.round(((recentHospitals - previousHospitals) / previousHospitals) * 100)
-                : recentHospitals > 0 ? 100 : 0;
+        // Calculate percentage change (comparing recent 30 days vs previous 30 days)
+        const hospitalChange = previousHospitals > 0 
+            ? Math.round(((recentHospitals - previousHospitals) / previousHospitals) * 100)
+            : recentHospitals > 0 ? 100 : 0;
 
-            const staffChange = previousStaff > 0
-                ? Math.round(((recentStaff - previousStaff) / previousStaff) * 100)
-                : recentStaff > 0 ? 100 : 0;
+        const staffChange = previousStaff > 0
+            ? Math.round(((recentStaff - previousStaff) / previousStaff) * 100)
+            : recentStaff > 0 ? 100 : 0;
 
-            return {
-                totalHospitals: {
-                    count: totalHospitals,
-                    change: hospitalChange,
-                    changeLabel: hospitalChange >= 0 ? `+${hospitalChange}%` : `${hospitalChange}%`,
-                    trend: hospitalChange >= 0 ? 'up' : 'down'
-                },
-                medicalStaff: {
-                    count: totalStaff,
-                    change: staffChange,
-                    changeLabel: staffChange >= 0 ? `+${staffChange}%` : `${staffChange}%`,
-                    trend: staffChange >= 0 ? 'up' : 'down'
-                },
-                pendingVerifications: {
-                    count: totalPendingVerifications,
-                    hospitals: pendingHospitals,
-                    staff: pendingStaff,
-                    status: totalPendingVerifications > 20 ? 'urgent' : 'normal'
-                },
-                activeDuties: {
-                    count: activeDuties,
-                    status: 'live'
-                }
-            };
-        } catch (error) {
-            throw error;
-        }
+        return {
+            totalHospitals: {
+                count: totalHospitals,
+                change: hospitalChange,
+                changeLabel: hospitalChange >= 0 ? `+${hospitalChange}%` : `${hospitalChange}%`,
+                trend: hospitalChange >= 0 ? 'up' : 'down'
+            },
+            medicalStaff: {
+                count: totalStaff,
+                change: staffChange,
+                changeLabel: staffChange >= 0 ? `+${staffChange}%` : `${staffChange}%`,
+                trend: staffChange >= 0 ? 'up' : 'down'
+            },
+            pendingVerifications: {
+                count: totalPendingVerifications,
+                hospitals: pendingHospitals,
+                staff: pendingStaff,
+                status: totalPendingVerifications > 20 ? 'urgent' : 'normal'
+            },
+            activeDuties: {
+                count: activeDuties,
+                status: 'live'
+            }
+        };
     }
 
 
@@ -250,86 +245,82 @@ class AdminService {
 
     // Get staff statistics grouped by job role
     async getStaffStatistics() {
-        try {
-            // Aggregate pipeline to group staff by job role and calculate statistics
-            const roleStats = await MedicalStaff.aggregate([
-                {
-                    $group: {
-                        _id: '$jobRole',
-                        totalStaff: { $sum: 1 },
-                        availableStaff: {
-                            $sum: { $cond: [{ $eq: ['$isAvailable', true] }, 1, 0] }
-                        }
-                    }
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        jobRole: '$_id',
-                        totalStaff: 1,
-                        availableStaff: 1,
-                        availabilityPercentage: {
-                            $multiply: [
-                                {
-                                    $cond: [
-                                        { $eq: ['$totalStaff', 0] },
-                                        0,
-                                        { $divide: ['$availableStaff', '$totalStaff'] }
-                                    ]
-                                },
-                                100
-                            ]
-                        }
-                    }
-                },
-                {
-                    $sort: { jobRole: 1 }
-                }
-            ]);
-
-            // Calculate overall statistics
-            const overallStats = await MedicalStaff.aggregate([
-                {
-                    $group: {
-                        _id: null,
-                        totalStaff: { $sum: 1 },
-                        availableStaff: {
-                            $sum: { $cond: [{ $eq: ['$isAvailable', true] }, 1, 0] }
-                        }
-                    }
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        totalStaff: 1,
-                        availableStaff: 1,
-                        availabilityPercentage: {
-                            $multiply: [
-                                {
-                                    $cond: [
-                                        { $eq: ['$totalStaff', 0] },
-                                        0,
-                                        { $divide: ['$availableStaff', '$totalStaff'] }
-                                    ]
-                                },
-                                100
-                            ]
-                        }
+        // Aggregate pipeline to group staff by job role and calculate statistics
+        const roleStats = await MedicalStaff.aggregate([
+            {
+                $group: {
+                    _id: '$jobRole',
+                    totalStaff: { $sum: 1 },
+                    availableStaff: {
+                        $sum: { $cond: [{ $eq: ['$isAvailable', true] }, 1, 0] }
                     }
                 }
-            ]);
+            },
+            {
+                $project: {
+                    _id: 0,
+                    jobRole: '$_id',
+                    totalStaff: 1,
+                    availableStaff: 1,
+                    availabilityPercentage: {
+                        $multiply: [
+                            {
+                                $cond: [
+                                    { $eq: ['$totalStaff', 0] },
+                                    0,
+                                    { $divide: ['$availableStaff', '$totalStaff'] }
+                                ]
+                            },
+                            100
+                        ]
+                    }
+                }
+            },
+            {
+                $sort: { jobRole: 1 }
+            }
+        ]);
 
-            return {
-                overall: overallStats[0] || {
-                    totalStaff: 0,
-                    availableStaff: 0,
-                    availabilityPercentage: 0
-                },
-                byRole: roleStats
-            };
-        } catch (error) {
-            throw error;
-        }
+        // Calculate overall statistics
+        const overallStats = await MedicalStaff.aggregate([
+            {
+                $group: {
+                    _id: null,
+                    totalStaff: { $sum: 1 },
+                    availableStaff: {
+                        $sum: { $cond: [{ $eq: ['$isAvailable', true] }, 1, 0] }
+                    }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    totalStaff: 1,
+                    availableStaff: 1,
+                    availabilityPercentage: {
+                        $multiply: [
+                            {
+                                $cond: [
+                                    { $eq: ['$totalStaff', 0] },
+                                    0,
+                                    { $divide: ['$availableStaff', '$totalStaff'] }
+                                ]
+                            },
+                            100
+                        ]
+                    }
+                }
+            }
+        ]);
+
+        return {
+            overall: overallStats[0] || {
+                totalStaff: 0,
+                availableStaff: 0,
+                availabilityPercentage: 0
+            },
+            byRole: roleStats
+        };
     }
 
 
@@ -362,11 +353,6 @@ class AdminService {
             .sort({ fullName: 1 })
             .skip(skip)
             .limit(limitNum);
-        // Get all staff userIds
-        const userIds = staff
-            .map(s => s.user?._id)
-            .filter(id => id);
-
         // Aggregate completed duties
         const dutyCounts = await Duty.aggregate([
             {
@@ -1737,88 +1723,84 @@ class AdminService {
     async getActiveDuties(filters) {
         const { role, location, status, page = 1, limit = 10 } = filters;
 
-        try {
-            // Build base query for active duties
-            const activeStatuses = ['assigned', 'enroute', 'in-progress'];
-            let query = {
-                status: status ? [status] : activeStatuses
-            };
+        // Build base query for active duties
+        const activeStatuses = ['assigned', 'enroute', 'in-progress'];
+        let query = {
+            status: status ? [status] : activeStatuses
+        };
 
-            // Role-based filtering
-            if (role) {
-                if (!ALLOWED_ROLES.includes(role)) {
-                    throw new ValidationError(`Invalid role: ${role}`);
-                }
-                query.staffRole = role;
+        // Role-based filtering
+        if (role) {
+            if (!ALLOWED_ROLES.includes(role)) {
+                throw new ValidationError(`Invalid role: ${role}`);
             }
-
-            // Location-based filtering
-            if (location) {
-                const locationFilter = await this.buildLocationFilter(location);
-                if (locationFilter) {
-                    query = { ...query, ...locationFilter };
-                }
-            }
-
-            // Get total count for pagination (before filtering)
-            const totalDuties = await Duty.countDocuments(query);
-
-            // Calculate pagination parameters
-            const { skip } = getPaginationParams(page, limit);
-
-            // Fetch duties with populated data
-            const duties = await Duty.find(query)
-                .populate({
-                    path: 'assignedTo',
-                    select: 'fullName user coordinates currentAddress city state pincode email',
-                    populate: {
-                        path: 'user',
-                        select: 'name email'
-                    }
-                })
-                .populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates')
-                .sort({ createdAt: -1 }) // Latest duties first
-                .skip(skip)
-                .limit(limit);
-
-            // Filter out duties with missing staff data before processing
-            const validDuties = duties.filter(duty => duty.assignedTo);
-
-            // Batch process real-time locations for better performance
-            const staffUserIds = validDuties
-                .filter(duty => duty.assignedTo && duty.assignedTo.user)
-                .map(duty => duty.assignedTo.user._id);
-
-            // Get all real-time locations in batch
-            const realtimeLocations = await getBatchStaffLocations(staffUserIds);
-
-            const formattedDuties = await Promise.all(
-                validDuties.map(async (duty) => {
-                    return await formatActiveDuty(duty, realtimeLocations);
-                })
-            );
-
-            // Filter out null results from duties with missing staff
-            const validFormattedDuties = formattedDuties.filter(duty => duty !== null);
-
-            return {
-                duties: validFormattedDuties,
-                pagination: getPaginationMeta(validFormattedDuties.length, page, limit),
-                filters: {
-                    role: role || 'all',
-                    location: location || 'all',
-                    status: status || 'all'
-                },
-                summary: {
-                    totalActiveDuties: totalDuties,
-                    assignedCount: await Duty.countDocuments({ ...query, status: 'assigned' }),
-                    enrouteCount: await Duty.countDocuments({ ...query, status: 'enroute' }),
-                    inProgressCount: await Duty.countDocuments({ ...query, status: 'in-progress' })
-                }
-            };
-        } catch (error) {
-            throw error;
+            query.staffRole = role;
         }
+
+        // Location-based filtering
+        if (location) {
+            const locationFilter = await this.buildLocationFilter(location);
+            if (locationFilter) {
+                query = { ...query, ...locationFilter };
+            }
+        }
+
+        // Get total count for pagination (before filtering)
+        const totalDuties = await Duty.countDocuments(query);
+
+        // Calculate pagination parameters
+        const { skip } = getPaginationParams(page, limit);
+
+        // Fetch duties with populated data
+        const duties = await Duty.find(query)
+            .populate({
+                path: 'assignedTo',
+                select: 'fullName user coordinates currentAddress city state pincode email',
+                populate: {
+                    path: 'user',
+                    select: 'name email'
+                }
+            })
+            .populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates')
+            .sort({ createdAt: -1 }) // Latest duties first
+            .skip(skip)
+            .limit(limit);
+
+        // Filter out duties with missing staff data before processing
+        const validDuties = duties.filter(duty => duty.assignedTo);
+
+        // Batch process real-time locations for better performance
+        const staffUserIds = validDuties
+            .filter(duty => duty.assignedTo && duty.assignedTo.user)
+            .map(duty => duty.assignedTo.user._id);
+
+        // Get all real-time locations in batch
+        const realtimeLocations = await getBatchStaffLocations(staffUserIds);
+
+        const formattedDuties = await Promise.all(
+            validDuties.map(async (duty) => {
+                return await formatActiveDuty(duty, realtimeLocations);
+            })
+        );
+
+        // Filter out null results from duties with missing staff
+        const validFormattedDuties = formattedDuties.filter(duty => duty !== null);
+
+        return {
+            duties: validFormattedDuties,
+            pagination: getPaginationMeta(validFormattedDuties.length, page, limit),
+            filters: {
+                role: role || 'all',
+                location: location || 'all',
+                status: status || 'all'
+            },
+            summary: {
+                totalActiveDuties: totalDuties,
+                assignedCount: await Duty.countDocuments({ ...query, status: 'assigned' }),
+                enrouteCount: await Duty.countDocuments({ ...query, status: 'enroute' }),
+                inProgressCount: await Duty.countDocuments({ ...query, status: 'in-progress' })
+            }
+        };
     }
 
 

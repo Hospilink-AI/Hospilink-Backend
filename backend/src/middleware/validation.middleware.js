@@ -1,5 +1,4 @@
 const validator = require('validator');
-const { body, validationResult } = require('express-validator');
 const { ValidationError } = require('./error.middleware');
 const { getCurrentIST, toIST } = require('../utils/helpers');
 const { INDIAN_STATES, ALLOWED_ROLES } = require('../utils/constants');
@@ -263,7 +262,7 @@ function dateOfBirthError(value) {
 }
 
 const validateMedicalStaffProfile = (req, res, next) => {
-    const { fullName, jobRole, currentAddress, city, state, pincode, phoneNumber, email, profileSummary, education, skills, experience } = req.body;
+    const { fullName, jobRole, currentAddress, city, state, pincode, phoneNumber, email, experience } = req.body;
     const errors = [];
 
     // Check for unexpected fields
@@ -665,7 +664,7 @@ const validateProfileUpdate = (req, res, next) => {
     
     // Dynamic validation based on user role
     if (role === 'staff') {
-        const { fullName, jobRole, currentAddress, city, state, pincode, coordinates, experience } = req.body;
+        const { fullName, currentAddress, city, state, pincode, coordinates, experience } = req.body;
         
         // Prevent email changes (read-only after creation)
         if (req.body.email && req.body.email !== req.user.email) {
@@ -720,7 +719,7 @@ const validateProfileUpdate = (req, res, next) => {
         
         
     } else if (role === 'hospital') {
-        const { hospitalLegalName, currentAddress, servicesAvailable, city, state, pincode, staffCount, phoneNumber, email, description } = req.body;
+        const { hospitalLegalName, servicesAvailable, city, state, pincode, phoneNumber, email, description } = req.body;
         
         // Prevent email and phone number changes
         if (email && email !== req.user.email) {

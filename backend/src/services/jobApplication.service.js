@@ -3,7 +3,6 @@ const JobVacancy = require('../models/JobVacancy');
 const Hospital = require('../models/Hospital');
 const MedicalStaff = require('../models/MedicalStaff');
 const Document = require('../models/Document');
-const User = require('../models/User');
 const vacancyMatchingService = require('./vacancyMatching.service');
 const noShowPenaltyService = require('./noShowPenalty.service');
 const notificationEmitter = require('./notificationEmitter');

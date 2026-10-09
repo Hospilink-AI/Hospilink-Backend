@@ -222,7 +222,7 @@ const parseDateString = (dateString) => {
         const date = new Date(year, month - 1, day);
         
         // Validate the date is valid
-        if (date.getDate() == day && date.getMonth() == month - 1 && date.getFullYear() == year) {
+        if (date.getDate() === Number(day) && date.getMonth() === month - 1 && date.getFullYear() === Number(year)) {
             return date;
         }
     }

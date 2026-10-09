@@ -4,7 +4,6 @@ const { protect, authorize, requireCapability } = require('../middleware/auth.mi
 const adminController = require('../controllers/admin.controller');
 const adminManagementController = require('../controllers/adminManagement.controller');
 const {
-    validateStaffDutyReportQuery,
     validateNearbyStaffQuery,
     validateAdminSignin,
     validateAdminOTP,

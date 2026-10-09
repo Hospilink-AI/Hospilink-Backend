@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const multer = require('multer');
 const profileController = require('../controllers/profile.controller');
 const dashboardController = require('../controllers/dashboard.controller');
 const { protect, authorize, checkSuspension } = require('../middleware/auth.middleware');
@@ -19,7 +18,7 @@ const {
 const { staffAvailabilityRateLimit, phoneOtpRateLimit, verifyPhoneOtpRateLimit } = require('../middleware/rateLimit.middleware');
 const upload = require('../middleware/upload.middleware');
 const { validateMagicBytes } = require('../middleware/upload.middleware');
-const { requireHospitalVerification, requireStaffVerificationandisAvailable, requireVerifiedStaffOnly} = require('../middleware/accountsVerification.middleware');
+const { requireHospitalVerification, requireVerifiedStaffOnly} = require('../middleware/accountsVerification.middleware');
 
 // Apply protection to all profile routes
 router.use(protect);

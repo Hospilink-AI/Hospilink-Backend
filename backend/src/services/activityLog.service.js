@@ -5,7 +5,6 @@ const {
     categorizeActivity,
     determineActivityStatus,
     sanitizeSensitiveData,
-    formatActivityMessage,
     validateActivityLogData,
     buildActivityLogQuery,
     parsePaginationOptions
@@ -117,7 +116,6 @@ class ActivityLogService {
     // Get activity logs with filters and pagination
     async getActivityLogs(filters = {}, paginationOptions = {}) {
         try {
-            const query = buildActivityLogQuery(filters);
             const options = parsePaginationOptions(paginationOptions);
             
             const result = await ActivityLog.getFilteredLogs(filters, options);

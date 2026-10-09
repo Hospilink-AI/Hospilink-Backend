@@ -1,7 +1,4 @@
 const documentService = require("../services/document.service");
-const Document = require("../models/Document");
-const User = require("../models/User");
-const rules = require("../config/requiredDocs");
 const { deleteFromS3 } = require("../services/s3.service");
 const activityLogEmitter = require('../services/activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');

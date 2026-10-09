@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const { body, validationResult } = require('express-validator');
 const { ALLOWED_ROLES } = require('../utils/constants');
 const { isValidDateKey } = require('../utils/calendar.helper');
 
