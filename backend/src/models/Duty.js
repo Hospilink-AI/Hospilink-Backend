@@ -731,17 +731,10 @@ dutySchema.index({
     date: 1 
 }); // For staff duty status lookup
 
-dutySchema.index({ 
-    assignedTo: 1, 
-    status: { $in: ['assigned', 'enroute', 'in-progress'] }, 
-    date: 1 
-}); // For active duties
-
-dutySchema.index({ 
-    assignedTo: 1, 
-    status: 'available', 
-    date: { $gte: new Date(), $lte: new Date(Date.now() + 7*24*60*60*1000) }
-}); // For upcoming duties (next 7 days)
+// Two definitions that were here used query filters as index keys
+// ({ status: { $in: [...] } }, { status: 'available', date: { $gte: ... } }).
+// MongoDB rejects those, so they never existed; { assignedTo, status, date }
+// above serves both queries.
 
 dutySchema.index({ 
     assignedTo: 1, 
