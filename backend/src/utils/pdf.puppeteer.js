@@ -6,8 +6,8 @@ const logger = require('./logger');
 // per request costs ~1 s and ~150 MB each, so a burst of statement downloads
 // could take the server down. Each request gets its own page instead.
 const MAX_CONCURRENT_PAGES = parseInt(process.env.PDF_MAX_CONCURRENT_PAGES, 10) || 3;
-// Web fonts get this long to load before printing goes ahead with fallbacks
-const FONT_WAIT_MS = 5000;
+// Embedded fonts get this long to be ready before printing goes ahead
+const FONT_WAIT_MS = 2000;
 
 let browserPromise = null;
 let activePages = 0;
@@ -43,20 +43,22 @@ function releaseSlot() {
     else activePages--;
 }
 
-// Renders html to a PDF buffer. waitForFonts waits for the network to settle
-// (web fonts) for up to FONT_WAIT_MS, then prints whatever has loaded.
+// Renders html to a PDF buffer. waitForFonts waits until the page's embedded
+// fonts are ready (up to FONT_WAIT_MS). Nothing is fetched from the network,
+// so there is no network-idle wait.
 async function renderPdf(html, pdfOptions, { waitForFonts = false } = {}) {
     await acquireSlot();
     let page = null;
     try {
         const browser = await getBrowser();
         page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'load' });
         if (waitForFonts) {
-            await page.setContent(html, { waitUntil: 'networkidle0', timeout: FONT_WAIT_MS }).catch((err) => {
-                if (!/timeout/i.test(err.message)) throw err;
-            });
-        } else {
-            await page.setContent(html, { waitUntil: 'load' });
+            let timer;
+            await Promise.race([
+                page.evaluate(() => document.fonts.ready.then(() => true)),
+                new Promise(resolve => { timer = setTimeout(resolve, FONT_WAIT_MS); })
+            ]).finally(() => clearTimeout(timer));
         }
         return await page.pdf({ printBackground: true, ...pdfOptions });
     } finally {
