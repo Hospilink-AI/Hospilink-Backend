@@ -1,3 +1,4 @@
+const logger = require('../utils/logger');
 const MedicalStaff = require('../models/MedicalStaff');
 const Duty = require('../models/Duty');
 const mongoose = require('mongoose');
@@ -10,6 +11,17 @@ const { hasDutyStarted, istDayRange } = require('../utils/calendar.helper');
 const staffLocator = require('./staffLocator.service');
 const dutyOfferService = require('./dutyOffer.service');
 const blockService = require('./block.service');
+const ratingAlgorithmService = require('./ratingAlgorithm.service');
+
+// The locality of a hospital address: the last part that isn't the city,
+// state or pincode. "12 MG Road, Kothrud, Pune 411038" gives "Kothrud".
+function areaFromAddress(address, city, state) {
+    const skip = [city, state].filter(Boolean).map(s => s.trim().toLowerCase());
+    const parts = String(address || '').split(',')
+        .map(p => p.replace(/\b\d{6}\b/g, '').trim())
+        .filter(p => p && !/^\d+$/.test(p) && !skip.includes(p.toLowerCase()) && p.toLowerCase() !== 'india');
+    return parts.length > 1 ? parts[parts.length - 1] : null;
+}
 
 class LocationBasedStaffService {
     // Calculate bounding box for 50km radius (in degrees: ~111 km per degree)
@@ -74,11 +86,11 @@ class LocationBasedStaffService {
             throw new Error('Medical staff profile not found');
         }
 
-        console.log(`[AvailableJobs] Staff ID: ${staffId} | Job Role: ${medicalStaff.jobRole}`);
+        logger.debug(`[AvailableJobs] Staff ID: ${staffId} | Job Role: ${medicalStaff.jobRole}`);
 
         // Get staff current location (browser GPS from Redis, falls back to profile)
         const staffLocation = await this.getStaffCurrentLocation(staffId);
-        console.log(`[AvailableJobs] Staff location → lat: ${staffLocation.latitude}, lng: ${staffLocation.longitude}`);
+        logger.debug(`[AvailableJobs] Staff location → lat: ${staffLocation.latitude}, lng: ${staffLocation.longitude}`);
 
         // Widen any staged offers that are due before deciding what this doctor sees
         await dutyOfferService.runDueThrottled();
@@ -121,10 +133,10 @@ class LocationBasedStaffService {
 
         // Fetch all available duties for this staff's job role — no count cap
         const duties = await Duty.find(query)
-            .populate('hospital', 'hospitalLegalName coordinates city state')
+            .populate('hospital', 'hospitalLegalName coordinates city state currentAddress verificationStatus averageRating totalRatings user')
             .sort({ date: 1, startTime: 1 });
 
-        console.log(`[AvailableJobs] Total duties fetched from DB: ${duties.length} (role: ${medicalStaff.jobRole})`);
+        logger.debug(`[AvailableJobs] Total duties fetched from DB: ${duties.length} (role: ${medicalStaff.jobRole})`);
 
         // --- Step 1: Pre-filter before calling Google Maps ---
         // Remove duties missing hospital coordinates or that have already started
@@ -132,22 +144,22 @@ class LocationBasedStaffService {
 
         for (const duty of duties) {
             if (!duty.hospital?.coordinates?.coordinates) {
-                console.log(`[AvailableJobs] Skipping duty ${duty._id} — missing hospital coordinates`);
+                logger.debug(`[AvailableJobs] Skipping duty ${duty._id} — missing hospital coordinates`);
                 continue;
             }
 
             if (hasDutyStarted(duty, currentTime)) {
-                console.log(`[AvailableJobs] Skipping duty ${duty._id} — already started at ${duty.startTime} on ${duty.date}`);
+                logger.debug(`[AvailableJobs] Skipping duty ${duty._id} — already started at ${duty.startTime} on ${duty.date}`);
                 continue;
             }
 
             validDuties.push(duty);
         }
 
-        console.log(`[AvailableJobs] Valid duties after pre-filter (has coords + not started): ${validDuties.length}`);
+        logger.debug(`[AvailableJobs] Valid duties after pre-filter (has coords + not started): ${validDuties.length}`);
 
         if (validDuties.length === 0) {
-            console.log(`[AvailableJobs] No valid duties found — returning empty result`);
+            logger.debug(`[AvailableJobs] No valid duties found — returning empty result`);
             return { jobs: [], staffLocation };
         }
 
@@ -207,7 +219,7 @@ class LocationBasedStaffService {
             );
 
             if (straightLine > HAVERSINE_THRESHOLD_KM) {
-                console.log(`[AvailableJobs] Haversine skip: ${duty.hospital.hospitalLegalName} (${duty.hospital.city}) — ${straightLine.toFixed(1)}km straight-line > ${HAVERSINE_THRESHOLD_KM}km threshold`);
+                logger.debug(`[AvailableJobs] Haversine skip: ${duty.hospital.hospitalLegalName} (${duty.hospital.city}) — ${straightLine.toFixed(1)}km straight-line > ${HAVERSINE_THRESHOLD_KM}km threshold`);
                 skippedHospitals.add(hospitalId);
                 haversineSkippedCount++;
                 continue;
@@ -217,10 +229,10 @@ class LocationBasedStaffService {
             nearbyDuties.push(duty);
         }
 
-        console.log(`[AvailableJobs] After haversine pre-filter: ${nearbyDuties.length} duties | ${nearbyHospitals.size} unique nearby hospitals | ${haversineSkippedCount} duties skipped`);
+        logger.debug(`[AvailableJobs] After haversine pre-filter: ${nearbyDuties.length} duties | ${nearbyHospitals.size} unique nearby hospitals | ${haversineSkippedCount} duties skipped`);
 
         if (nearbyDuties.length === 0) {
-            console.log(`[AvailableJobs] No nearby duties — returning empty result`);
+            logger.debug(`[AvailableJobs] No nearby duties — returning empty result`);
             return { jobs: [], staffLocation };
         }
 
@@ -233,7 +245,7 @@ class LocationBasedStaffService {
 
         const batchSize = 25;
         const expectedApiCalls = Math.ceil(destinations.length / batchSize);
-        console.log(`[AvailableJobs] Google Maps batch call — unique hospitals: ${destinations.length} | duties: ${nearbyDuties.length} | expected API calls: ${expectedApiCalls}`);
+        logger.debug(`[AvailableJobs] Google Maps batch call — unique hospitals: ${destinations.length} | duties: ${nearbyDuties.length} | expected API calls: ${expectedApiCalls}`);
 
         // --- Step 4: Single batch call on unique hospitals only ---
         const { resultMap, totalApiCalls } = await geocodingService.calculateBatchDistanceAndETA(
@@ -242,7 +254,7 @@ class LocationBasedStaffService {
             destinations
         );
 
-        console.log(`[AvailableJobs] Google Maps API calls made: ${totalApiCalls} | successful results: ${resultMap.size}/${destinations.length}`);
+        logger.debug(`[AvailableJobs] Google Maps API calls made: ${totalApiCalls} | successful results: ${resultMap.size}/${destinations.length}`);
 
         // --- Step 5: Filter within 50km and build final result ---
         const jobsWithDistance = [];
@@ -254,7 +266,7 @@ class LocationBasedStaffService {
             const distanceResult = resultMap.get(hospitalId); // lookup by hospitalId
 
             if (!distanceResult) {
-                console.log(`[AvailableJobs] No distance result for hospital ${duty.hospital.hospitalLegalName} — skipping`);
+                logger.debug(`[AvailableJobs] No distance result for hospital ${duty.hospital.hospitalLegalName} — skipping`);
                 noResultCount++;
                 continue;
             }
@@ -288,16 +300,17 @@ class LocationBasedStaffService {
         });
 
         await this.attachSpots(jobsWithDistance);
+        await this.attachHospitalFacts(jobsWithDistance);
 
-        console.log(`[AvailableJobs] Summary:`);
-        console.log(`  DB fetched            : ${duties.length}`);
-        console.log(`  Valid (pre-filter)    : ${validDuties.length}`);
-        console.log(`  Haversine skipped     : ${haversineSkippedCount} duties (hospital > ${HAVERSINE_THRESHOLD_KM}km straight-line)`);
-        console.log(`  Unique hospitals sent : ${destinations.length}`);
-        console.log(`  Within 50km           : ${jobsWithDistance.length}`);
-        console.log(`  Outside 50km          : ${outsideRadiusCount}`);
-        console.log(`  No API result         : ${noResultCount}`);
-        console.log(`  Google Maps calls     : ${totalApiCalls}`);
+        logger.debug(`[AvailableJobs] Summary:`);
+        logger.debug(`  DB fetched            : ${duties.length}`);
+        logger.debug(`  Valid (pre-filter)    : ${validDuties.length}`);
+        logger.debug(`  Haversine skipped     : ${haversineSkippedCount} duties (hospital > ${HAVERSINE_THRESHOLD_KM}km straight-line)`);
+        logger.debug(`  Unique hospitals sent : ${destinations.length}`);
+        logger.debug(`  Within 50km           : ${jobsWithDistance.length}`);
+        logger.debug(`  Outside 50km          : ${outsideRadiusCount}`);
+        logger.debug(`  No API result         : ${noResultCount}`);
+        logger.debug(`  Google Maps calls     : ${totalApiCalls}`);
 
         return {
             jobs: jobsWithDistance,
@@ -334,6 +347,35 @@ class LocationBasedStaffService {
         return jobs;
     }
 
+    // Locality, verified status and rating of each offer's hospital. Ratings
+    // come from one batched call for all the hospitals in the feed.
+    async attachHospitalFacts(jobs) {
+        const hospitals = new Map();
+        for (const job of jobs) {
+            if (job.hospital?._id) hospitals.set(String(job.hospital._id), job.hospital);
+        }
+        const list = [...hospitals.values()];
+        let ratings = [];
+        try {
+            ratings = await ratingAlgorithmService.getEffectiveRatingsForMany(list, 'staff_to_hospital');
+        } catch (error) {
+            console.error('[AvailableJobs] Hospital ratings unavailable:', error.message);
+        }
+        const facts = new Map(list.map((h, i) => [String(h._id), {
+            area: areaFromAddress(h.currentAddress, h.city, h.state),
+            verificationStatus: h.verificationStatus || null,
+            effectiveRating: ratings[i]?.ratingShown ?? null,
+            totalRatings: h.totalRatings || 0
+        }]));
+
+        for (const job of jobs) {
+            if (!job.hospital?._id) continue;
+            const { user, averageRating, currentAddress, ...hospital } = job.hospital;
+            job.hospital = { ...hospital, ...facts.get(String(job.hospital._id)) };
+        }
+        return jobs;
+    }
+
     // Helper method to get staff current location
     async getStaffCurrentLocation(staffId) {
         try {
@@ -358,3 +400,4 @@ class LocationBasedStaffService {
 }
 
 module.exports = new LocationBasedStaffService();
+module.exports.areaFromAddress = areaFromAddress;
