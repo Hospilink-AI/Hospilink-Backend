@@ -150,7 +150,7 @@ const KPIS = [
     k('recruitment', 'matchTierHires', 'Match tier outcomes', 'Shortlist and hire rate for exact, related and unscored matches.', 'ratio'),
 
     // Engagement
-    k('engagement', 'dau', 'Daily active users', 'Distinct users signing in per day, averaged over the period. Logs keep 90 days; older days come from the daily snapshot.', 'count'),
+    k('engagement', 'dau', 'Daily active users', 'Distinct users signing in per day, averaged over the period. Older days come from the daily snapshot.', 'count'),
     k('engagement', 'wau', 'Weekly active users', 'Distinct users signing in during the last 7 days of the period.', 'count'),
     k('engagement', 'mau', 'Monthly active users', 'Distinct users signing in during the last 30 days of the period.', 'count'),
     k('engagement', 'stickiness', 'Stickiness', 'Average daily active users divided by monthly active users.', 'ratio'),

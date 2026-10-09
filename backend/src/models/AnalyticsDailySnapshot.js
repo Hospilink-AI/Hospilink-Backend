@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 // One row per IST day for the admin analytics module. Holds what can't be
 // worked out again later: point-in-time counts (stocks) taken when the row
 // is written, and a durable copy of the day's headline numbers (flows) whose
-// sources expire (activity logs and notifications keep 90 days).
+// sources expire (notifications keep 90 days).
 const analyticsDailySnapshotSchema = new mongoose.Schema({
     // IST day, 'YYYY-MM-DD'
     date: { type: String, required: true },
