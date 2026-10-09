@@ -1,7 +1,7 @@
 jest.mock('../src/utils/logger', () => ({ error: () => {}, info: () => {}, warn: () => {}, debug: () => {} }));
 const mockCleared = [];
 jest.mock('../src/services/cache.service', () => ({
-    invalidatePattern: async (p) => { mockCleared.push(p); return true; },
+    invalidateAllNearbyStaff: async () => { mockCleared.push('nearby:staff'); return true; },
     get: async () => null, set: async () => true, del: async () => true
 }));
 jest.mock('../src/services/systemConfig.service', () => ({
@@ -18,7 +18,7 @@ describe('saving platform settings', () => {
     it('clears the hospital map cache when a privacy setting changes', async () => {
         await adminService.updatePlatformSetting('privacy.showContactOnMap', true, null, 'a1');
         await adminService.updatePlatformSetting('privacy.mapLocationPrecisionKm', 2, null, 'a1');
-        expect(mockCleared).toEqual(['nearby:staff:*', 'nearby:staff:*']);
+        expect(mockCleared).toEqual(['nearby:staff', 'nearby:staff']);
     });
 
     it('leaves the map cache alone for other settings', async () => {

@@ -1,7 +1,7 @@
 jest.mock('../src/utils/logger', () => ({ error: () => {}, info: () => {}, warn: () => {}, debug: () => {} }));
 const mockCleared = [];
 jest.mock('../src/services/cache.service', () => ({
-    invalidatePattern: async (p) => { mockCleared.push(p); },
+    invalidateAllNearbyStaff: async () => { mockCleared.push('nearby:staff'); },
     get: async () => null, set: async () => true, del: async () => true
 }));
 const mockTickets = [];
@@ -69,14 +69,14 @@ describe('blocking', () => {
             ['staff', 's1', { $addToSet: { blockedHospitals: 'h2' } }],
             ['hospital', 'h2', { $pull: { favouriteStaff: 's1' } }]
         ]);
-        expect(mockCleared).toEqual(['nearby:staff:hu2:*']);
+        expect(mockCleared).toEqual(['nearby:staff']);
         expect(result.upcomingDuties).toBe(1);
     });
 
     it('a hospital blocking a doctor removes them from favourites', async () => {
         await blockService.blockStaff('hu2', 's1');
         expect(updates).toEqual([['hospital', 'h2', { $addToSet: { blockedStaff: 's1' }, $pull: { favouriteStaff: 's1' } }]]);
-        expect(mockCleared).toEqual(['nearby:staff:hu2:*']);
+        expect(mockCleared).toEqual(['nearby:staff']);
     });
 
     it('stops at 500 blocked accounts', async () => {
