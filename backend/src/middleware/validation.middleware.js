@@ -889,6 +889,26 @@ const validateDutyCreation = (req, res, next) => {
 
 
 
+// Raise rate: { offered_rate }, the new hourly rate
+const validateRaiseRate = (req, res, next) => {
+    const errors = [];
+    const body = req.body || {};
+    const unexpectedFields = Object.keys(body).filter(field => field !== 'offered_rate');
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    }
+    const rate = body.offered_rate;
+    if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0 || rate > 50000) {
+        errors.push('offered_rate must be a positive number less than 50000');
+    }
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    next();
+};
+
+
+
 // Validation for duty acceptance
 const validateDutyAcceptance = (req, res, next) => {
     const { duty_id } = req.body;
@@ -3150,6 +3170,7 @@ module.exports = {
     validateVerifyStartOtp,
     validateVerifyEndOtp,
     validateResendOtp,
+    validateRaiseRate,
     validateDutyCancellation,
     validateDutyEdit,
     validateAutoRelistToggle,

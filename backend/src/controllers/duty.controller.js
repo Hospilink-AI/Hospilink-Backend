@@ -23,7 +23,8 @@ const dutyOfferService = require('../services/dutyOffer.service');
 const blockService = require('../services/block.service');
 const dutyInviteService = require('../services/dutyInvite.service');
 const systemConfigService = require('../services/systemConfig.service');
-const { anesthesiaFields } = require('../utils/dutyPricing');                    
+const { anesthesiaFields } = require('../utils/dutyPricing');
+const dutyRateRaiseService = require('../services/dutyRateRaise.service');                    
 
 // Extend logger with debug method
 logger.debug = (message) => {
@@ -746,6 +747,31 @@ exports.editDuty = asyncHandler(async (req, res) => {
     res.status(200).json({
         success: true,
         message: 'Duty updated successfully',
+        duty
+    });
+});
+
+
+
+// POST /api/duties/:id/raise-rate - hospital raises the hourly rate of an open duty
+exports.raiseRate = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const duty = await dutyRateRaiseService.raise(id, userId, req.body.offered_rate);
+    dutyCalendarService.invalidateCounts(userId);
+
+    activityLogEmitter.emitDutyActivity(
+        ACTIVITY_ACTIONS.DUTY_EDITED,
+        duty,
+        activityLogEmitter.actorFrom(req.user),
+        { changes: [{ field: 'Offered Rate', oldValue: duty.rateRaise?.previousRate, newValue: duty.offeredRate }], rateRaise: true },
+        req
+    ).catch(err => logger.error('Error logging rate raise:', err));
+
+    res.status(200).json({
+        success: true,
+        message: 'Rate raised',
         duty
     });
 });

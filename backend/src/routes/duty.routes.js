@@ -13,6 +13,7 @@ const {
     validateVerifyStartOtp,
     validateVerifyEndOtp,
     validateResendOtp,
+    validateRaiseRate,
     validateDutyCancellation,
     validateDutyEdit,
     validateAutoRelistToggle,
@@ -142,6 +143,16 @@ router.patch(
     requireHospitalVerification,
     validateDutyEdit,
     dutyController.editDuty
+);
+
+// Raise the hourly rate of an open duty; doctors already offered it are told
+router.post(
+    '/duties/:id/raise-rate',
+    authorize('hospital'),
+    requireHospitalVerification,
+    validateObjectId('id'),
+    validateRaiseRate,
+    dutyController.raiseRate
 );
 
 router.patch(

@@ -120,6 +120,27 @@ const dutySchema = new mongoose.Schema({
         maxlength: [600, 'Case note cannot exceed 600 characters'],
         default: undefined
     },
+    // The hospital raised the hourly rate to fill the duty. rateRaise is the
+    // latest raise; rateRaises keeps every one.
+    rateRaise: {
+        type: {
+            _id: false,
+            previousRate: Number,
+            raisedAt: Date,
+            by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+        },
+        default: undefined
+    },
+    rateRaises: {
+        type: [{
+            _id: false,
+            previousRate: Number,
+            newRate: Number,
+            raisedAt: Date,
+            by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+        }],
+        default: undefined
+    },
     offeredRate: {
         type: Number,
         min: [0, 'Offered rate cannot be negative']

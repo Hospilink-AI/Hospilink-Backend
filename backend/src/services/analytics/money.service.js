@@ -29,13 +29,17 @@ const boostExtra = (duty) => (duty.autoRelist?.rateBoostApplied && duty.autoReli
     ? Math.max(0, (duty.offeredRate - duty.autoRelist.originalOfferedRate) * dutyHours(duty))
     : 0);
 
+// Extra paid because the hospital raised the rate to fill the duty
+const raiseExtra = (duty) => sum((duty.rateRaises || []).map(r =>
+    Math.max(0, ((r.newRate || 0) - (r.previousRate || 0)) * dutyHours(duty))));
+
 class MoneyAnalytics {
     async build(period, filters) {
         const [posted, completed] = await Promise.all([
             loadDuties('createdAt', period.compareStart, period.end, filters, 'createdAt status assignedTo totalPayment cancellation.cancelledBy'),
             loadDuties(
                 'completedAt', period.compareStart, period.end, filters,
-                'completedAt offeredRate totalPayment urgency staffRole hospital assignedTo isPaid paymentMethod autoRelist.rateBoostApplied autoRelist.originalOfferedRate',
+                'completedAt offeredRate totalPayment urgency staffRole hospital assignedTo isPaid paymentMethod autoRelist.rateBoostApplied autoRelist.originalOfferedRate rateRaises',
                 { status: 'completed' }
             )
         ]);
@@ -57,6 +61,7 @@ class MoneyAnalytics {
                 averageDutyValue: completedRows.length ? sum(completedRows.map(d => d.totalPayment)) / completedRows.length : null,
                 emergencyPremium: emergencyRate && normalRate ? round(emergencyRate / normalRate - 1, 4) : null,
                 boostSpend: sum(completedRows.map(boostExtra)),
+                raiseSpend: sum(completedRows.map(raiseExtra)),
                 paidConfirmedShare: ratio(completedRows.filter(d => d.isPaid === true).length, completedRows.length),
                 unconfirmedShare: ratio(completedRows.filter(d => d.isPaid === null || d.isPaid === undefined).length, completedRows.length)
             };
@@ -79,6 +84,7 @@ class MoneyAnalytics {
             tile('averageDutyValue', 'Average completed duty value', cur.averageDutyValue, prev.averageDutyValue, 'inr'),
             tile('emergencyPremium', 'Emergency rate premium', cur.emergencyPremium, prev.emergencyPremium, 'ratio'),
             tile('boostSpend', 'Extra paid through rate boosts', cur.boostSpend, prev.boostSpend, 'inr'),
+            tile('raiseSpend', 'Extra paid through rate raises', cur.raiseSpend, prev.raiseSpend, 'inr'),
             tile('paidConfirmedShare', 'Completed duties confirmed paid', cur.paidConfirmedShare, prev.paidConfirmedShare, 'ratio'),
             tile('commission', 'Platform commission', revenueCur.commission, revenuePrev.commission, 'inr', revenueExtra),
             tile('netRevenue', 'Net platform revenue', revenueCur.netRevenue, revenuePrev.netRevenue, 'inr', revenueExtra),
@@ -146,7 +152,7 @@ class MoneyAnalytics {
 
     _gmvTrend(posted, completed, period) {
         const postedSeries = seriesFromRows(posted.filter(d => !wasWithdrawn(d)), d => d.createdAt, period, { gmvPosted: d => d.totalPayment });
-        const completedSeries = seriesFromRows(completed, d => d.completedAt, period, { gmvCompleted: d => d.totalPayment, boostSpend: boostExtra });
+        const completedSeries = seriesFromRows(completed, d => d.completedAt, period, { gmvCompleted: d => d.totalPayment, boostSpend: boostExtra, raiseSpend: raiseExtra });
         return postedSeries.map((row, i) => ({ ...row, ...completedSeries[i] }));
     }
 
