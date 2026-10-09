@@ -502,7 +502,9 @@ class ProfileService {
                             assignedTo: raw._id,
                             status: { $in: ['assigned', 'enroute', 'in-progress'] }
                         }),
-                        Document.findOne({ userId }).lean()
+                        Document.findOne({ userId })
+                            .select('documents.isDeleted documents.verificationStatus')
+                            .lean()
                     ]);
 
                     // Verified docs count
@@ -544,6 +546,9 @@ class ProfileService {
                         isProfileComplete: raw.isProfileComplete,
                         isDocumentsUploaded: raw.isDocumentsUploaded ?? false,
                         verificationStatus: raw.verificationStatus,
+                        isPhoneVerified: raw.isPhoneVerified === true,
+                        rejectionReason: raw.verificationStatus === 'rejected' ? (raw.rejectionReason || null) : null,
+                        verifiedAt: raw.verifiedAt || null,
                         resumeAnalysis: raw.resumeAnalysis?.analyzedAt ? raw.resumeAnalysis : null,
                         profileCompletion,
                         activeApplications,
