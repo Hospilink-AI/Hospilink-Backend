@@ -944,16 +944,39 @@ const validateDutyStatusChange = (req, res, next) => {
 
 
 // Validation for requesting a Start OTP (staff taps "Get OTP" within range of the hospital)
+// Optional { latitude, longitude } the app sends with the start code calls, used
+// when the live position from the socket is missing or stale. Both or neither.
+const startCodeLocationErrors = (body) => {
+    const errors = [];
+    const hasLat = body.latitude !== undefined;
+    const hasLng = body.longitude !== undefined;
+    if (!hasLat && !hasLng) return errors;
+    if (hasLat !== hasLng) {
+        errors.push('Send both latitude and longitude, or neither');
+        return errors;
+    }
+    if (typeof body.latitude !== 'number' || !Number.isFinite(body.latitude) || body.latitude < -90 || body.latitude > 90) {
+        errors.push('Latitude must be a number between -90 and 90');
+    }
+    if (typeof body.longitude !== 'number' || !Number.isFinite(body.longitude) || body.longitude < -180 || body.longitude > 180) {
+        errors.push('Longitude must be a number between -180 and 180');
+    }
+    return errors;
+};
+
 const validateRequestStartOtp = (req, res, next) => {
     const errors = [];
+    const body = req.body || {};
 
-    const allowedFields = [];
-    const receivedFields = Object.keys(req.body);
+    const allowedFields = ['latitude', 'longitude'];
+    const receivedFields = Object.keys(body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
 
     if (unexpectedFields.length > 0) {
         errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
     }
+
+    errors.push(...startCodeLocationErrors(body));
 
     if (errors.length > 0) {
         return res.status(400).json({
@@ -973,7 +996,7 @@ const validateVerifyStartOtp = (req, res, next) => {
     const { otp } = req.body;
     const errors = [];
 
-    const allowedFields = ['otp'];
+    const allowedFields = ['otp', 'latitude', 'longitude'];
     const receivedFields = Object.keys(req.body);
     const unexpectedFields = receivedFields.filter(field => !allowedFields.includes(field));
 
@@ -984,6 +1007,8 @@ const validateVerifyStartOtp = (req, res, next) => {
     if (!otp || !/^\d{6}$/.test(otp)) {
         errors.push('OTP must be exactly 6 digits');
     }
+
+    errors.push(...startCodeLocationErrors(req.body));
 
     if (errors.length > 0) {
         return res.status(400).json({

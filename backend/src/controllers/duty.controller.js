@@ -491,7 +491,10 @@ exports.requestStartOtp = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
-    const { alreadyInProgress, expiresAt } = await DutyService.requestStartOtp(id, userId);
+    const { latitude, longitude } = req.body || {};
+    const sentLocation = typeof latitude === 'number' ? { latitude, longitude } : null;
+
+    const { alreadyInProgress, expiresAt } = await DutyService.requestStartOtp(id, userId, sentLocation);
 
     res.status(200).json({
         success: true,
@@ -507,10 +510,11 @@ exports.requestStartOtp = asyncHandler(async (req, res) => {
 
 exports.verifyStartOtp = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { otp } = req.body;
+    const { otp, latitude, longitude } = req.body;
     const userId = req.user.id;
+    const sentLocation = typeof latitude === 'number' ? { latitude, longitude } : null;
 
-    const duty = await DutyService.verifyStartOtp(id, userId, otp);
+    const duty = await DutyService.verifyStartOtp(id, userId, otp, sentLocation);
 
     // Emit on-site notification to hospital + in-progress notification to staff
     try {

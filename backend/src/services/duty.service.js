@@ -93,6 +93,17 @@ async function releaseDutyLock(dutyId, staffId) {
     }
 }
 
+// The live position from the socket when it is fresh, otherwise the position
+// the app sent with the request
+async function resolveStaffLocation(staffUserId, sentLocation) {
+    const live = await getRecentStaffLocation(staffUserId);
+    if (live) return live;
+    if (sentLocation && typeof sentLocation.latitude === 'number' && typeof sentLocation.longitude === 'number') {
+        return { latitude: sentLocation.latitude, longitude: sentLocation.longitude, timestamp: Date.now(), source: 'request' };
+    }
+    return null;
+}
+
 async function getRecentStaffLocation(staffUserId) {
     try {
         const dashboardLocation = await DashboardService.getDashboardLocation(staffUserId);
@@ -2904,7 +2915,7 @@ class DutyService {
     // Re-checks the geofence server-side against the submitted coordinates, mints a Start OTP,
     // and sends it via SMS to the hospital's registered phone number. The hospital reads the
     // code aloud to the staff member, who then submits it via verify-start-otp.
-    async requestStartOtp(dutyId, userId) {
+    async requestStartOtp(dutyId, userId, sentLocation = null) {
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {
             throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
@@ -2966,7 +2977,7 @@ class DutyService {
             throw new ValidationError('Hospital location is not configured — contact support');
         }
 
-        const staffLocation = await getRecentStaffLocation(userId);
+        const staffLocation = await resolveStaffLocation(userId, sentLocation);
         if (!staffLocation) {
             throw new ValidationError('Unable to determine your current location. Ensure the app is online and sharing live GPS to the server.');
         }
@@ -3036,7 +3047,7 @@ class DutyService {
     // Staff submits the Start OTP (read out by the hospital) along with their current
     // coordinates. Both the OTP and a fresh geofence check must pass to move 'enroute' ->
     // 'in-progress'. Wrong OTP or out-of-range counts toward the shared lockout counter.
-    async verifyStartOtp(dutyId, userId, otp) {
+    async verifyStartOtp(dutyId, userId, otp, sentLocation = null) {
         const medicalStaff = await MedicalStaff.findOne({ user: userId });
         if (!medicalStaff) {
             throw new NotFoundError('Medical staff profile not found. Please complete your profile first.');
@@ -3077,7 +3088,7 @@ class DutyService {
             throw new ValidationError('Hospital location is not configured — contact support');
         }
 
-        const staffLocation = await getRecentStaffLocation(userId);
+        const staffLocation = await resolveStaffLocation(userId, sentLocation);
         if (!staffLocation) {
             throw new ValidationError('Unable to determine your current location. Ensure the app is online and sharing live GPS to the server.');
         }
