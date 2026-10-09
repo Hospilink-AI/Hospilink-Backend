@@ -8,7 +8,7 @@ const {
     tile, ratio, round, median, countBy, seriesFromRows
 } = require('../../utils/analytics.helper');
 
-const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegex = require('../../utils/escapeRegex');
 const exact = (value) => ({ $regex: `^${escapeRegex(value.trim())}$`, $options: 'i' });
 
 const RATING_BANDS = [

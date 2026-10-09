@@ -12,7 +12,7 @@ const EARTH_RADIUS_KM = 6371;
 const LIVE_GEO_KEY = 'staff:live';
 const liveLocationKey = (userId) => `dashboard:location:${userId}`;
 
-const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegex = require('../utils/escapeRegex');
 
 function boundingBox(lat, lng, radiusKm) {
     const latDelta = radiusKm / KM_PER_DEGREE;

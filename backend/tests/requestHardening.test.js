@@ -51,7 +51,7 @@ describe('patterns in admin filters', () => {
         const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
         expect(read('src/models/ActivityLog.js')).not.toContain('new RegExp(filters.location');
         expect(read('src/utils/activityLog.helpers.js')).not.toContain('new RegExp(filters.location');
-        expect(read('src/services/admin.service.js')).toContain('new RegExp(`^${escapeRegex(r.trim())}$`');
+        expect(read('src/services/admin/staff.js')).toContain('new RegExp(`^${escapeRegex(r.trim())}$`');
     });
 });
 

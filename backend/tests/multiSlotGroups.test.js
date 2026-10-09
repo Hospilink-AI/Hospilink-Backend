@@ -19,7 +19,7 @@ describe('multi-slot posts', () => {
     it('the hospital and admin create paths give the slots one groupId', () => {
         const fs = require('fs');
         const path = require('path');
-        for (const file of ['../src/controllers/duty.controller.js', '../src/services/admin.service.js']) {
+        for (const file of ['../src/controllers/duty.controller.js', '../src/services/admin/duties.js']) {
             const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
             expect(source).toMatch(/if \(numberOfDuties > 1\) \{\s+dutyData\.groupId = new mongoose\.Types\.ObjectId\(\);/);
         }

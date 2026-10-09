@@ -62,7 +62,8 @@ describe('hot paths', () => {
     it('availability, privacy, blocking and calendar changes never scan the keyspace', () => {
         const fs = require('fs');
         const path = require('path');
-        for (const file of ['services/profile.service.js', 'services/admin.service.js', 'services/block.service.js', 'services/dutyCalendar.service.js']) {
+        const adminFiles = fs.readdirSync(path.join(__dirname, '../src/services/admin')).map(f => `services/admin/${f}`);
+        for (const file of ['services/profile.service.js', 'services/admin.service.js', ...adminFiles, 'services/block.service.js', 'services/dutyCalendar.service.js']) {
             const source = fs.readFileSync(path.join(__dirname, '../src', file), 'utf8');
             expect({ file, scans: /invalidatePattern\(/.test(source) }).toEqual({ file, scans: false });
         }
