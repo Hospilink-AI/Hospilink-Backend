@@ -45,6 +45,7 @@ const {
 
 // Database storage operations
 const storage = require("./modules/storage");
+const { withSource } = require("./utils/jobSource");
 const googleSheetsService = require("./modules/google_sheets"); // GoogleSheetsService instance
 const saveJobsToUserExcel = (username, jobs) => googleSheetsService.saveJobsToUserExcel(username, jobs);
 const connectDb = storage.connect;
@@ -462,7 +463,7 @@ app.get(
                   nextPage: pagination.nextPage,
                   prevPage: pagination.prevPage,
               },
-              jobs,
+              jobs: (jobs || []).map(withSource),
           },
       });
     } catch (error) {
@@ -496,7 +497,7 @@ app.get("/v1/jobs/:id", authenticateMedicalStaff, async (req, res) => {
 
     res.json({
       status: "success",
-      data: job,
+      data: withSource(job),
     });
   } catch (error) {
     logger.error("Job fetch failed", {
