@@ -1,4 +1,5 @@
 const Ticket = require('../models/Ticket');
+const logger = require('../utils/logger');
 const TicketConversation = require('../models/TicketConversation');
 const Duty = require('../models/Duty');
 const JobApplication = require('../models/JobApplication');
@@ -36,6 +37,10 @@ const SUB_ROLE_FLOOR = { tech_support: 1, operations_manager: 2, super_admin: 3 
 // admin work queue (list/claim/reassign/recategorize/priority-override) and
 // raiser withdraw. Still no respondent flow, decision/approval, or
 // consequence engine — those need the SLA-pause machinery and land next.
+// Sweeps load only the fields they need, so a save must check only what the
+// sweep changed (validators on fields it didn't load would see them missing)
+const SWEEP_SAVE = { validateModifiedOnly: true };
+
 class TicketService {
     // Best-effort context snapshot at creation time (spec §04 linkedContext,
     // §06.06 "context is fetched, never asked for"). Deliberately narrow
@@ -927,41 +932,46 @@ class TicketService {
             respondentNotifiedAt: { $ne: null },
             'respondentStatement.submittedAt': null,
             'respondentStatement.lapsed': false
-        }).select('ticketId raisedAgainst respondentNotifiedAt respondentDeadline reminders status slaPauseStartedAt slaPausedMs statusHistory');
+        }).select('ticketId resolutionClass raisedAgainst respondentNotifiedAt respondentDeadline reminders status slaPauseStartedAt slaPausedMs statusHistory');
 
         let remindersSent = 0;
         let lapsed = 0;
 
         for (const ticket of pending) {
-            const windowMs = ticket.respondentDeadline.getTime() - ticket.respondentNotifiedAt.getTime();
-            const halfwayAt = new Date(ticket.respondentNotifiedAt.getTime() + windowMs / 2);
-            const twoHoursLeftAt = new Date(ticket.respondentDeadline.getTime() - 2 * 60 * 60 * 1000);
+            try {
+                const windowMs = ticket.respondentDeadline.getTime() - ticket.respondentNotifiedAt.getTime();
+                const halfwayAt = new Date(ticket.respondentNotifiedAt.getTime() + windowMs / 2);
+                const twoHoursLeftAt = new Date(ticket.respondentDeadline.getTime() - 2 * 60 * 60 * 1000);
 
-            if (now >= ticket.respondentDeadline) {
-                ticket.respondentStatement.lapsed = true;
-                if (ticket.status === 'AWAITING_RESPONDENT') {
-                    if (ticket.slaPauseStartedAt) {
-                        ticket.slaPausedMs += now.getTime() - ticket.slaPauseStartedAt.getTime();
-                        ticket.slaPauseStartedAt = null;
+                if (now >= ticket.respondentDeadline) {
+                    ticket.respondentStatement.lapsed = true;
+                    if (ticket.status === 'AWAITING_RESPONDENT') {
+                        if (ticket.slaPauseStartedAt) {
+                            ticket.slaPausedMs += now.getTime() - ticket.slaPauseStartedAt.getTime();
+                            ticket.slaPauseStartedAt = null;
+                        }
+                        ticket.status = 'IN_REVIEW';
                     }
-                    ticket.status = 'IN_REVIEW';
+                    ticket.pushHistory(ticket.status, 'system', 'Response window lapsed — no reply received');
+                    await ticket.save(SWEEP_SAVE);
+                    lapsed++;
+                    continue;
                 }
-                ticket.pushHistory(ticket.status, 'system', 'Response window lapsed — no reply received');
-                await ticket.save();
-                lapsed++;
-                continue;
-            }
 
-            if (!ticket.reminders.respondentTwoHoursLeft && now >= twoHoursLeftAt) {
-                ticket.reminders.respondentTwoHoursLeft = true;
-                await ticket.save();
-                notificationEmitter.emitResponseWindowClosing(ticket, '2 hours').catch(err => console.error('emitResponseWindowClosing failed:', err));
-                remindersSent++;
-            } else if (!ticket.reminders.respondentHalfWindow && now >= halfwayAt) {
-                ticket.reminders.respondentHalfWindow = true;
-                await ticket.save();
-                notificationEmitter.emitResponseWindowClosing(ticket, 'half the response window').catch(err => console.error('emitResponseWindowClosing failed:', err));
-                remindersSent++;
+                if (!ticket.reminders.respondentTwoHoursLeft && now >= twoHoursLeftAt) {
+                    ticket.reminders.respondentTwoHoursLeft = true;
+                    await ticket.save(SWEEP_SAVE);
+                    notificationEmitter.emitResponseWindowClosing(ticket, '2 hours').catch(err => console.error('emitResponseWindowClosing failed:', err));
+                    remindersSent++;
+                } else if (!ticket.reminders.respondentHalfWindow && now >= halfwayAt) {
+                    ticket.reminders.respondentHalfWindow = true;
+                    await ticket.save(SWEEP_SAVE);
+                    notificationEmitter.emitResponseWindowClosing(ticket, 'half the response window').catch(err => console.error('emitResponseWindowClosing failed:', err));
+                    remindersSent++;
+                }
+            } catch (err) {
+                // One ticket that can't be saved must not stop the sweep
+                logger.error(`Ticket sweep skipped ${ticket.ticketId}: ${err.message}`);
             }
         }
 
@@ -984,38 +994,43 @@ class TicketService {
         const pending = await Ticket.find({
             status: 'AWAITING_RAISER',
             infoRequestedAt: { $ne: null }
-        }).select('ticketId raisedBy infoRequestedAt reminders slaPauseStartedAt slaPausedMs statusHistory');
+        }).select('ticketId resolutionClass raisedBy infoRequestedAt reminders slaPauseStartedAt slaPausedMs statusHistory');
 
         let remindersSent = 0;
         let autoClosed = 0;
 
         for (const ticket of pending) {
-            const day1At = new Date(ticket.infoRequestedAt.getTime() + 1 * 24 * 60 * 60 * 1000);
-            const day3At = new Date(ticket.infoRequestedAt.getTime() + 3 * 24 * 60 * 60 * 1000);
-            const deadline = new Date(ticket.infoRequestedAt.getTime() + autoCloseDays * 24 * 60 * 60 * 1000);
+            try {
+                const day1At = new Date(ticket.infoRequestedAt.getTime() + 1 * 24 * 60 * 60 * 1000);
+                const day3At = new Date(ticket.infoRequestedAt.getTime() + 3 * 24 * 60 * 60 * 1000);
+                const deadline = new Date(ticket.infoRequestedAt.getTime() + autoCloseDays * 24 * 60 * 60 * 1000);
 
-            if (now >= deadline) {
-                if (ticket.slaPauseStartedAt) {
-                    ticket.slaPausedMs += now.getTime() - ticket.slaPauseStartedAt.getTime();
-                    ticket.slaPauseStartedAt = null;
+                if (now >= deadline) {
+                    if (ticket.slaPauseStartedAt) {
+                        ticket.slaPausedMs += now.getTime() - ticket.slaPauseStartedAt.getTime();
+                        ticket.slaPauseStartedAt = null;
+                    }
+                    ticket.status = 'AUTO_CLOSED';
+                    ticket.pushHistory('AUTO_CLOSED', 'system', `Auto-closed — no response to information request after ${autoCloseDays} days`);
+                    await ticket.save(SWEEP_SAVE);
+                    autoClosed++;
+                    continue;
                 }
-                ticket.status = 'AUTO_CLOSED';
-                ticket.pushHistory('AUTO_CLOSED', 'system', `Auto-closed — no response to information request after ${autoCloseDays} days`);
-                await ticket.save();
-                autoClosed++;
-                continue;
-            }
 
-            if (!ticket.reminders.raiserDay3 && now >= day3At) {
-                ticket.reminders.raiserDay3 = true;
-                await ticket.save();
-                notificationEmitter.emitInfoRequestReminder(ticket, '3 days ago').catch(err => console.error('emitInfoRequestReminder failed:', err));
-                remindersSent++;
-            } else if (!ticket.reminders.raiserDay1 && now >= day1At) {
-                ticket.reminders.raiserDay1 = true;
-                await ticket.save();
-                notificationEmitter.emitInfoRequestReminder(ticket, '1 day ago').catch(err => console.error('emitInfoRequestReminder failed:', err));
-                remindersSent++;
+                if (!ticket.reminders.raiserDay3 && now >= day3At) {
+                    ticket.reminders.raiserDay3 = true;
+                    await ticket.save(SWEEP_SAVE);
+                    notificationEmitter.emitInfoRequestReminder(ticket, '3 days ago').catch(err => console.error('emitInfoRequestReminder failed:', err));
+                    remindersSent++;
+                } else if (!ticket.reminders.raiserDay1 && now >= day1At) {
+                    ticket.reminders.raiserDay1 = true;
+                    await ticket.save(SWEEP_SAVE);
+                    notificationEmitter.emitInfoRequestReminder(ticket, '1 day ago').catch(err => console.error('emitInfoRequestReminder failed:', err));
+                    remindersSent++;
+                }
+            } catch (err) {
+                // One ticket that can't be saved must not stop the sweep
+                logger.error(`Ticket sweep skipped ${ticket.ticketId}: ${err.message}`);
             }
         }
 
@@ -1040,22 +1055,27 @@ class TicketService {
             status: 'IN_REVIEW',
             assignedTo: { $ne: null },
             claimedAt: { $ne: null }
-        }).select('ticketId priority priorityOverride assignedTo claimedAt statusHistory');
+        }).select('ticketId resolutionClass priority priorityOverride assignedTo claimedAt statusHistory');
 
         let returned = 0;
 
         for (const ticket of claimed) {
-            const effectivePriority = ticket.priorityOverride?.value || ticket.priority;
-            const timeoutMinutes = CLAIM_TIMEOUT_MINUTES_BY_PRIORITY[effectivePriority];
-            const deadline = new Date(ticket.claimedAt.getTime() + timeoutMinutes * 60 * 1000);
+            try {
+                const effectivePriority = ticket.priorityOverride?.value || ticket.priority;
+                const timeoutMinutes = CLAIM_TIMEOUT_MINUTES_BY_PRIORITY[effectivePriority];
+                const deadline = new Date(ticket.claimedAt.getTime() + timeoutMinutes * 60 * 1000);
 
-            if (now >= deadline) {
-                ticket.assignedTo = null;
-                ticket.claimedAt = null;
-                ticket.status = 'NEW';
-                ticket.pushHistory('NEW', 'system', `Returned to queue — unclaimed/untouched for ${timeoutMinutes} minutes (${effectivePriority})`);
-                await ticket.save();
-                returned++;
+                if (now >= deadline) {
+                    ticket.assignedTo = null;
+                    ticket.claimedAt = null;
+                    ticket.status = 'NEW';
+                    ticket.pushHistory('NEW', 'system', `Returned to queue — unclaimed/untouched for ${timeoutMinutes} minutes (${effectivePriority})`);
+                    await ticket.save(SWEEP_SAVE);
+                    returned++;
+                }
+            } catch (err) {
+                // One ticket that can't be saved must not stop the sweep
+                logger.error(`Ticket sweep skipped ${ticket.ticketId}: ${err.message}`);
             }
         }
 
