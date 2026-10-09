@@ -34,6 +34,8 @@ jobs:
   backend-checks:
     name: Backend lint and tests
     runs-on: ubuntu-latest
+    env:
+      MONGOMS_DISTRO: ubuntu-22.04
     defaults:
       run:
         working-directory: backend
@@ -50,6 +52,13 @@ jobs:
 
       - name: Install
         run: npm ci
+
+      # In-memory MongoDB for the real-database tests (same major version as Atlas)
+      - name: Cache MongoDB test binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-8.0.4-ubuntu-22.04
 
       - name: Lint (errors fail the build)
         run: npm run lint

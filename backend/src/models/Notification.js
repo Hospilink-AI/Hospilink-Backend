@@ -61,10 +61,11 @@ const notificationSchema = new mongoose.Schema({
         default: null,
         index: true
     },
+    // Indexed by the 90-day expiry index below (a plain index here would
+    // block it from being built)
     createdAt: {
         type: Date,
-        default: Date.now,
-        index: true
+        default: Date.now
     }
 }, {
     timestamps: false // We're managing createdAt manually
@@ -77,12 +78,11 @@ notificationSchema.index({ recipient: 1, deliveredAt: 1 }); // For undelivered q
 
 // TTL index - automatically delete notifications older than 90 days
 // This prevents the notifications collection from growing indefinitely
+// Default name (createdAt_1), so an existing plain createdAt_1 index can be
+// turned into this one in place (collMod) instead of dropped
 notificationSchema.index(
-    { createdAt: 1 }, 
-    { 
-        expireAfterSeconds: 90 * 24 * 60 * 60, // 90 days in seconds
-        name: 'notification_ttl_index'
-    }
+    { createdAt: 1 },
+    { expireAfterSeconds: 90 * 24 * 60 * 60 } // 90 days in seconds
 );
 
 const Notification = mongoose.model('Notification', notificationSchema);

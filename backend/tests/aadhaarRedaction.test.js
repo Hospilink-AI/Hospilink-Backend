@@ -1,6 +1,6 @@
 // Aadhaar card images are stored with the first 8 digits blacked out
 // Image and PDF work loads native libraries on first use
-jest.setTimeout(30000);
+jest.setTimeout(90000);
 jest.mock('../src/utils/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
 
 // Vision is replaced by what this test draws: the text and where each word is
@@ -17,6 +17,12 @@ const sharp = require('sharp');
 const { createCanvas } = require('canvas');
 const { PDFDocument } = require('pdf-lib');
 const { redact, boxesToCover, countNumbersInText, RedactionError } = require('../src/services/aadhaarRedaction.service');
+
+// Load the native image libraries once, before the timed tests
+beforeAll(async () => {
+    await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"/>')).png().toBuffer();
+    createCanvas(2, 2).toBuffer('image/png');
+});
 
 const box = (text, x0, y0, x1, y1) => ({
     description: text,
