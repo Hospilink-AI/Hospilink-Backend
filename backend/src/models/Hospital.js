@@ -242,7 +242,6 @@ const hospitalSchema = new mongoose.Schema({
 
 
 // Index for faster queries
-hospitalSchema.index({ user: 1 }); 
 hospitalSchema.index({ 'coordinates.coordinates.longitude': 1 });
 hospitalSchema.index({ 'coordinates.coordinates.latitude': 1 });
 hospitalSchema.index({ servicesAvailable: 1 });

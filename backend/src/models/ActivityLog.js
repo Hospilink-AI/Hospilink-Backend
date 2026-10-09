@@ -6,11 +6,12 @@ const {
 } = require('../utils/activityLog.constants');
 
 const activityLogSchema = new mongoose.Schema({
+    // Indexed by the 90-day expiry index below (a plain index here would
+    // block it from being built)
     timestamp: {
         type: Date,
         default: Date.now,
-        required: true,
-        index: true
+        required: true
     },
     actor: {
         userId: {

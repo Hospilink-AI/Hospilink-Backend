@@ -357,7 +357,6 @@ medicalStaffSchema.pre('save', function (next) {
 
 
 // Basic single-field indexes
-medicalStaffSchema.index({ user: 1 });
 medicalStaffSchema.index({ city: 1 });
 medicalStaffSchema.index({ blockedHospitals: 1 }, { sparse: true });
 medicalStaffSchema.index({ state: 1 });
