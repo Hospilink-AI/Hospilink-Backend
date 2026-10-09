@@ -150,7 +150,13 @@ const DEFAULTS = {
     // assigned. Contacts stay hidden unless switched on; positions are
     // rounded to this many km (0 shows the exact point and street address).
     'privacy.showContactOnMap': false,
-    'privacy.mapLocationPrecisionKm': 1
+    'privacy.mapLocationPrecisionKm': 1,
+
+    // "Market rate" the hospital app suggests when posting an RMO duty
+    'pricing.rmoCasualtyTotal': 1400,
+    'pricing.rmoCasualtyHours': 8,
+    'pricing.rmoIcuTotal': 1800,
+    'pricing.rmoIcuHours': 8
 };
 
 const CACHE_TTL_SECONDS = 300;

@@ -23,8 +23,8 @@ const dutyOfferService = require('../services/dutyOffer.service');
 const blockService = require('../services/block.service');
 const dutyInviteService = require('../services/dutyInvite.service');
 const systemConfigService = require('../services/systemConfig.service');
-const { anesthesiaFields } = require('../utils/dutyPricing');
 const dutyRateRaiseService = require('../services/dutyRateRaise.service');                    
+const { anesthesiaFields, pricingForHospitals } = require('../utils/dutyPricing');
 
 // Extend logger with debug method
 logger.debug = (message) => {
@@ -773,6 +773,16 @@ exports.raiseRate = asyncHandler(async (req, res) => {
         success: true,
         message: 'Rate raised',
         duty
+    });
+});
+
+
+
+// GET /api/hospitals/current/pricing
+exports.getPricing = asyncHandler(async (req, res) => {
+    res.status(200).json({
+        success: true,
+        data: await pricingForHospitals()
     });
 });
 

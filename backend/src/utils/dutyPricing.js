@@ -88,9 +88,30 @@ function anesthesiaFields(body) {
     };
 }
 
+const RECOMMENDATION_KEYS = ['pricing.rmoCasualtyTotal', 'pricing.rmoCasualtyHours', 'pricing.rmoIcuTotal', 'pricing.rmoIcuHours'];
+
+// Price rules and market-rate suggestions for the hospital's Create duty screen
+async function pricingForHospitals() {
+    const systemConfigService = require('../services/systemConfig.service');
+    const cfg = await systemConfigService.getManyEffective(RECOMMENDATION_KEYS);
+    return {
+        minTotal: MIN_TOTAL,
+        maxTotal: MAX_TOTAL,
+        minHours: MIN_HOURS,
+        maxHours: MAX_HOURS,
+        recommendations: {
+            rmo: {
+                casualty: { total: cfg['pricing.rmoCasualtyTotal'], hours: cfg['pricing.rmoCasualtyHours'] },
+                icu: { total: cfg['pricing.rmoIcuTotal'], hours: cfg['pricing.rmoIcuHours'] }
+            }
+        }
+    };
+}
+
 module.exports = {
     anesthesiaErrors,
     anesthesiaFields,
+    pricingForHospitals,
     MIN_TOTAL,
     MAX_TOTAL,
     MIN_HOURS,
