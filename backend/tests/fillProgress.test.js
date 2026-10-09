@@ -1,4 +1,4 @@
-jest.mock('../src/utils/logger', () => ({ error: () => {}, info: () => {}, warn: () => {} }));
+jest.mock('../src/utils/logger', () => ({ error: () => {}, info: () => {}, warn: () => {}, debug: () => {} }));
 jest.mock('../src/config/redis', () => ({ getClientAsync: async () => ({}) }));
 
 const Duty = require('../src/models/Duty');

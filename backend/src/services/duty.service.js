@@ -1,3 +1,4 @@
+const logger = require('../utils/logger');
 const Duty = require('../models/Duty');
 const Hospital = require('../models/Hospital');
 const MedicalStaff = require('../models/MedicalStaff');
@@ -631,7 +632,7 @@ class DutyService {
             return upcomingDuties;
         }
 
-        console.log(`[UpcomingDuties] Using ${locationSource} location for staff ${userId}: lat=${staffLat}, lng=${staffLng}`);
+        logger.debug(`[UpcomingDuties] Using ${locationSource} location for staff ${userId}: lat=${staffLat}, lng=${staffLng}`);
 
         // --- Step 1: Separate duties with and without coordinates ---
         const dutiesWithCoords = [];
@@ -648,7 +649,7 @@ class DutyService {
             }
         }
 
-        console.log(`[UpcomingDuties] Duties with coordinates: ${dutiesWithCoords.length} | Without coordinates: ${dutiesWithoutCoords.length}`);
+        logger.debug(`[UpcomingDuties] Duties with coordinates: ${dutiesWithCoords.length} | Without coordinates: ${dutiesWithoutCoords.length}`);
 
         // --- Step 2: Build destinations array for batch call ---
         const destinations = dutiesWithCoords.map(duty => ({
@@ -659,7 +660,7 @@ class DutyService {
 
         const batchSize = 25;
         const expectedApiCalls = Math.ceil(destinations.length / batchSize);
-        console.log(`[UpcomingDuties] Google Maps batch call — destinations: ${destinations.length} | batch size: ${batchSize} | expected API calls: ${expectedApiCalls}`);
+        logger.debug(`[UpcomingDuties] Google Maps batch call — destinations: ${destinations.length} | batch size: ${batchSize} | expected API calls: ${expectedApiCalls}`);
 
         // --- Step 3: Single batch call instead of N individual calls ---
         let resultMap = new Map();
@@ -669,7 +670,7 @@ class DutyService {
             ({ resultMap, totalApiCalls } = await geocodingService.calculateBatchDistanceAndETA(
                 staffLat, staffLng, destinations
             ));
-            console.log(`[UpcomingDuties] Google Maps API calls made: ${totalApiCalls} | successful results: ${resultMap.size}/${destinations.length}`);
+            logger.debug(`[UpcomingDuties] Google Maps API calls made: ${totalApiCalls} | successful results: ${resultMap.size}/${destinations.length}`);
         } catch (error) {
             console.error(`[UpcomingDuties] Batch distance calculation failed: ${error.message}`);
         }
@@ -707,12 +708,12 @@ class DutyService {
             return a.startTime.localeCompare(b.startTime);
         });
 
-        console.log(`[UpcomingDuties] ✓ Summary:`);
-        console.log(`  DB fetched           : ${duties.length}`);
-        console.log(`  After time filter    : ${upcomingDuties.length}`);
-        console.log(`  With coordinates     : ${dutiesWithCoords.length}`);
-        console.log(`  Without coordinates  : ${dutiesWithoutCoords.length}`);
-        console.log(`  Google Maps calls    : ${totalApiCalls}`);
+        logger.debug(`[UpcomingDuties] ✓ Summary:`);
+        logger.debug(`  DB fetched           : ${duties.length}`);
+        logger.debug(`  After time filter    : ${upcomingDuties.length}`);
+        logger.debug(`  With coordinates     : ${dutiesWithCoords.length}`);
+        logger.debug(`  Without coordinates  : ${dutiesWithoutCoords.length}`);
+        logger.debug(`  Google Maps calls    : ${totalApiCalls}`);
 
         return dutiesWithDistance;
     }
@@ -914,7 +915,7 @@ class DutyService {
                             // Notify hospital (please confirm) and staff (free to accept new duties)
                             await notificationEmitter.emitDutyPendingConfirmation(duty, staff, hospitalUserId, staffUserId);
                             activityLogEmitter.emitDutyActivity(ACTIVITY_ACTIONS.DUTY_PENDING_CONFIRMATION, duty, SYSTEM_ACTOR).catch(() => {});
-                            console.log(`Pending-confirmation notification sent for duty ${duty._id}`);
+                            logger.debug(`Pending-confirmation notification sent for duty ${duty._id}`);
                         }
                     } catch (notifError) {
                         console.error(`Error sending pending-confirmation notification for duty ${duty._id}:`, notifError);
@@ -1049,7 +1050,7 @@ class DutyService {
                 const staffName = duty.assignedTo?.user?.name || 'Unknown Staff';
                 const hospitalName = duty.hospital?.hospitalLegalName || 'Unknown Hospital';
 
-                console.log(`Marking duty INCOMPLETE: ${hospitalName} - ${duty.staffRole} - ${staffName} (${minutesOverdue}min overdue)`);
+                logger.debug(`Marking duty INCOMPLETE: ${hospitalName} - ${duty.staffRole} - ${staffName} (${minutesOverdue}min overdue)`);
 
                 incompleteDuties.push({
                     dutyId: duty._id,
@@ -1090,12 +1091,12 @@ class DutyService {
             const result = await Duty.bulkWrite(bulkOps);
             markedIncompleteCount = result.modifiedCount;
 
-            console.log(`\n=== INCOMPLETE DUTIES SUMMARY ===`);
-            console.log(`Total duties marked incomplete: ${markedIncompleteCount}`);
+            logger.debug(`\n=== INCOMPLETE DUTIES SUMMARY ===`);
+            logger.debug(`Total duties marked incomplete: ${markedIncompleteCount}`);
             incompleteDuties.forEach(duty => {
-                console.log(`• ${duty.staffName} - ${duty.staffRole} at ${duty.hospitalName} (${duty.minutesOverdue}min overdue)`);
+                logger.debug(`• ${duty.staffName} - ${duty.staffRole} at ${duty.hospitalName} (${duty.minutesOverdue}min overdue)`);
             });
-            console.log(`================================\n`);
+            logger.debug(`================================\n`);
 
             // Tell both sides the duty was closed as incomplete
             for (const duty of noticeDuties) {
@@ -1172,7 +1173,7 @@ class DutyService {
 
                     const hospitalName = reminder.duty.hospital?.hospitalLegalName || 'Hospital';
                     const staffName = reminder.staff.user?.name || 'Staff';
-                    console.log(`Navigation reminder sent: ${staffName} for duty at ${hospitalName} (starts in ${reminder.minutesUntilStart} min)`);
+                    logger.debug(`Navigation reminder sent: ${staffName} for duty at ${hospitalName} (starts in ${reminder.minutesUntilStart} min)`);
                 } catch (notifError) {
                     console.error(`Error sending navigation reminder for duty ${reminder.duty._id}:`, notifError);
                 }
@@ -1500,9 +1501,9 @@ class DutyService {
             : null;
 
         // Role-based authorization
-        console.log(`getDutyDetail called with userRole: "${userRole}" for duty ${dutyId}`);
+        logger.debug(`getDutyDetail called with userRole: "${userRole}" for duty ${dutyId}`);
         if (userRole === 'staff') {
-            console.log('Entering staff block - distance calculation will be performed');
+            logger.debug('Entering staff block - distance calculation will be performed');
             // Find medical staff profile
             const medicalStaff = await MedicalStaff.findOne({ user: userId });
             if (!medicalStaff) {
@@ -1550,7 +1551,7 @@ class DutyService {
                 const staffLng = locationInfo.location.longitude;
                 const locationSource = locationInfo.source; // 'browser' or 'profile'
 
-                console.log(`Staff accessing duty ${duty._id} - using ${locationSource} location:`, {
+                logger.debug(`Staff accessing duty ${duty._id} - using ${locationSource} location:`, {
                     lat: staffLat,
                     lng: staffLng,
                     permissionGranted: locationInfo.permissionGranted
@@ -1565,7 +1566,7 @@ class DutyService {
                     const hospitalLat = duty.hospital.coordinates.coordinates.latitude;
                     const hospitalLng = duty.hospital.coordinates.coordinates.longitude;
 
-                    console.log(`Processing distance for duty ${duty._id}:`, {
+                    logger.debug(`Processing distance for duty ${duty._id}:`, {
                         staffLocation: { lat: staffLat, lng: staffLng },
                         hospitalLocation: { lat: hospitalLat, lng: hospitalLng },
                         hospitalName: duty.hospital.hospitalLegalName,
@@ -1578,7 +1579,7 @@ class DutyService {
                             staffLat, staffLng, hospitalLat, hospitalLng
                         );
 
-                        console.log(`Distance calculation completed for duty ${duty._id}:`, {
+                        logger.debug(`Distance calculation completed for duty ${duty._id}:`, {
                             method: distanceInfo.source,
                             distance: distanceInfo.distanceText,
                             duration: distanceInfo.durationText,
@@ -1650,7 +1651,7 @@ class DutyService {
                 return dutyObject;
             }
         } else if (userRole === 'hospital') {
-            console.log('Entering hospital block - CONDITIONAL distance calculation');
+            logger.debug('Entering hospital block - CONDITIONAL distance calculation');
             // Find hospital profile
             const hospital = await Hospital.findOne({ user: userId });
             if (!hospital) {
@@ -1669,7 +1670,7 @@ class DutyService {
 
             if (shouldShowDistance && duty.assignedTo && duty.assignedTo.user) {
                 try {
-                    console.log(`Hospital viewing assigned duty ${duty._id} - calculating staff distance`);
+                    logger.debug(`Hospital viewing assigned duty ${duty._id} - calculating staff distance`);
 
                     // Get assigned staff's real-time location
                     const locationInfo = await DashboardService.getStaffLocationForDuties(duty.assignedTo.user._id);
@@ -1686,7 +1687,7 @@ class DutyService {
                         staffLat, staffLng, hospitalLat, hospitalLng
                     );
 
-                    console.log(`Hospital distance calculated for duty ${duty._id}:`, {
+                    logger.debug(`Hospital distance calculated for duty ${duty._id}:`, {
                         distance: distanceInfo.distanceText,
                         duration: distanceInfo.durationText,
                         staffLocationSource: locationSource
@@ -1721,7 +1722,7 @@ class DutyService {
                 }
             }
 
-            console.log(`Hospital viewing duty ${duty._id} - no distance calculation (status: ${duty.status})`);
+            logger.debug(`Hospital viewing duty ${duty._id} - no distance calculation (status: ${duty.status})`);
         } else if (userRole === 'admin') {
             // Admin can view any duty — fall through to return below
         } else {
@@ -1752,7 +1753,7 @@ class DutyService {
             const staffLng = locationInfo.location.longitude;
             const locationSource = locationInfo.source;
 
-            console.log(`Using ${locationSource} location for staff ${staffId}:`, {
+            logger.debug(`Using ${locationSource} location for staff ${staffId}:`, {
                 lat: staffLat,
                 lng: staffLng,
                 permissionGranted: locationInfo.permissionGranted
@@ -1764,7 +1765,7 @@ class DutyService {
                 throw new NotFoundError('Staff profile not found');
             }
 
-            console.log(`Processing available duties for staff ${staffId}:`, {
+            logger.debug(`Processing available duties for staff ${staffId}:`, {
                 staffLocation: { lat: staffLat, lng: staffLng },
                 staffRole: staff.jobRole,
                 locationSource: locationSource
@@ -1796,7 +1797,7 @@ class DutyService {
             // Additional safety filter to ensure no expired duties
             const filteredDuties = duties.filter(duty => duty.status === 'available');
 
-            console.log(`Found ${filteredDuties.length} available duties for staff ${staffId} (filtered from ${duties.length} total)`);
+            logger.debug(`Found ${filteredDuties.length} available duties for staff ${staffId} (filtered from ${duties.length} total)`);
 
 
             // Calculate distance for each duty
@@ -1820,7 +1821,7 @@ class DutyService {
                 const hospitalLat = duty.hospital.coordinates.coordinates.latitude;
                 const hospitalLng = duty.hospital.coordinates.coordinates.longitude;
 
-                console.log(`Calculating distance for duty ${duty._id}:`, {
+                logger.debug(`Calculating distance for duty ${duty._id}:`, {
                     hospitalName: duty.hospital.hospitalLegalName,
                     staffLocation: { lat: staffLat, lng: staffLng },
                     hospitalLocation: { lat: hospitalLat, lng: hospitalLng }
@@ -1832,7 +1833,7 @@ class DutyService {
                         staffLat, staffLng, hospitalLat, hospitalLng
                     );
 
-                    console.log(`Distance calculation completed for duty ${duty._id}:`, {
+                    logger.debug(`Distance calculation completed for duty ${duty._id}:`, {
                         method: distanceInfo.source,
                         distance: distanceInfo.distanceText,
                         duration: distanceInfo.durationText
@@ -1867,7 +1868,7 @@ class DutyService {
             // Sort by distance (closest first)
             jobsWithDistance.sort((a, b) => a.distance - b.distance);
 
-            console.log(`Processed ${jobsWithDistance.length} duties with distance information`);
+            logger.debug(`Processed ${jobsWithDistance.length} duties with distance information`);
 
             return {
                 success: true,

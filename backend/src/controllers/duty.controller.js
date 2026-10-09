@@ -27,12 +27,6 @@ const systemConfigService = require('../services/systemConfig.service');
 const dutyRateRaiseService = require('../services/dutyRateRaise.service');                    
 const { anesthesiaFields, pricingForHospitals } = require('../utils/dutyPricing');
 
-// Extend logger with debug method
-logger.debug = (message) => {
-    if (process.env.NODE_ENV === 'development') {
-        console.log(`[DEBUG] ${new Date().toISOString()} - ${message}`);
-    }
-};
 
 
 

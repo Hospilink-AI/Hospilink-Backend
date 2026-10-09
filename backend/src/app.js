@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
+const compression = require("compression");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 require("dotenv").config();
@@ -49,8 +50,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// Request logging
-app.use(morgan("combined"));
+// Gzip JSON over 1 KB: duty lists and feeds shrink several times over on
+// mobile networks. Socket.IO traffic is not affected.
+app.use(compression({ threshold: 1024 }));
+
+// Request logging (load balancer health checks left out)
+app.use(morgan("combined", { skip: (req) => req.path === "/health" }));
 
 // Add specific trust proxy setting
 app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal', '172.16.0.0/12', '192.168.0.0/16', '10.0.0.0/8']);

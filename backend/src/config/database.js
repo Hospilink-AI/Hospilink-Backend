@@ -23,6 +23,13 @@ const connectDB = async () => {
 
       bufferCommands: false, // Disable mongoose buffering to fail fast if not connected
       family: 4, // Force IPv4 to avoid ENOTFOUND errors on some systems
+
+      // Connections per server process. Warm ones avoid a TLS handshake on
+      // the first requests after a deploy; size the max to the Atlas tier
+      // (tasks x maxPoolSize must stay under its connection limit).
+      maxPoolSize: parseInt(process.env.MONGO_MAX_POOL_SIZE, 10) || 100,
+      minPoolSize: parseInt(process.env.MONGO_MIN_POOL_SIZE, 10) || 10,
+      maxIdleTimeMS: 60000,
     };
 
     logger.info("MongoDB initiating new connection...");

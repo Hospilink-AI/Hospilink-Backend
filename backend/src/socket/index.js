@@ -59,7 +59,7 @@ async function initializeSocket(server) {
     io.on('connection', async (socket) => {
         try {
             const user = socket.user;
-            console.log(`User connected: ${user._id} (${user.role})`);
+            logger.debug(`User connected: ${user._id} (${user.role})`);
 
             // Join user to their personal room
             roomManager.joinUserRoom(socket, user._id.toString());
@@ -74,7 +74,7 @@ async function initializeSocket(server) {
             if (user.role === 'admin') {
                 // Join admin to tracking room for real-time updates
                 socket.join('admin_tracking');
-                console.log(`Admin ${user._id} joined admin tracking room`);
+                logger.debug(`Admin ${user._id} joined admin tracking room`);
             }
 
             // Send current unread count on connection
@@ -90,7 +90,7 @@ async function initializeSocket(server) {
                 const undelivered = await notificationService.getUndeliveredNotifications(user._id);
                 
                 if (undelivered.length > 0) {
-                    console.log(`Delivering ${undelivered.length} undelivered notifications to user ${user._id}`);
+                    logger.debug(`Delivering ${undelivered.length} undelivered notifications to user ${user._id}`);
                     
                     // Deliver notifications with small stagger to avoid flooding
                     undelivered.forEach((notification, index) => {
@@ -103,7 +103,7 @@ async function initializeSocket(server) {
                     const notificationIds = undelivered.map(n => n._id);
                     await notificationService.markAsDelivered(notificationIds);
                     
-                    console.log(`Marked ${notificationIds.length} notifications as delivered for user ${user._id}`);
+                    logger.debug(`Marked ${notificationIds.length} notifications as delivered for user ${user._id}`);
                 }
             } catch (error) {
                 console.error('Error delivering undelivered notifications:', error);
@@ -124,7 +124,7 @@ async function initializeSocket(server) {
                             socket.emit('notification', notification.payload);
                         });
                         
-                        console.log(`Sent ${missedNotifications.length} missed notifications to user ${user._id}`);
+                        logger.debug(`Sent ${missedNotifications.length} missed notifications to user ${user._id}`);
                     }
                 } catch (error) {
                     console.error('Error fetching missed notifications:', error);
@@ -154,7 +154,7 @@ async function initializeSocket(server) {
                     if (user.role === 'admin' && ['assigned', 'enroute', 'in-progress'].includes(duty.status)) {
                         socket.join(`duty_tracking:${dutyId}`);
                         socket.emit('duty_tracking_subscribed', { dutyId });
-                        console.log(`Admin ${user._id} subscribed to duty ${dutyId} tracking`);
+                        logger.debug(`Admin ${user._id} subscribed to duty ${dutyId} tracking`);
                     } else {
                         socket.emit('error', { message: 'Permission denied' });
                     }
@@ -170,7 +170,7 @@ async function initializeSocket(server) {
                     const { dutyId } = data;
                     socket.leave(`duty_tracking:${dutyId}`);
                     socket.emit('duty_tracking_unsubscribed', { dutyId });
-                    console.log(`User ${user._id} unsubscribed from duty ${dutyId} tracking`);
+                    logger.debug(`User ${user._id} unsubscribed from duty ${dutyId} tracking`);
                 } catch (error) {
                     console.error('Error in unsubscribe_duty_tracking:', error);
                 }
@@ -209,7 +209,7 @@ async function initializeSocket(server) {
 
             // Handle disconnection
             socket.on('disconnect', () => {
-                console.log(`User disconnected: ${user._id}`);
+                logger.debug(`User disconnected: ${user._id}`);
                 roomManager.leaveAllRooms(socket);
             });
 

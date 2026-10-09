@@ -1,3 +1,4 @@
+const logger = require('../utils/logger');
 /**
  * WebSocket Manager Service
  * Handles emitting notifications to Socket.IO rooms
@@ -31,7 +32,7 @@ class WebSocketManager {
             
             const roomName = `user:${userId}`;
             this.io.to(roomName).emit(event, payload);
-            console.log(`Emitted ${event} to user room: ${roomName}`);
+            logger.debug(`Emitted ${event} to user room: ${roomName}`);
 
             // Mark notification as delivered if user is online and notificationId provided
             if (notificationId && this.isUserOnline(userId)) {
@@ -78,7 +79,7 @@ class WebSocketManager {
             
             const roomName = `role:staff:${jobRole}`;
             this.io.to(roomName).emit(event, payload);
-            console.log(`Emitted ${event} to role room: ${roomName}`);
+            logger.debug(`Emitted ${event} to role room: ${roomName}`);
         } catch (error) {
             console.error(`Error emitting to staff role ${jobRole}:`, error);
         }
@@ -99,7 +100,7 @@ class WebSocketManager {
             
             const roomName = `duty:${dutyId}`;
             this.io.to(roomName).emit(event, payload);
-            console.log(`Emitted ${event} to duty room: ${roomName}`);
+            logger.debug(`Emitted ${event} to duty room: ${roomName}`);
         } catch (error) {
             console.error(`Error emitting to duty ${dutyId}:`, error);
         }

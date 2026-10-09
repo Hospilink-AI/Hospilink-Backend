@@ -14,7 +14,7 @@ const fakeRedis = {
     }
 };
 jest.mock('../src/config/redis', () => ({ getClientAsync: async () => fakeRedis }));
-jest.mock('../src/utils/logger', () => ({ error: () => {}, info: () => {}, warn: () => {} }));
+jest.mock('../src/utils/logger', () => ({ error: () => {}, info: () => {}, warn: () => {}, debug: () => {} }));
 
 const MedicalStaff = require('../src/models/MedicalStaff');
 const staffLocator = require('../src/services/staffLocator.service');
