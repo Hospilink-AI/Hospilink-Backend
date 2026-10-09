@@ -56,6 +56,9 @@ const startServer = async () => {
         // Set Socket.IO instance in WebSocket Manager
         websocketManager.setIO(io);
 
+        // Per-minute CloudWatch metrics (requests, latency, sockets, cron failures)
+        require('./src/utils/metrics').start({ sockets: () => io.engine.clientsCount });
+
         // Initialize Location Tracking Handler
         require('./src/socket/locationTracking.handler');
 
@@ -104,6 +107,8 @@ const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 250
 
 function shutdown(signal, { server, io }, exitCode = 0) {
     logger.info(`${signal} received, shutting down gracefully`);
+    // Write out the last partial minute of metrics
+    require('./src/utils/metrics').flush();
     const force = setTimeout(() => {
         logger.warn('Shutdown timed out, exiting');
         process.exit(exitCode);

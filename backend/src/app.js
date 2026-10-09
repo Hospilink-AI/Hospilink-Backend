@@ -57,6 +57,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Request count, errors and latency for the per-minute CloudWatch metrics
+app.use(require("./utils/metrics").requestMetrics);
+
 // Gzip JSON over 1 KB: duty lists and feeds shrink several times over on
 // mobile networks. Socket.IO traffic is not affected.
 app.use(compression({ threshold: 1024 }));

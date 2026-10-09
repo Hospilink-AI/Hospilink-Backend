@@ -5,6 +5,7 @@ const User = require('../models/User');
 const notificationEmitter = require('../services/notificationEmitter');
 const EmailService = require('../services/email.service');
 const redisClient = require('../config/redis');
+const metrics = require('./metrics');
 const InterviewLifecycleService = require('../services/interviewLifecycle.service');
 const TicketService = require('../services/ticket.service');
 const autoRelistAnalyticsService = require('../services/autoRelistAnalytics.service');
@@ -99,7 +100,7 @@ class CronJobs {
             try {
                 await jobFunction();
             } catch (error) {
-                console.error(`${jobName} error:`, error);
+                metrics.cronJobFailed(jobName, error);
             }
         };
 
@@ -278,7 +279,7 @@ class CronJobs {
                     const purged = await accountDeletionService.runDue();
                     if (purged > 0) console.log(`Accounts deleted: ${purged}`);
                 } catch (err) {
-                    console.error('Account deletion job failed:', err);
+                    metrics.cronJobFailed('Account deletion', err);
                 }
             },
             60,
@@ -295,7 +296,7 @@ class CronJobs {
                     const sent = await staffAvailabilityService.sendExpiryReminders();
                     if (sent > 0) console.log(`Availability reminders sent: ${sent}`);
                 } catch (err) {
-                    console.error('Availability reminder job failed:', err);
+                    metrics.cronJobFailed('Availability reminders', err);
                 }
             },
             60,
@@ -314,7 +315,7 @@ class CronJobs {
                     const sent = await verificationReminderService.runDue(now);
                     if (sent > 0) console.log(`Documents reminders sent: ${sent}`);
                 } catch (err) {
-                    console.error('Documents reminder job failed:', err);
+                    metrics.cronJobFailed('Documents reminders', err);
                 }
             },
             60,
@@ -329,7 +330,7 @@ class CronJobs {
                     const widened = await dutyOfferService.runDue();
                     if (widened > 0) console.log(`Staged duty offers widened: ${widened}`);
                 } catch (err) {
-                    console.error('Staged duty offer job failed:', err);
+                    metrics.cronJobFailed('Staged duty offers', err);
                 }
             },
             5,
@@ -346,7 +347,7 @@ class CronJobs {
                     const { settled } = await require('../services/idfyResults.service').checkPending();
                     if (settled > 0) console.log(`IDfy results applied: ${settled}`);
                 } catch (err) {
-                    console.error('IDfy results job failed:', err.message);
+                    metrics.cronJobFailed('IDfy results', err);
                 }
             },
             1,
@@ -367,7 +368,7 @@ class CronJobs {
                     const sent = await require('../services/identityCheck.service').sendDueReminders(now);
                     if (sent > 0) console.log(`Identity check reminders sent: ${sent}`);
                 } catch (err) {
-                    console.error('Identity check reminder job failed:', err.message);
+                    metrics.cronJobFailed('Identity check reminders', err);
                 }
             },
             60,
@@ -389,7 +390,7 @@ class CronJobs {
                         console.log(`Sent ${sentCount} auto-relist repeat push(es) at ${new Date().toLocaleString()}`);
                     }
                 } catch (err) {
-                    console.error('Auto-relist repeat push job failed:', err);
+                    metrics.cronJobFailed('Auto-relist repeat push job', err);
                 }
             },
             5,
@@ -423,7 +424,7 @@ class CronJobs {
                         { jobName: 'Auto-relist daily rollup', date: dateKey, hospitalsWritten, timestamp: new Date().toISOString() }
                     ).catch(err => console.error('Error logging auto-relist rollup job:', err));
                 } catch (err) {
-                    console.error('Auto-relist daily rollup failed:', err);
+                    metrics.cronJobFailed('Auto-relist daily rollup', err);
                 }
             },
             60,
@@ -438,7 +439,7 @@ class CronJobs {
                     const written = await analyticsSnapshotService.ensureYesterday();
                     if (written) console.log('Analytics daily snapshot written');
                 } catch (err) {
-                    console.error('Analytics daily snapshot failed:', err);
+                    metrics.cronJobFailed('Analytics daily snapshot', err);
                 }
             },
             60,
