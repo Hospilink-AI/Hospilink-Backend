@@ -27,13 +27,17 @@ test.each(models.map(model => [model.modelName, model]))('%s indexes build', asy
     expect(built.length).toBeGreaterThanOrEqual(model.schema.indexes().length);
 });
 
-test('activity logs and notifications really expire after 90 days', async () => {
-    const ActivityLog = require('../../src/models/ActivityLog');
+test('notifications expire after 90 days', async () => {
     const Notification = require('../../src/models/Notification');
-    for (const [model, field] of [[ActivityLog, 'timestamp'], [Notification, 'createdAt']]) {
-        const indexes = await model.collection.indexes();
-        const ttl = indexes.find(index => index.key[field] === 1 && Object.keys(index.key).length === 1);
-        expect(ttl).toBeDefined();
-        expect(ttl.expireAfterSeconds).toBe(90 * 24 * 60 * 60);
-    }
+    const indexes = await Notification.collection.indexes();
+    const ttl = indexes.find(index => index.key.createdAt === 1 && Object.keys(index.key).length === 1);
+    expect(ttl).toBeDefined();
+    expect(ttl.expireAfterSeconds).toBe(90 * 24 * 60 * 60);
+});
+
+test('activity logs are kept forever: no index on them expires', async () => {
+    const ActivityLog = require('../../src/models/ActivityLog');
+    const indexes = await ActivityLog.collection.indexes();
+    expect(indexes.find(index => index.key.timestamp === 1 && Object.keys(index.key).length === 1)).toBeDefined();
+    expect(indexes.filter(index => index.expireAfterSeconds !== undefined)).toEqual([]);
 });

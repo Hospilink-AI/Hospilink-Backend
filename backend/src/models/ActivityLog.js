@@ -6,12 +6,13 @@ const {
 } = require('../utils/activityLog.constants');
 
 const activityLogSchema = new mongoose.Schema({
-    // Indexed by the 90-day expiry index below (a plain index here would
-    // block it from being built)
+    // Activity logs are kept forever (the audit trail), so this is a plain
+    // index with no expiry. Never add expireAfterSeconds here.
     timestamp: {
         type: Date,
         default: Date.now,
-        required: true
+        required: true,
+        index: true
     },
     actor: {
         userId: {
@@ -102,9 +103,6 @@ activityLogSchema.index({
     location: 'text',
     action: 'text'
 });
-
-// TTL index for automatic deletion after retention period (90 days)
-activityLogSchema.index({ timestamp: 1 }, { expireAfterSeconds: 7776000 }); // 90 days
 
 // Virtual for formatted timestamp
 activityLogSchema.virtual('formattedTimestamp').get(function() {

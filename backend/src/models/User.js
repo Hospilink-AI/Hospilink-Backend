@@ -72,7 +72,7 @@ const userSchema = new mongoose.Schema({
         expiresAt: Date
     },
 
-    // Last sign-in, for active-user analytics (activity logs only keep 90 days)
+    // Last sign-in, for active-user analytics without scanning the activity log
     lastActiveAt: {
         type: Date
     },

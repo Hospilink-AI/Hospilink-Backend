@@ -319,19 +319,11 @@ const SENSITIVE_FIELDS = [
     'aadhaar'
 ];
 
-// Data retention periods (in days)
-const RETENTION_PERIODS = {
-    ACTIVE: 90,      // Keep in main collection for 90 days
-    ARCHIVE: 365,    // Keep in archive for 1 year
-    COMPLIANCE: 2555 // Keep for compliance (7 years)
-};
-
 module.exports = {
     ACTIVITY_CATEGORIES,
     ACTIVITY_STATUSES,
     ACTIVITY_ACTIONS,
     ACTION_CATEGORY_MAP,
     CRITICAL_ACTIONS,
-    SENSITIVE_FIELDS,
-    RETENTION_PERIODS
+    SENSITIVE_FIELDS
 };
