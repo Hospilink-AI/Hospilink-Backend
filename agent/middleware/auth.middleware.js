@@ -2,6 +2,28 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const MedicalStaff = require('../models/MedicalStaff');
 const logger = require('../utils/logger');
+const signOut = require('../services/signOut.service');
+
+// Fields the agent reads from the user; same account rules as the backend
+const USER_FIELDS = '_id name role adminSubRole isActive deletion';
+
+/**
+ * Why this user can't use the agent, or null. Mirrors the backend sign-in:
+ * deleted accounts, accounts scheduled for deletion and deactivated admins
+ * are refused.
+ */
+function accountRefusal(user) {
+    if (!user || user.deletion?.completedAt) {
+        return { status: 401, code: 'USER_NOT_FOUND', message: 'User not found. Please login again.' };
+    }
+    if (user.deletion?.requestedAt) {
+        return { status: 403, code: 'ACCOUNT_SCHEDULED_FOR_DELETION', message: 'This account is scheduled for deletion. Sign in again to keep it.' };
+    }
+    if (user.role === 'admin' && user.isActive === false) {
+        return { status: 403, code: 'ACCOUNT_DEACTIVATED', message: 'This admin account has been deactivated.' };
+    }
+    return null;
+}
 
 /**
  * Protect agent routes - require valid JWT token
@@ -31,19 +53,41 @@ const protect = async (req, res, next) => {
     try {
         // Verify token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
-        // Get user from token
-        const user = await User.findById(decoded.id);
-        if (!user) {
-            logger.warn('Agent access denied - user not found', { 
-                userId: decoded.id,
-                ip: req.ip 
+
+        // Signed out on the backend: refused here too
+        let signedOut;
+        try {
+            signedOut = await signOut.isSignedOut(token);
+        } catch (err) {
+            logger.error('Agent sign-out check unavailable', { error: err.message });
+            return res.status(503).json({
+                status: 'error',
+                code: 'AUTH_UNAVAILABLE',
+                message: 'Authentication service unavailable. Please try again.'
             });
-            
+        }
+        if (signedOut) {
             return res.status(401).json({
                 status: 'error',
-                code: 'USER_NOT_FOUND',
-                message: 'User not found. Please login again.'
+                code: 'TOKEN_INVALIDATED',
+                message: 'Token has been invalidated. Please login again.'
+            });
+        }
+
+        // Get user from token
+        const user = await User.findById(decoded.id).select(USER_FIELDS).lean();
+        const refusal = accountRefusal(user);
+        if (refusal) {
+            logger.warn('Agent access denied', {
+                userId: decoded.id,
+                code: refusal.code,
+                ip: req.ip
+            });
+
+            return res.status(refusal.status).json({
+                status: 'error',
+                code: refusal.code,
+                message: refusal.message
             });
         }
 
@@ -181,9 +225,10 @@ const optionalAuth = async (req, res, next) => {
     if (token) {
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            const user = await User.findById(decoded.id);
-            
-            if (user && user.role === 'staff') {
+            const signedOut = await signOut.isSignedOut(token);
+            const user = signedOut ? null : await User.findById(decoded.id).select(USER_FIELDS).lean();
+
+            if (user && !accountRefusal(user) && user.role === 'staff') {
                 const medicalStaff = await MedicalStaff.findOne({ user: user._id });
                 req.user = user;
                 req.medicalStaff = medicalStaff;
@@ -197,6 +242,7 @@ const optionalAuth = async (req, res, next) => {
 };
 
 module.exports = {
+    accountRefusal,
     requireSuperAdmin,
     authenticateSuperAdmin,
     protect,

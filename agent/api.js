@@ -281,8 +281,8 @@ app.get("/v1/stats", optionalAuth, async (req, res) => {
 });
 
 
-// get detailed stats
-app.get("/v1/stats/detailed", async (req, res) => {
+// get detailed stats (Super Admin: internal figures)
+app.get("/v1/stats/detailed", authenticateSuperAdmin, async (req, res) => {
   try {
     const stats = await getDetailedStats();
     res.json({
@@ -1221,8 +1221,8 @@ app.get("/v1/agent/status", authenticateMedicalStaff, async (req, res) => {
 
 
 
-// get queue status
-app.get("/v1/queue/status", async (req, res) => {
+// get queue status (Super Admin)
+app.get("/v1/queue/status", authenticateSuperAdmin, async (req, res) => {
   const stats = await getQueueStats();
   res.json({
     status: "success",
@@ -1231,8 +1231,8 @@ app.get("/v1/queue/status", async (req, res) => {
 });
 
 
-// get active connections
-app.get("/v1/connections", (req, res) => {
+// get active connections (Super Admin: includes doctors' locations)
+app.get("/v1/connections", authenticateSuperAdmin, (req, res) => {
   res.json({
     status: "success",
     data: {
