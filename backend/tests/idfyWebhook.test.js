@@ -64,6 +64,12 @@ describe('IDfy Aadhaar webhook', () => {
         expect(mockChecked).toEqual(['u1']);
     });
 
+    it('stores only the last 4 digits of an Aadhaar number DigiLocker sends', async () => {
+        await send({ reference_id: 'r1', status: 'completed', parsed_details: { name: 'Asha Rao', uid: '1234 5678 9012' } });
+        expect(updates[0]['documents.$.extractedData']).toEqual({ name: 'Asha Rao', uid: 'XXXX XXXX 9012' });
+        expect(JSON.stringify(updates[0])).not.toContain('5678');
+    });
+
     it('still rejects a wrong token', async () => {
         const res = { code: null, status(c) { this.code = c; return this; }, json() { return this; } };
         await handleAadhaarWebhook({ query: { wt: 'wrong-token!' }, body: { reference_id: 'r1', status: 'completed' } }, res);

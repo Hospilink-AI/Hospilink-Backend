@@ -156,4 +156,19 @@ documentSchema.index(
     { partialFilterExpression: { "documents.verificationMeta.status": "in_progress" } }
 );
 
+// Any Aadhaar entry saved through this model keeps only the last 4 digits
+// of the number (UIDAI rules), including older entries saved in full
+documentSchema.pre("save", function maskAadhaarNumbers(next) {
+    const { maskedEntryFields } = require("../utils/aadhaarMask");
+    for (const entry of this.documents || []) {
+        const changes = maskedEntryFields(entry.toObject ? entry.toObject() : entry);
+        if (!changes) continue;
+        for (const [path, value] of Object.entries(changes)) {
+            entry.set(path, value);
+            entry.markModified(path);
+        }
+    }
+    next();
+});
+
 module.exports = mongoose.model("Document", documentSchema);
