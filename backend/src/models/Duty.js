@@ -705,22 +705,22 @@ dutySchema.pre('save', function (next) {
 
 
 
+// Every index is updated on every duty write, so none here repeats another.
+// An index whose keys start another index (hospital, staffRole, status,
+// assignedTo, createdAt, { hospital, status }) is served by the longer one,
+// and an index read backwards serves the opposite sort. Taking a definition
+// out of this file does not drop the index from the database; that is done
+// in Atlas (see the PR "Duty index cleanup").
+
 // Basic single-field indexes
-dutySchema.index({ hospital: 1 });
 // Sparse: only multi-slot posts have a groupId
 dutySchema.index({ groupId: 1 }, { sparse: true });
-dutySchema.index({ staffRole: 1 });
 dutySchema.index({ date: 1 });
-dutySchema.index({ status: 1 });
-dutySchema.index({ createdAt: -1 });
-dutySchema.index({ totalPayment: 1 });
-dutySchema.index({ assignedTo: 1 });
 dutySchema.index({ 'autoRelist.excludedStaff': 1 });
 dutySchema.index({ 'autoRelist.relistCount': 1 });
 dutySchema.index({ 'autoRelist.history.cancelledBy': 1 });
 
 // Essential compound indexes for performance
-dutySchema.index({ hospital: 1, status: 1 });
 dutySchema.index({ staffRole: 1, status: 1, date: 1 });
 dutySchema.index({ createdAt: 1, status: 1 });
 
@@ -742,13 +742,6 @@ dutySchema.index({
     startTime: 1,
     endTime: 1
 }); // For time-based duty queries
-
-// Enhanced indexes for route map optimization
-dutySchema.index({ 
-    assignedTo: 1, 
-    status: 1, 
-    date: -1 
-}); // For active duty queries (optimized)
 
 dutySchema.index({ 
     status: 1, 
