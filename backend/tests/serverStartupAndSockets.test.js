@@ -1,7 +1,7 @@
 // Socket.IO is ready before the server takes connections, sockets hold only
 // what they need, and the server stops cleanly behind the AWS load balancer.
 jest.mock('../src/utils/logger', () => ({ error: () => {}, info: () => {}, warn: () => {}, debug: () => {} }));
-jest.mock('../src/services/cache.service', () => ({ getStrict: async () => null, get: async () => null, set: async () => true }));
+jest.mock('../src/services/cache.service', () => ({ getStrict: async () => null, getManyStrict: async (keys) => keys.map(() => null), get: async () => null, set: async () => true, pipeline: async () => [] }));
 
 const fs = require('fs');
 const path = require('path');

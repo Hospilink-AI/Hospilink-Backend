@@ -82,21 +82,24 @@ async function initializeSocket(server) {
                 logger.debug(`Admin ${user._id} joined admin tracking room`);
             }
 
-            // Send current unread count on connection
-            try {
-                const unreadCount = await notificationService.getUnreadCount(user._id);
-                socket.emit('unread_count', { count: unreadCount });
-            } catch (error) {
-                console.error('Error fetching unread count:', error);
+            // Unread count and notices sent while offline, read together
+            const [unreadResult, undeliveredResult] = await Promise.allSettled([
+                notificationService.getUnreadCount(user._id),
+                notificationService.getUndeliveredNotifications(user._id)
+            ]);
+
+            if (unreadResult.status === 'fulfilled') {
+                socket.emit('unread_count', { count: unreadResult.value });
+            } else {
+                logger.error(`Error fetching unread count: ${unreadResult.reason?.message}`);
             }
 
             // Auto-push undelivered notifications (Phase 2: Offline Delivery)
-            try {
-                const undelivered = await notificationService.getUndeliveredNotifications(user._id);
-                
+            if (undeliveredResult.status === 'fulfilled') {
+                const undelivered = undeliveredResult.value;
                 if (undelivered.length > 0) {
                     logger.debug(`Delivering ${undelivered.length} undelivered notifications to user ${user._id}`);
-                    
+
                     // Deliver notifications with small stagger to avoid flooding
                     undelivered.forEach((notification, index) => {
                         setTimeout(() => {
@@ -106,12 +109,11 @@ async function initializeSocket(server) {
 
                     // Mark all as delivered
                     const notificationIds = undelivered.map(n => n._id);
-                    await notificationService.markAsDelivered(notificationIds);
-                    
-                    logger.debug(`Marked ${notificationIds.length} notifications as delivered for user ${user._id}`);
+                    notificationService.markAsDelivered(notificationIds)
+                        .catch(error => logger.error(`Error marking notifications delivered: ${error.message}`));
                 }
-            } catch (error) {
-                console.error('Error delivering undelivered notifications:', error);
+            } else {
+                logger.error(`Error delivering undelivered notifications: ${undeliveredResult.reason?.message}`);
             }
 
             // Handle get_missed_notifications event for reconnection
