@@ -337,6 +337,23 @@ class CronJobs {
             'Staged duty offers'
         );
 
+        // IDfy PAN / GST / CIN results — one server per minute fetches the
+        // checks still waiting (see idfyResults.service)
+        this.scheduleJob(
+            async () => {
+                const hasLock = await acquireCronLock('idfy-results', 55);
+                if (!hasLock) return;
+                try {
+                    const { settled } = await require('../services/idfyResults.service').checkPending();
+                    if (settled > 0) console.log(`IDfy results applied: ${settled}`);
+                } catch (err) {
+                    console.error('IDfy results job failed:', err.message);
+                }
+            },
+            1,
+            'IDfy results'
+        );
+
         // Auto-relist repeat push — run every 5 minutes. State-based
         // (DutyService.sendAutoRelistRepeatPushes checks repeatPushCount
         // vs. minutes-since-relist), so a 5-minute cadence is precise

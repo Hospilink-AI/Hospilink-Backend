@@ -142,4 +142,11 @@ documentSchema.index({ "documents.verifiedBy": 1 });
 // Soft-delete aware queries: skip deleted docs efficiently
 documentSchema.index({ userId: 1, "documents.isDeleted": 1 });
 
+// IDfy checks still waiting for a result (the IDfy results job). Partial, so
+// it only holds those few documents.
+documentSchema.index(
+    { "documents.verificationMeta.status": 1 },
+    { partialFilterExpression: { "documents.verificationMeta.status": "in_progress" } }
+);
+
 module.exports = mongoose.model("Document", documentSchema);

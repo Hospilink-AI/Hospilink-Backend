@@ -4,6 +4,9 @@ const IDFY_BASE_URL = process.env.IDFY_BASE_URL;
 const IDFY_API_KEY = process.env.IDFY_API_KEY;
 const IDFY_ACCOUNT_ID = process.env.IDFY_ACCOUNT_ID;
 
+// An upload waits on these calls, so they can't hang
+const REQUEST_TIMEOUT_MS = 10000;
+
 const headers = {
     "api-key": IDFY_API_KEY,
     "account-id": IDFY_ACCOUNT_ID,
@@ -24,12 +27,12 @@ exports.verifyPAN = async ({ pan, name, dob }) => {
                     dob: dob // YYYY-MM-DD
                 }
             },
-            { headers }
+            { headers, timeout: REQUEST_TIMEOUT_MS }
         );
 
         return response.data; // returns request_id
     } catch (err) {
-        console.error("PAN API Error:", err.response?.data || err.message);
+        console.error("PAN API Error:", err.response?.status || err.code || "", err.message);
         return null;
     }
 };
@@ -46,12 +49,12 @@ exports.verifyGST = async (gstin) => {
                     gstin: gstin
                 }
             },
-            { headers }
+            { headers, timeout: REQUEST_TIMEOUT_MS }
         );
 
         return response.data;
     } catch (err) {
-        console.error("GST API Error:", err.response?.data || err.message);
+        console.error("GST API Error:", err.response?.status || err.code || "", err.message);
         return null;
     }
 };
@@ -68,12 +71,12 @@ exports.verifyCIN = async (cin) => {
                     cin: cin
                 }
             },
-            { headers }
+            { headers, timeout: REQUEST_TIMEOUT_MS }
         );
 
         return response.data;
     } catch (err) {
-        console.error("CIN API Error:", err.response?.data || err.message);
+        console.error("CIN API Error:", err.response?.status || err.code || "", err.message);
         return null;
     }
 };
@@ -82,12 +85,12 @@ exports.getTaskResult = async (requestId) => {
     try {
         const response = await axios.get(
             `${IDFY_BASE_URL}/tasks?request_id=${requestId}`,
-            { headers }
+            { headers, timeout: REQUEST_TIMEOUT_MS }
         );
 
         return response.data;
     } catch (err) {
-        console.error("Fetch Result Error:", err.response?.data || err.message);
+        console.error("Fetch Result Error:", err.response?.status || err.code || "", err.message);
         return null;
     }
 };
@@ -113,12 +116,12 @@ exports.verifyAadhaarDigilocker = async (referenceId) => {
 
                 }
             },
-            { headers }
+            { headers, timeout: REQUEST_TIMEOUT_MS }
         );
 
         return response.data;
     } catch (err) {
-        console.error("Aadhaar Digilocker API Error:", err.response?.data || err.message);
+        console.error("Aadhaar Digilocker API Error:", err.response?.status || err.code || "", err.message);
         return null;
     }
 };
