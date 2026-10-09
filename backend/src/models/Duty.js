@@ -436,16 +436,36 @@ dutySchema.methods.canChangeStatus = function (newStatus, userId) {
 };
 
 
+const timeToMinutes = (value) => {
+    const [hours, minutes] = String(value || '').split(':').map(Number);
+    return (hours || 0) * 60 + (minutes || 0);
+};
+
+// Whole days between the start date and the day the duty ends. An overnight
+// duty (end time at or before the start time) ends the next day unless a later
+// endDate says otherwise.
+dutySchema.methods.endDayOffset = function () {
+    if (this.endDate && this.date) {
+        const days = Math.round((toIST(new Date(this.endDate)).setHours(0, 0, 0, 0) -
+            toIST(new Date(this.date)).setHours(0, 0, 0, 0)) / (24 * 60 * 60 * 1000));
+        if (days > 0) return days;
+    }
+    return timeToMinutes(this.endTime) <= timeToMinutes(this.startTime) ? 1 : 0;
+};
+
+// Scheduled end, in the same frame as getCurrentIST()
+dutySchema.methods.getScheduledEnd = function () {
+    const [hours, minutes] = this.endTime.split(':').map(Number);
+    const end = new Date(toIST(new Date(this.date)));
+    end.setDate(end.getDate() + this.endDayOffset());
+    end.setHours(hours, minutes, 0, 0);
+    return end;
+};
+
 dutySchema.methods.isAtEndTime = function () {
     // Use getCurrentIST() for consistent time handling
     const now = getCurrentIST();
-    const dutyDate = new Date(this.date);
-    const [hours, minutes] = this.endTime.split(':');
-
-    // Convert duty date to IST first, then set time
-    const istDutyDate = toIST(dutyDate);
-    const dutyEndTime = new Date(istDutyDate);
-    dutyEndTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+    const dutyEndTime = this.getScheduledEnd();
 
     // Check if current time is at or past end time (within 1 minute tolerance)
     const timeDiff = Math.abs(now.getTime() - dutyEndTime.getTime());
@@ -462,12 +482,7 @@ dutySchema.methods.canRequestEndOtp = function () {
     }
 
     const now = getCurrentIST();
-    const dutyDate = new Date(this.date);
-    const [hours, minutes] = this.endTime.split(':');
-
-    const istDutyDate = toIST(dutyDate);
-    const istDutyEndTime = new Date(istDutyDate);
-    istDutyEndTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+    const istDutyEndTime = this.getScheduledEnd();
 
     if (now < istDutyEndTime) {
         return { allowed: false, reason: 'Can only request end OTP at or after scheduled end time' };

@@ -814,10 +814,11 @@ class DutyService {
         // Get today's date in IST
         const istToday = new Date(istNow.getFullYear(), istNow.getMonth(), istNow.getDate());
 
+        // From yesterday, so overnight duties that end this morning are included
         const dutiesToComplete = await Duty.find({
             status: 'in-progress',
             date: {
-                $gte: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate()),
+                $gte: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() - 1),
                 $lt: new Date(istToday.getFullYear(), istToday.getMonth(), istToday.getDate() + 1)
             }
         }).populate('hospital', 'hospitalLegalName currentAddress location user')
@@ -831,14 +832,8 @@ class DutyService {
         const graceMinutes = parseInt(process.env.PENDING_CONFIRMATION_GRACE_MINUTES) || 30;
 
         for (const duty of dutiesToComplete) {
-            // Create proper Date objects for duty end time in IST
-            const [endHours, endMinutes] = duty.endTime.split(':').map(Number);
-            const dutyEndDate = new Date(duty.date);
-
-            // Convert duty date to IST first, then set the time
-            const istDutyDate = toIST(dutyEndDate);
-            const istDutyEndTime = new Date(istDutyDate);
-            istDutyEndTime.setHours(endHours, endMinutes, 0, 0);
+            // Scheduled end, the next day for overnight duties
+            const istDutyEndTime = duty.getScheduledEnd();
 
             const gracePeriodEndTime = new Date(istDutyEndTime.getTime() + graceMinutes * 60 * 1000);
 
