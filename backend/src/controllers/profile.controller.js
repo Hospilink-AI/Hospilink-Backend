@@ -1,4 +1,5 @@
 const ProfileService = require('../services/profile.service');
+const staffPreferences = require('../services/staffPreferences.service');
 const dutyInviteService = require('../services/dutyInvite.service');
 const { asyncHandler, AppError, ValidationError, ConflictError } = require('../middleware/error.middleware');
 const activityLogEmitter = require('../services/activityLogEmitter');
@@ -266,6 +267,14 @@ class ProfileController {
 
 
     // Check profile completion status
+    getPreferences = asyncHandler(async (req, res) => {
+        res.status(200).json({ success: true, data: await staffPreferences.get(req.user.id) });
+    });
+
+    updatePreferences = asyncHandler(async (req, res) => {
+        res.status(200).json({ success: true, data: await staffPreferences.update(req.user.id, req.body) });
+    });
+
     checkProfileStatus = asyncHandler(async (req, res) => {
         const userId = req.user.id;
 

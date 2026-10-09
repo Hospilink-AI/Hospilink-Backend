@@ -185,6 +185,22 @@ const medicalStaffSchema = new mongoose.Schema({
         default: false,
         index: true
     },
+    // Saved by the doctor in the app. Missing means the defaults in
+    // staffPreferences.service.js (every push on, English, no distance limit).
+    preferences: {
+        type: {
+            _id: false,
+            notifications: {
+                offers: Boolean,
+                reminders: Boolean,
+                support: Boolean,
+                marketing: Boolean
+            },
+            language: { type: String, enum: ['en', 'hi', 'mr'] },
+            maxDistanceKm: { type: Number, min: 1, max: 200 }
+        },
+        default: undefined
+    },
     averageRating: {
         type: Number,
         default: 0

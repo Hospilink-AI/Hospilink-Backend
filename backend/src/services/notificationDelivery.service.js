@@ -2,6 +2,7 @@ const websocketManager = require('./websocketManager');
 const fcmService = require('./fcm.service');
 const notificationService = require('./notificationService');
 const logger = require('../utils/logger');
+const staffPreferences = require('./staffPreferences.service');
 
 /**
  * Notification Delivery Service
@@ -66,6 +67,12 @@ class NotificationDeliveryService {
                     userId
                 };
             } else {
+                // The doctor turned this kind of push off
+                const [allowed] = await staffPreferences.filterPushRecipients([userId], type);
+                if (!allowed) {
+                    return { success: true, method: 'none', userId, reason: 'preference' };
+                }
+
                 // User is offline - deliver via FCM push
                 const title = payload.display?.title || FCM_TITLES[type] || 'HospiLink';
                 const body = payload.message || 'You have a new notification';
@@ -138,9 +145,10 @@ class NotificationDeliveryService {
                 }
             }
 
-            // Deliver to offline users via FCM
+            // Deliver to offline users via FCM, except doctors who turned this kind of push off
             let fcmResult = { success: true, successCount: 0, failureCount: 0 };
-            if (offlineIds.length > 0) {
+            const pushIds = await staffPreferences.filterPushRecipients(offlineIds, type);
+            if (pushIds.length > 0) {
                 const title = payload.display?.title || FCM_TITLES[type] || 'HospiLink';
                 const body = payload.message || 'You have a new notification';
                 
@@ -150,7 +158,7 @@ class NotificationDeliveryService {
                     timestamp: payload.timestamp || new Date().toISOString()
                 };
 
-                fcmResult = await fcmService.sendToUsers(offlineIds, title, body, fcmData);
+                fcmResult = await fcmService.sendToUsers(pushIds, title, body, fcmData);
             }
 
             return {

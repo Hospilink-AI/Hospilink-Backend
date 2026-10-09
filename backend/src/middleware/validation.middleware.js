@@ -607,6 +607,40 @@ const validateResumeStageUpload = (req, res, next) => {
 
 
 
+// PATCH /api/profile/preferences
+const validatePreferencesUpdate = (req, res, next) => {
+    const errors = [];
+    const body = req.body || {};
+    const unexpected = Object.keys(body).filter(k => !['notifications', 'language', 'maxDistanceKm'].includes(k));
+    if (unexpected.length) errors.push(`Unexpected fields: ${unexpected.join(', ')}`);
+    if (Object.keys(body).length === 0) errors.push('Nothing to update');
+
+    if (body.notifications !== undefined) {
+        const n = body.notifications;
+        if (!n || typeof n !== 'object' || Array.isArray(n)) {
+            errors.push('notifications must be an object');
+        } else {
+            for (const [key, value] of Object.entries(n)) {
+                if (!['offers', 'reminders', 'support', 'marketing'].includes(key)) errors.push(`Unknown notification setting: ${key}`);
+                else if (typeof value !== 'boolean') errors.push(`notifications.${key} must be true or false`);
+            }
+        }
+    }
+    if (body.language !== undefined && !['en', 'hi', 'mr'].includes(body.language)) {
+        errors.push('language must be en, hi or mr');
+    }
+    if (body.maxDistanceKm !== undefined && body.maxDistanceKm !== null &&
+        (typeof body.maxDistanceKm !== 'number' || !Number.isInteger(body.maxDistanceKm) || body.maxDistanceKm < 1 || body.maxDistanceKm > 200)) {
+        errors.push('maxDistanceKm must be a whole number of km from 1 to 200, or null');
+    }
+    if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    }
+    next();
+};
+
+
+
 const validateProfileUpdate = (req, res, next) => {
     const errors = [];
     const { role } = req.user;
@@ -3195,6 +3229,7 @@ module.exports = {
     validateDocumentUpload,
     validateResumeStageUpload,
     validateProfileUpdate,
+    validatePreferencesUpdate,
     validateStaffAvailability,
     validateDutyCreation,
     validateNearbyStaff,
