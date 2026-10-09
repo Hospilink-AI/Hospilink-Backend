@@ -41,7 +41,10 @@ describe('duty handshake codes', () => {
     it('are selected only where the server checks or resends them', () => {
         const fs = require('fs');
         const path = require('path');
-        const source = fs.readFileSync(path.join(__dirname, '../src/services/duty.service.js'), 'utf8');
+        // The duty service and its method files in services/duty/
+        const dutyDir = path.join(__dirname, '../src/services/duty');
+        const source = [path.join(__dirname, '../src/services/duty.service.js'), ...fs.readdirSync(dutyDir).map(f => path.join(dutyDir, f))]
+            .map(f => fs.readFileSync(f, 'utf8')).join('\n');
         const body = (name) => {
             const start = source.indexOf(`    async ${name}(`);
             const end = source.indexOf('\n    async ', start + 10);
