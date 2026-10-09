@@ -30,3 +30,32 @@ jobs:
       - name: Install agent dependencies
         run: npm install --omit=optional
         working-directory: agent
+
+  backend-checks:
+    name: Backend lint and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint (errors fail the build)
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      - name: Known vulnerabilities (report only)
+        run: npm audit --omit=dev --audit-level=high || true

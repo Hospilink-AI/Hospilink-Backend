@@ -105,7 +105,6 @@ class CronJobs {
 
         // Calculate time until next scheduled run
         const msUntilNext = this.getMillisecondsUntilNext(intervalMinutes);
-        const nextRunTime = new Date(Date.now() + msUntilNext);
 
         // Schedule first run at next scheduled time
         setTimeout(() => {

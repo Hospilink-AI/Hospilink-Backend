@@ -9,7 +9,6 @@ const cacheService = require('./cache.service');
 const activityLogEmitter = require('./activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 const {
-    ValidationError,
     NotFoundError,
     ForbiddenError
 } = require('../middleware/error.middleware');
@@ -435,21 +434,17 @@ class DashboardService {
 
     // Get staff location for duties using only dashboard websocket location.
     async getStaffLocationForDuties(userId) {
-        try {
-            const location = await this.getDashboardLocation(userId);
+        const location = await this.getDashboardLocation(userId);
 
-            if (!location) {
-                throw new NotFoundError('Staff location not found. Please grant location permission on the dashboard.');
-            }
-
-            return {
-                location,
-                source: 'websocket',
-                permissionGranted: true
-            };
-        } catch (error) {
-            throw error;
+        if (!location) {
+            throw new NotFoundError('Staff location not found. Please grant location permission on the dashboard.');
         }
+
+        return {
+            location,
+            source: 'websocket',
+            permissionGranted: true
+        };
     }
 }
 

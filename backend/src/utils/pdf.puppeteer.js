@@ -56,6 +56,7 @@ async function renderPdf(html, pdfOptions, { waitForFonts = false } = {}) {
         if (waitForFonts) {
             let timer;
             await Promise.race([
+                // eslint-disable-next-line no-undef -- runs inside the page, where document exists
                 page.evaluate(() => document.fonts.ready.then(() => true)),
                 new Promise(resolve => { timer = setTimeout(resolve, FONT_WAIT_MS); })
             ]).finally(() => clearTimeout(timer));

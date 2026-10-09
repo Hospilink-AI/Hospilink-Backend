@@ -595,7 +595,6 @@ class DutyService {
         // Filter out duties that have already ended today
         const upcomingDuties = duties.filter(duty => {
             const dutyStartDate = new Date(duty.date);
-            const dutyEndDate = duty.endDate ? new Date(duty.endDate) : dutyStartDate;
 
             // For overnight duties, check if the end time on end date hasn't passed
             if (duty.isOvernightDuty && duty.endDate) {
@@ -1889,94 +1888,90 @@ class DutyService {
 
 
     async getJobRouteInfo(dutyId, staffId, currentLocation) {
+        // Get duty details
+        const duty = await Duty.findById(dutyId).populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates');
+
+        if (!duty) {
+            throw new NotFoundError('Duty not found');
+        }
+
+        // Add proper null check before accessing location properties
+        if (!currentLocation || !currentLocation.latitude || !currentLocation.longitude) {
+            throw new ValidationError('Staff location is required to get route information. Please enable location in your dashboard or update your profile location.');
+        }
+
+        const staffLat = currentLocation.latitude;
+        const staffLng = currentLocation.longitude;
+
+        // Check for named coordinates structure
+        if (!duty.hospital.coordinates ||
+            !duty.hospital.coordinates.coordinates ||
+            !duty.hospital.coordinates.coordinates.latitude ||
+            !duty.hospital.coordinates.coordinates.longitude) {
+
+            throw new NotFoundError('Hospital location not found');
+        }
+
+        //  Access named coordinates
+        const hospitalLat = duty.hospital.coordinates.coordinates.latitude;
+        const hospitalLng = duty.hospital.coordinates.coordinates.longitude;
+
         try {
-            // Get duty details
-            const duty = await Duty.findById(dutyId).populate('hospital', 'hospitalLegalName currentAddress city state pincode coordinates');
-
-            if (!duty) {
-                throw new NotFoundError('Duty not found');
-            }
-
-            // Add proper null check before accessing location properties
-            if (!currentLocation || !currentLocation.latitude || !currentLocation.longitude) {
-                throw new ValidationError('Staff location is required to get route information. Please enable location in your dashboard or update your profile location.');
-            }
-
-            const staffLat = currentLocation.latitude;
-            const staffLng = currentLocation.longitude;
-
-            // Check for named coordinates structure
-            if (!duty.hospital.coordinates ||
-                !duty.hospital.coordinates.coordinates ||
-                !duty.hospital.coordinates.coordinates.latitude ||
-                !duty.hospital.coordinates.coordinates.longitude) {
-
-                throw new NotFoundError('Hospital location not found');
-            }
-
-            //  Access named coordinates
-            const hospitalLat = duty.hospital.coordinates.coordinates.latitude;
-            const hospitalLng = duty.hospital.coordinates.coordinates.longitude;
-
-            try {
-                // Get detailed route using Google Maps Directions API
-                const routeInfo = await geocodingService.getDirections(
-                    staffLat, staffLng, hospitalLat, hospitalLng
-                );
-                return {
-                    success: true,
-                    job: {
-                        id: duty._id,
-                        staffRole: duty.staffRole,
-                        date: duty.date,
-                        startTime: duty.startTime,
-                        endTime: duty.endTime,
-                        urgency: duty.urgency,
-                        description: duty.description,
-                        offeredRate: duty.offeredRate
-                    },
-                    hospital: {
-                        id: duty.hospital._id,
-                        name: duty.hospital.hospitalLegalName,
-                        address: duty.hospital.currentAddress,
-                        city: duty.hospital.city,
-                        state: duty.hospital.state,
-                        pincode: duty.hospital.pincode,
-                        location: {
-                            latitude: hospitalLat,
-                            longitude: hospitalLng
-                        }
-                    },
-                    staffLocation: {
-                        latitude: staffLat,
-                        longitude: staffLng
-
-                    },
-                    // route: {
-                    //     polyline: routeInfo.polyline,
-                    //     distance: routeInfo.distance,
-                    //     duration: routeInfo.duration,
-                    //     distanceText: routeInfo.distanceText,
-                    //     durationText: routeInfo.durationText,
-                    //     steps: routeInfo.steps
-                    // }
-
-                    route: {
-                        overviewPolyline: routeInfo.overviewPolyline,
-                        stepPolylines: routeInfo.stepPolylines,
-                        distance: routeInfo.distance,
-                        duration: routeInfo.duration,
-                        distanceText: routeInfo.distanceText,
-                        durationText: routeInfo.durationText,
-                        steps: routeInfo.steps
+            // Get detailed route using Google Maps Directions API
+            const routeInfo = await geocodingService.getDirections(
+                staffLat, staffLng, hospitalLat, hospitalLng
+            );
+            return {
+                success: true,
+                job: {
+                    id: duty._id,
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    urgency: duty.urgency,
+                    description: duty.description,
+                    offeredRate: duty.offeredRate
+                },
+                hospital: {
+                    id: duty.hospital._id,
+                    name: duty.hospital.hospitalLegalName,
+                    address: duty.hospital.currentAddress,
+                    city: duty.hospital.city,
+                    state: duty.hospital.state,
+                    pincode: duty.hospital.pincode,
+                    location: {
+                        latitude: hospitalLat,
+                        longitude: hospitalLng
                     }
-                };
-            } catch (error) {
-                console.error('Directions API failed:', error.message);
-                throw new AppError('Unable to get route information. Please try again.', 503);
-            }
+                },
+                staffLocation: {
+                    latitude: staffLat,
+                    longitude: staffLng
+
+                },
+                // route: {
+                //     polyline: routeInfo.polyline,
+                //     distance: routeInfo.distance,
+                //     duration: routeInfo.duration,
+                //     distanceText: routeInfo.distanceText,
+                //     durationText: routeInfo.durationText,
+                //     steps: routeInfo.steps
+                // }
+
+                route: {
+                    overviewPolyline: routeInfo.overviewPolyline,
+                    stepPolylines: routeInfo.stepPolylines,
+                    distance: routeInfo.distance,
+                    duration: routeInfo.duration,
+                    distanceText: routeInfo.distanceText,
+                    durationText: routeInfo.durationText,
+                    steps: routeInfo.steps
+                }
+            };
         } catch (error) {
-            throw error;
+            console.error('Directions API failed:', error.message);
+            throw new AppError('Unable to get route information. Please try again.', 503);
         }
     }
 
@@ -1989,117 +1984,113 @@ class DutyService {
             throw new ValidationError(`Invalid status filter. Allowed values: ${TERMINAL_STATUSES.join(', ')}`);
         }
 
-        try {
-            const staff = await MedicalStaff.findOne({ user: staffUserId });
-            if (!staff) {
-                throw new NotFoundError('Medical staff profile not found');
+        const staff = await MedicalStaff.findOne({ user: staffUserId });
+        if (!staff) {
+            throw new NotFoundError('Medical staff profile not found');
+        }
+
+        const paginationParams = getPaginationParams(page, limit);
+
+        const statusQuery = statusFilter ? statusFilter : { $in: TERMINAL_STATUSES };
+
+        // Summary covers every completed duty, not just this page
+        const totalsPromise = this._completedTotals(staff._id);
+        totalsPromise.catch(() => {}); // awaited below; avoids an unhandled rejection if a query before it fails
+
+        const totalDuties = await Duty.countDocuments({
+            assignedTo: staff._id,
+            status: statusQuery
+        });
+
+        const duties = await Duty.find({
+            assignedTo: staff._id,
+            status: statusQuery
+        })
+            .populate('hospital', 'hospitalLegalName currentAddress city state pincode')
+            .populate({
+                path: 'assignedTo',
+                populate: {
+                    path: 'user',
+                    select: 'name email role'
+                }
+            })
+            .sort({ completedAt: -1, cancelledAt: -1, expiredAt: -1, incompleteAt: -1 })
+            .skip(paginationParams.skip)
+            .limit(paginationParams.limit);
+
+        // Blind/simultaneous reveal (Phase 3) — one batched call, not
+        // one per duty (same lesson as the rating algorithm's own
+        // batching). Replaces the old reviewMap, which keyed only by
+        // duty id — when both directions existed for a duty, the
+        // second one processed silently overwrote the first.
+        const dutyIds = duties.map(duty => duty._id);
+        const visibleReviewPairs = await reviewService.getVisibleReviewPairsForDuties(dutyIds, 'staff');
+
+        const totals = await totalsPromise;
+        let lastDutyDate = null;
+
+        const dutiesWithDetails = duties.map(duty => {
+            // Use the most relevant status timestamp for lastDutyDate
+            const dutyTimestamp = duty.completedAt || duty.cancelledAt || duty.expiredAt || duty.incompleteAt;
+            if (!lastDutyDate || dutyTimestamp > lastDutyDate) {
+                lastDutyDate = dutyTimestamp;
             }
 
-            const paginationParams = getPaginationParams(page, limit);
-
-            const statusQuery = statusFilter ? statusFilter : { $in: TERMINAL_STATUSES };
-
-            // Summary covers every completed duty, not just this page
-            const totalsPromise = this._completedTotals(staff._id);
-            totalsPromise.catch(() => {}); // awaited below; avoids an unhandled rejection if a query before it fails
-
-            const totalDuties = await Duty.countDocuments({
-                assignedTo: staff._id,
-                status: statusQuery
-            });
-
-            const duties = await Duty.find({
-                assignedTo: staff._id,
-                status: statusQuery
-            })
-                .populate('hospital', 'hospitalLegalName currentAddress city state pincode')
-                .populate({
-                    path: 'assignedTo',
-                    populate: {
-                        path: 'user',
-                        select: 'name email role'
-                    }
-                })
-                .sort({ completedAt: -1, cancelledAt: -1, expiredAt: -1, incompleteAt: -1 })
-                .skip(paginationParams.skip)
-                .limit(paginationParams.limit);
-
-            // Blind/simultaneous reveal (Phase 3) — one batched call, not
-            // one per duty (same lesson as the rating algorithm's own
-            // batching). Replaces the old reviewMap, which keyed only by
-            // duty id — when both directions existed for a duty, the
-            // second one processed silently overwrote the first.
-            const dutyIds = duties.map(duty => duty._id);
-            const visibleReviewPairs = await reviewService.getVisibleReviewPairsForDuties(dutyIds, 'staff');
-
-            const totals = await totalsPromise;
-            let lastDutyDate = null;
-
-            const dutiesWithDetails = duties.map(duty => {
-                // Use the most relevant status timestamp for lastDutyDate
-                const dutyTimestamp = duty.completedAt || duty.cancelledAt || duty.expiredAt || duty.incompleteAt;
-                if (!lastDutyDate || dutyTimestamp > lastDutyDate) {
-                    lastDutyDate = dutyTimestamp;
-                }
-
-                return {
-                    _id: duty._id,
-                    hospital: duty.hospital,
-                    assignedTo: duty.assignedTo,
-                    staffRole: duty.staffRole,
-                    dutySubType: duty.dutySubType,
-                    status: duty.status,
-                    date: duty.date,
-                    endDate: duty.endDate,
-                    startTime: duty.startTime,
-                    endTime: duty.endTime,
-                    isOvernightDuty: duty.isOvernightDuty,
-                    urgency: duty.urgency,
-                    description: duty.description,
-                    offeredRate: duty.offeredRate,
-                    totalPayment: duty.totalPayment,
-                    paymentMethod: duty.paymentMethod || null,
-                    isPaid: typeof duty.isPaid === 'boolean' ? duty.isPaid : null,
-                    paymentStatus: duty.status === 'completed' ? paymentStatusOf(duty) : null,
-                    duration: formatDuration(
-                        duty.startTime,
-                        duty.endTime,
-                        duty.date,
-                        duty.isOvernightDuty,
-                        duty.endDate
-                    ),
-                    assignedAt: duty.assignedAt,
-                    completedAt: duty.completedAt || null,
-                    cancelledAt: duty.cancelledAt || null,
-                    expiredAt: duty.expiredAt || null,
-                    incompleteAt: duty.incompleteAt || null,
-                    cancellation: duty.cancellation || null,
-                    statusHistory: duty.statusHistory,
-                    // rating = the staff's own submitted review (always
-                    // visible — they wrote it); hospitalReview = the
-                    // hospital's review of them, gated until both sides
-                    // exist or the reveal timeout passes.
-                    rating: visibleReviewPairs.get(duty._id.toString())?.staffToHospital || null,
-                    hospitalReview: visibleReviewPairs.get(duty._id.toString())?.hospitalToStaff || null
-                };
-            });
-
             return {
-                summary: {
-                    totalDutiesCompleted: totals.count,
-                    totalHours: formatDuration(totals.hours),
-                    totalEarnings: totals.earnings,
-                    lastDutyDate: lastDutyDate,
-                    paidEarnings: totals.paid,
-                    pendingEarnings: totals.pending
-                },
-                duties: dutiesWithDetails,
-                pagination: getPaginationMeta(totalDuties, page, limit)
+                _id: duty._id,
+                hospital: duty.hospital,
+                assignedTo: duty.assignedTo,
+                staffRole: duty.staffRole,
+                dutySubType: duty.dutySubType,
+                status: duty.status,
+                date: duty.date,
+                endDate: duty.endDate,
+                startTime: duty.startTime,
+                endTime: duty.endTime,
+                isOvernightDuty: duty.isOvernightDuty,
+                urgency: duty.urgency,
+                description: duty.description,
+                offeredRate: duty.offeredRate,
+                totalPayment: duty.totalPayment,
+                paymentMethod: duty.paymentMethod || null,
+                isPaid: typeof duty.isPaid === 'boolean' ? duty.isPaid : null,
+                paymentStatus: duty.status === 'completed' ? paymentStatusOf(duty) : null,
+                duration: formatDuration(
+                    duty.startTime,
+                    duty.endTime,
+                    duty.date,
+                    duty.isOvernightDuty,
+                    duty.endDate
+                ),
+                assignedAt: duty.assignedAt,
+                completedAt: duty.completedAt || null,
+                cancelledAt: duty.cancelledAt || null,
+                expiredAt: duty.expiredAt || null,
+                incompleteAt: duty.incompleteAt || null,
+                cancellation: duty.cancellation || null,
+                statusHistory: duty.statusHistory,
+                // rating = the staff's own submitted review (always
+                // visible — they wrote it); hospitalReview = the
+                // hospital's review of them, gated until both sides
+                // exist or the reveal timeout passes.
+                rating: visibleReviewPairs.get(duty._id.toString())?.staffToHospital || null,
+                hospitalReview: visibleReviewPairs.get(duty._id.toString())?.hospitalToStaff || null
             };
+        });
 
-        } catch (error) {
-            throw error;
-        }
+        return {
+            summary: {
+                totalDutiesCompleted: totals.count,
+                totalHours: formatDuration(totals.hours),
+                totalEarnings: totals.earnings,
+                lastDutyDate: lastDutyDate,
+                paidEarnings: totals.paid,
+                pendingEarnings: totals.pending
+            },
+            duties: dutiesWithDetails,
+            pagination: getPaginationMeta(totalDuties, page, limit)
+        };
+
     }
 
     // Earnings over every completed duty of a doctor. One light query, no paging.
@@ -2425,134 +2416,126 @@ class DutyService {
 
     // Get active duties for hospital with filtering and real-time tracking
     async getHospitalActiveDuties(hospitalId, filters = {}) {
-        try {
-            const { role, status, page = 1, limit = 10 } = filters;
+        const { role, status, page = 1, limit = 10 } = filters;
 
-            // Build base query for hospital's active duties
-            let query = {
-                hospital: hospitalId, // Query directly by hospital ID
-                status: { $in: ['assigned', 'enroute', 'in-progress'] }
-            };
+        // Build base query for hospital's active duties
+        let query = {
+            hospital: hospitalId, // Query directly by hospital ID
+            status: { $in: ['assigned', 'enroute', 'in-progress'] }
+        };
 
 
-            // Add role filter if specified
-            if (role) {
-                if (!ALLOWED_ROLES.includes(role)) {
-                    throw new ValidationError(`Invalid role: ${role}`);
-                }
-                query.staffRole = role;
+        // Add role filter if specified
+        if (role) {
+            if (!ALLOWED_ROLES.includes(role)) {
+                throw new ValidationError(`Invalid role: ${role}`);
             }
-
-            // Add status filter if specified
-            if (status) {
-                const allowedStatuses = ['assigned', 'enroute', 'in-progress'];
-                if (!allowedStatuses.includes(status)) {
-                    throw new ValidationError(`Invalid status: ${status}`);
-                }
-                query.status = status;
-            }
-
-            // Get total count for pagination
-            const totalDuties = await Duty.countDocuments(query);
-
-            // Calculate pagination parameters
-            const { skip } = getPaginationParams(page, limit);
-
-            // Fetch duties with populated data
-            const duties = await Duty.find(query)
-                .populate({
-                    path: 'assignedTo',
-                    select: 'fullName user coordinates currentAddress city state pincode',
-                    populate: {
-                        path: 'user',
-                        select: 'name email'
-                    }
-                })
-                .populate('hospital', 'hospitalLegalName location coordinates')
-                .sort({ createdAt: -1 }) // Latest duties first
-                .skip(skip)
-                .limit(limit);
-
-            // Batch process real-time locations for better performance
-            const staffUserIds = duties
-                .filter(duty => duty.assignedTo && duty.assignedTo.user)
-                .map(duty => duty.assignedTo.user._id);
-
-            // Get all real-time locations in batch
-            const realtimeLocations = await getBatchStaffLocations(staffUserIds);
-
-            const formattedDuties = await Promise.all(
-                duties.map(async (duty) => {
-                    return await formatActiveDuty(duty, realtimeLocations);
-                })
-            );
-
-            return {
-                duties: formattedDuties,
-                pagination: {
-                    totalItems: totalDuties,
-                    totalPages: Math.ceil(totalDuties / limit),
-                    currentPage: page,
-                    itemsPerPage: limit,
-                    hasNextPage: page < Math.ceil(totalDuties / limit),
-                    hasPrevPage: page > 1,
-                    nextPage: page < Math.ceil(totalDuties / limit) ? page + 1 : null,
-                    prevPage: page > 1 ? page - 1 : null
-                },
-                filters: {
-                    role: role || 'all',
-                    status: status || 'all'
-                },
-                summary: {
-                    totalActiveDuties: totalDuties,
-                    assignedCount: await Duty.countDocuments({ ...query, status: 'assigned' }),
-                    enrouteCount: await Duty.countDocuments({ ...query, status: 'enroute' }),
-                    inProgressCount: await Duty.countDocuments({ ...query, status: 'in-progress' })
-                }
-            };
-        } catch (error) {
-            throw error;
+            query.staffRole = role;
         }
+
+        // Add status filter if specified
+        if (status) {
+            const allowedStatuses = ['assigned', 'enroute', 'in-progress'];
+            if (!allowedStatuses.includes(status)) {
+                throw new ValidationError(`Invalid status: ${status}`);
+            }
+            query.status = status;
+        }
+
+        // Get total count for pagination
+        const totalDuties = await Duty.countDocuments(query);
+
+        // Calculate pagination parameters
+        const { skip } = getPaginationParams(page, limit);
+
+        // Fetch duties with populated data
+        const duties = await Duty.find(query)
+            .populate({
+                path: 'assignedTo',
+                select: 'fullName user coordinates currentAddress city state pincode',
+                populate: {
+                    path: 'user',
+                    select: 'name email'
+                }
+            })
+            .populate('hospital', 'hospitalLegalName location coordinates')
+            .sort({ createdAt: -1 }) // Latest duties first
+            .skip(skip)
+            .limit(limit);
+
+        // Batch process real-time locations for better performance
+        const staffUserIds = duties
+            .filter(duty => duty.assignedTo && duty.assignedTo.user)
+            .map(duty => duty.assignedTo.user._id);
+
+        // Get all real-time locations in batch
+        const realtimeLocations = await getBatchStaffLocations(staffUserIds);
+
+        const formattedDuties = await Promise.all(
+            duties.map(async (duty) => {
+                return await formatActiveDuty(duty, realtimeLocations);
+            })
+        );
+
+        return {
+            duties: formattedDuties,
+            pagination: {
+                totalItems: totalDuties,
+                totalPages: Math.ceil(totalDuties / limit),
+                currentPage: page,
+                itemsPerPage: limit,
+                hasNextPage: page < Math.ceil(totalDuties / limit),
+                hasPrevPage: page > 1,
+                nextPage: page < Math.ceil(totalDuties / limit) ? page + 1 : null,
+                prevPage: page > 1 ? page - 1 : null
+            },
+            filters: {
+                role: role || 'all',
+                status: status || 'all'
+            },
+            summary: {
+                totalActiveDuties: totalDuties,
+                assignedCount: await Duty.countDocuments({ ...query, status: 'assigned' }),
+                enrouteCount: await Duty.countDocuments({ ...query, status: 'enroute' }),
+                inProgressCount: await Duty.countDocuments({ ...query, status: 'in-progress' })
+            }
+        };
     }
 
 
 
     // Get duty route map with polyline for hospital (hospital-specific)
     async getHospitalDutyRouteMap(dutyId, hospitalId) {
-        try {
-            // Verify duty belongs to hospital
-            const duty = await Duty.findOne({
-                _id: dutyId,
-                hospital: hospitalId
+        // Verify duty belongs to hospital
+        const duty = await Duty.findOne({
+            _id: dutyId,
+            hospital: hospitalId
+        })
+            .populate({
+                path: 'assignedTo',
+                select: 'fullName user coordinates phoneNumber skills averageRating totalRatings experience currentAddress city state pincode email verificationStatus education profileSummary',
+                populate: {
+                    path: 'user',
+                    select: 'name email'
+                }
             })
-                .populate({
-                    path: 'assignedTo',
-                    select: 'fullName user coordinates phoneNumber skills averageRating totalRatings experience currentAddress city state pincode email verificationStatus education profileSummary',
-                    populate: {
-                        path: 'user',
-                        select: 'name email'
-                    }
-                })
-                .populate('hospital', 'hospitalLegalName location currentAddress coordinates');
+            .populate('hospital', 'hospitalLegalName location currentAddress coordinates');
 
-            if (!duty) {
-                throw new NotFoundError('Duty not found or does not belong to your hospital');
-            }
-
-            // Verify duty is in active state
-            if (!['assigned', 'enroute', 'in-progress'].includes(duty.status)) {
-                throw new ValidationError('Duty is not in active state');
-            }
-
-            if (!duty.assignedTo) {
-                throw new ValidationError('Duty is not assigned to any staff');
-            }
-
-            // Use hospital-specific route formatting (not admin service)
-            return await this.formatDutyRouteMap(duty);
-        } catch (error) {
-            throw error;
+        if (!duty) {
+            throw new NotFoundError('Duty not found or does not belong to your hospital');
         }
+
+        // Verify duty is in active state
+        if (!['assigned', 'enroute', 'in-progress'].includes(duty.status)) {
+            throw new ValidationError('Duty is not in active state');
+        }
+
+        if (!duty.assignedTo) {
+            throw new ValidationError('Duty is not assigned to any staff');
+        }
+
+        // Use hospital-specific route formatting (not admin service)
+        return await this.formatDutyRouteMap(duty);
     }
 
 

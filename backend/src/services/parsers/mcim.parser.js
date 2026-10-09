@@ -6,7 +6,6 @@ module.exports = (text) => {
         .replace(/[ \t]+/g, ' ')
         .trim();
 
-    const lines = normalized.split('\n').map(l => l.trim()).filter(Boolean);
 
     let doctorName = null;
     let registrationNumber = null;

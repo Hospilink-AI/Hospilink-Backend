@@ -1,6 +1,5 @@
 const Hospital = require('../models/Hospital');
 const Duty = require('../models/Duty');
-const User = require('../models/User')
 const AdminAuthService = require('../services/adminAuth.service');
 const identityCheck = require('../services/identityCheck.service');
 const adminService = require('../services/admin.service');
@@ -9,8 +8,6 @@ const documentService = require('../services/document.service');
 const { asyncHandler } = require('../middleware/error.middleware');
 const notificationEmitter = require('../services/notificationEmitter');
 const activityLogEmitter = require('../services/activityLogEmitter');
-const MedicalStaff = require('../models/MedicalStaff');
-const { normalizeRole } = require('../utils/helpers');
 const logger = require('../utils/logger');
 const cacheService = require('../services/cache.service');
 const { generateActiveDutiesPDF } = require('../utils/pdf.puppeteer');

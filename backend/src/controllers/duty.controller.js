@@ -1,7 +1,6 @@
 const DutyService = require('../services/duty.service');
 const EmailService = require('../services/email.service');
 const { asyncHandler } = require('../middleware/error.middleware');
-const { normalizeRole } = require('../utils/helpers');
 const notificationEmitter = require('../services/notificationEmitter');
 const activityLogEmitter = require('../services/activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
@@ -11,7 +10,6 @@ const Hospital = require('../models/Hospital');
 const Duty = require('../models/Duty');
 const mongoose = require('mongoose');
 const logger = require('../utils/logger');
-const dutyService = require('../services/duty.service');
 const locationTrackingService = require('../services/locationTracking.service');
 const DashboardService = require('../services/dashboard.service');
 const locationBasedStaffService = require('../services/locationBasedStaff.service');
@@ -403,10 +401,6 @@ exports.changeDutyStatus = asyncHandler(async (req, res) => {
             message: 'Invalid status. Allowed values: enroute'
         });
     }
-
-    // Store previous status before update
-    const dutyBeforeUpdate = await Duty.findById(duty_id);
-    const previousStatus = dutyBeforeUpdate ? dutyBeforeUpdate.status : null;
 
     const duty = await DutyService.changeDutyStatus(duty_id, userId, status);
 

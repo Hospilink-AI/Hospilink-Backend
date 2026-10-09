@@ -238,7 +238,7 @@ class AuthController {
         }
 
         
-        const result = await fcmService.removeToken(userId, token);
+        await fcmService.removeToken(userId, token);
 
         res.status(200).json({
             success: true,

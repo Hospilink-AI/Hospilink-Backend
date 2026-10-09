@@ -3,7 +3,7 @@ const jobApplicationService = require('./jobApplication.service');
 const systemConfigService = require('./systemConfig.service');
 const noShowPenaltyService = require('./noShowPenalty.service');
 const notificationEmitter = require('./notificationEmitter');
-const { UnprocessableEntityError, ConflictError, NotFoundError } = require('../middleware/error.middleware');
+const { UnprocessableEntityError, ConflictError } = require('../middleware/error.middleware');
 const {
     SLOT_DURATIONS,
     SLOT_GRANULARITY_MINUTES,

@@ -3,7 +3,6 @@ const notificationService = require('./notificationService');
 const websocketManager = require('./websocketManager');
 const notificationDelivery = require('./notificationDelivery.service');
 const geocodingService = require('./geocoding.service');
-const MedicalStaff = require('../models/MedicalStaff');
 const Hospital = require('../models/Hospital');
 const User = require('../models/User');
 const JobVacancy = require('../models/JobVacancy');
@@ -2159,10 +2158,6 @@ class NotificationEmitter {
      */
     async emitAccountSuspended(profile, userId, role, reason) {
         try {
-            const name = role === 'hospital'
-                ? (profile.hospitalLegalName || 'Account')
-                : (profile.fullName || 'Account');
-
             const payload = {
                 type: 'ACCOUNT_SUSPENDED',
                 reason,
