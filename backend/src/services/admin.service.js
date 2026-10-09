@@ -2339,6 +2339,11 @@ class AdminService {
             ...require('../utils/dutyPricing').anesthesiaFields(dutyPayload)
         };
 
+        // Slots of one post share a groupId
+        if (numberOfDuties > 1) {
+            dutyData.groupId = new mongoose.Types.ObjectId();
+        }
+
         // Create multiple duties based on staff_count
         const createdDuties = [];
         for (let i = 0; i < numberOfDuties; i++) {
