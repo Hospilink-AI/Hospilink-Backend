@@ -358,11 +358,7 @@ app.get(
         ]
       };
 
-      console.log('DEBUG - Staff Role:', staffRole);
-      console.log('DEBUG - Role Display:', roleDisplay);
-      console.log('DEBUG - Query Criteria:', JSON.stringify(criteria, null, 2));
-
-      // Add location filter if provided
+// Add location filter if provided
       if (location && location.trim() !== '') {
           criteria.location = { $regex: location, $options: "i" };
       }
@@ -376,7 +372,8 @@ app.get(
           }).length,
       );
 
-      // Add cache bypass to cache key if provided
+      // Add cache bypass to cache key if provided. Position rounded to about
+      // 1 km so doctors near each other share cached pages.
       const cacheBypass = req.query.cache_bypass;
       const cacheKey = JSON.stringify({
           criteria,
@@ -384,8 +381,8 @@ app.get(
           offset,
           search: searchText,
           page,
-          userLat,
-          userLng,
+          userLat: typeof userLat === 'number' ? userLat.toFixed(2) : userLat,
+          userLng: typeof userLng === 'number' ? userLng.toFixed(2) : userLng,
           staffRole,
           ...(cacheBypass && { cache_bypass: cacheBypass }),
       });
@@ -410,22 +407,23 @@ app.get(
             ]);
           }
 
-          // Calculate distance if user coordinates provided
+          // Distances in batched Maps calls, not one call per opening
           if (userLat && userLng && jobs.length > 0) {
-            for (const job of jobs) {
-              if (job.coordinates && job.coordinates.latitude && job.coordinates.longitude) {
-                const distanceResult = await geocodingService.calculateDistanceAndETA(
-                  userLat,
-                  userLng,
-                  job.coordinates.latitude,
-                  job.coordinates.longitude
-                );
-                job.distance = distanceResult.distance;
-                job.duration = distanceResult.duration;
-                job.distanceText = distanceResult.distanceText;
-                job.durationText = distanceResult.durationText;
-              }
-            }
+            const located = jobs.filter(job => job.coordinates?.latitude && job.coordinates?.longitude);
+            const distances = await geocodingService.batchDistances(
+              userLat,
+              userLng,
+              located.map((job, i) => ({ id: i, latitude: job.coordinates.latitude, longitude: job.coordinates.longitude }))
+            );
+            located.forEach((job, i) => {
+              const result = distances.get(i);
+              if (!result) return;
+              job.distance = result.distance;
+              job.duration = result.duration;
+              job.distanceText = result.distanceText;
+              job.durationText = result.durationText;
+              if (result.estimated) job.distanceEstimated = true;
+            });
           }
 
           if (jobs.length > 0) {
