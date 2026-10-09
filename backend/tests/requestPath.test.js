@@ -87,7 +87,8 @@ describe('app setup', () => {
     });
 
     it('logs no doctor coordinates when a duty is opened', () => {
-        const duty = fs.readFileSync(path.join(__dirname, '../src/services/duty.service.js'), 'utf8');
+        const duty = fs.readFileSync(path.join(__dirname, '../src/services/duty/detail.js'), 'utf8');
+        expect(duty).toContain('async getDutyDetail(');
         expect(duty).not.toMatch(/console\.log\(`Staff accessing duty/);
     });
 });

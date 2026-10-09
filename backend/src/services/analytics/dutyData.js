@@ -1,7 +1,7 @@
 const Duty = require('../../models/Duty');
 const Hospital = require('../../models/Hospital');
 
-const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegex = require('../../utils/escapeRegex');
 
 // Statuses a duty can only reach after someone accepted it
 const FILLED_STATUSES = ['assigned', 'enroute', 'in-progress', 'pending-confirmation', 'completed', 'incomplete'];

@@ -5,7 +5,7 @@ const { splitByPeriod, wasFilled, wasWithdrawn } = require('./dutyData');
 const { istDateKey, istDayStart, addDaysToKey } = require('../../utils/calendar.helper');
 const { tile, ratio, median, countBy, seriesFromRows } = require('../../utils/analytics.helper');
 
-const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegex = require('../../utils/escapeRegex');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const AT_RISK_QUIET_DAYS = 30;
 const AT_RISK_LOOKBACK_DAYS = 90;
