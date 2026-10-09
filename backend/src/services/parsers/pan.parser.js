@@ -16,7 +16,7 @@ module.exports = (text) => {
 
         // DOB 
         if (/date of birth|dob/i.test(lines[i])) {
-            const dobMatch = lines[i + 1]?.match(/\d{2}[-\/]\d{2}[-\/]\d{4}/);
+            const dobMatch = lines[i + 1]?.match(/\d{2}[-/]\d{2}[-/]\d{4}/);
             if (dobMatch) {
                 dob = dobMatch[0];
             }
@@ -24,7 +24,7 @@ module.exports = (text) => {
     }
 
     if (!dob) {
-        const match = text.match(/\d{2}[-\/]\d{2}[-\/]\d{4}/);
+        const match = text.match(/\d{2}[-/]\d{2}[-/]\d{4}/);
         dob = match?.[0];
     }
 

@@ -69,7 +69,7 @@ function getCurrentIST() {
 function normalizeRole(role) {
     return role
         .toLowerCase()
-        .replace(/[()\/]/g, '') // Remove parentheses and slashes
+        .replace(/[()/]/g, '') // Remove parentheses and slashes
         .replace(/\s+/g, '_')   // Replace spaces with underscores
         .replace(/_+/g, '_')    // Replace multiple underscores with single
         .replace(/^_|_$/g, ''); // Remove leading/trailing underscores

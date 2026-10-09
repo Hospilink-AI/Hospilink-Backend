@@ -129,7 +129,7 @@ module.exports = (text = "") => {
     // DATE EXTRACTION
 
     const validFromMatch = normalized.match(
-        /Valid\s*from\s*[:\-]?\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
+        /Valid\s*from\s*[:-]?\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
     );
 
     if (validFromMatch) {
@@ -137,7 +137,7 @@ module.exports = (text = "") => {
     }
 
     const validThruMatch = normalized.match(
-        /Valid\s*thru\s*[:\-]?\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
+        /Valid\s*thru\s*[:-]?\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
     );
 
     if (validThruMatch) {
@@ -150,7 +150,7 @@ module.exports = (text = "") => {
 
         /([A-Z]{0,10}HCO-\d{4}-\d{3,6})/i,
 
-        /Certificate\s*No\.?\s*[:\-]?\s*([A-Z0-9\-]+)/i
+        /Certificate\s*No\.?\s*[:-]?\s*([A-Z0-9-]+)/i
     ];
 
     for (const regex of certRegexes) {

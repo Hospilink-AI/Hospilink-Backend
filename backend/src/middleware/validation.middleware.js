@@ -341,7 +341,7 @@ const validateMedicalStaffProfile = (req, res, next) => {
     // Phone number validation
     if (!phoneNumber || phoneNumber.trim().length === 0) {
         errors.push('Phone number is required');
-    } else if (!/^\+?[\d\s\-\(\)]{10,15}$/.test(phoneNumber)) {
+    } else if (!/^\+?[\d\s\-()]{10,15}$/.test(phoneNumber)) {
         errors.push('Please provide a valid phone number');
     }
 

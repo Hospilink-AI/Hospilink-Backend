@@ -1606,7 +1606,7 @@ class ProfileService {
         fileName = fileName
             .toLowerCase()
             .replace(/\s+/g, '-')
-            .replace(/[^a-z0-9\-]/g, '');
+            .replace(/[^a-z0-9-]/g, '');
 
         // Extension
         const ext = path.extname(file.originalname);

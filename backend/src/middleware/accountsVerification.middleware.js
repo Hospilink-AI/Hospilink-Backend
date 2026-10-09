@@ -52,13 +52,13 @@ exports.requireHospitalVerification = asyncHandler(async (req, res, next) => {
                 'Please check your email for updates.'
             );
 
-        case 'rejected':
-            const rejectionMsg = verificationStatus.rejectionReason
-                ? `Your hospital registration has been rejected. Reason: ${verificationStatus.rejectionReason}. ` +
-                  'Please contact support or update your profile and resubmit for verification.'
-                : 'Your hospital registration has been rejected. Please contact support for assistance.';
-            
-            throw new ForbiddenError(rejectionMsg);
+        case 'rejected': {
+                const rejectionMsg = verificationStatus.rejectionReason
+                    ? `Your hospital registration has been rejected. Reason: ${verificationStatus.rejectionReason}. ` +
+                      'Please contact support or update your profile and resubmit for verification.'
+                    : 'Your hospital registration has been rejected. Please contact support for assistance.';
+                throw new ForbiddenError(rejectionMsg);
+            }
 
         default:
             throw new ForbiddenError('Invalid hospital verification status. Please contact support.');
@@ -185,13 +185,13 @@ exports.requireStaffVerificationandisAvailable = asyncHandler(async (req, res, n
                 'Please check your email for updates.'
             );
 
-        case 'rejected':
-            const rejectionMsg = staffData.rejectionReason
-                ? `Your staff registration has been rejected. Reason: ${staffData.rejectionReason}. ` +
-                  'Please contact support or update your profile and resubmit for verification.'
-                : 'Your staff registration has been rejected. Please contact support for assistance.';
-            
-            throw new ForbiddenError(rejectionMsg);
+        case 'rejected': {
+                const rejectionMsg = staffData.rejectionReason
+                    ? `Your staff registration has been rejected. Reason: ${staffData.rejectionReason}. ` +
+                      'Please contact support or update your profile and resubmit for verification.'
+                    : 'Your staff registration has been rejected. Please contact support for assistance.';
+                throw new ForbiddenError(rejectionMsg);
+            }
 
         default:
             throw new ForbiddenError('Invalid staff verification status. Please contact support.');
@@ -256,13 +256,13 @@ exports.requireVerifiedStaffOnly = asyncHandler(async (req, res, next) => {
                 'Please check your email for updates.'
             );
 
-        case 'rejected':
-            const rejectionMsg = staffData.rejectionReason
-                ? `Your staff registration has been rejected. Reason: ${staffData.rejectionReason}. ` +
-                  'Please contact support or update your profile and resubmit for verification.'
-                : 'Your staff registration has been rejected. Please contact support for assistance.';
-            
-            throw new ForbiddenError(rejectionMsg);
+        case 'rejected': {
+                const rejectionMsg = staffData.rejectionReason
+                    ? `Your staff registration has been rejected. Reason: ${staffData.rejectionReason}. ` +
+                      'Please contact support or update your profile and resubmit for verification.'
+                    : 'Your staff registration has been rejected. Please contact support for assistance.';
+                throw new ForbiddenError(rejectionMsg);
+            }
 
         default:
             throw new ForbiddenError('Invalid staff verification status. Please contact support.');
