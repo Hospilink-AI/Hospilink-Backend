@@ -9,6 +9,7 @@ const notificationEmitter = require('./notificationEmitter');
 const idfyService = require("./idfy.service");
 const idfyResults = require("./idfyResults.service");
 const identityCheck = require("./identityCheck.service");
+const aadhaarRedaction = require("./aadhaarRedaction.service");
 const { maskAadhaarInText, maskAadhaarDeep, maskAadhaarNumber } = require("../utils/aadhaarMask");
 const { extractTextFromPDF } = require("./pdf.service");
 const { isDocumentExpired } = require("../utils/documentExpiryValidator");
@@ -147,6 +148,28 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
         }
     }
 
+    // Aadhaar: black out the number on the card before anything is stored or
+    // an older copy replaced. The same read gives the card's text.
+    let preReadText = null;
+    let imageRedactedAt = null;
+    if (documentType === "aadhaar-card") {
+        try {
+            const redacted = await aadhaarRedaction.redact(file.buffer, file.mimetype);
+            file = { ...file, buffer: redacted.buffer, mimetype: redacted.mimetype, size: redacted.buffer.length };
+            preReadText = redacted.text;
+            imageRedactedAt = new Date();
+        } catch (err) {
+            if (err instanceof aadhaarRedaction.RedactionError) {
+                logger.warn(`Aadhaar upload refused, number not hidden: ${err.message}`);
+                throw new ValidationError(
+                    "We couldn't read the Aadhaar number clearly enough to hide it. Upload a clear, straight photo of the card, or the masked Aadhaar from DigiLocker or the UIDAI website."
+                );
+            }
+            logger.error(`Aadhaar redaction failed: ${err.message}`);
+            throw new ValidationError("We couldn't process your Aadhaar just now. Please try again in a few minutes.");
+        }
+    }
+
     let userDocs = await Document.findOne({ userId: user._id });
     //create document if not exists
     if (!userDocs) {
@@ -205,8 +228,12 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             // OCR
             const isPDF = file.mimetype === "application/pdf";
 
-            extractedText = isPDF ? await extractTextFromPDF(file.buffer)
-                : await extractTextFromBuffer(file.buffer, file.mimetype, documentType);
+            if (preReadText !== null) {
+                extractedText = preReadText;
+            } else {
+                extractedText = isPDF ? await extractTextFromPDF(file.buffer)
+                    : await extractTextFromBuffer(file.buffer, file.mimetype, documentType);
+            }
 
             //Parse
             if (parserMap[documentType]) {
@@ -237,9 +264,10 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
                 const aadhaarNumber = String(extractedData?.aadhaarNumber || "").replace(/\s/g, "");
 
+                // A full number, or UIDAI's masked Aadhaar (last 4 digits only)
                 if (
                     !aadhaarNumber ||
-                    !/^\d{12}$/.test(aadhaarNumber)
+                    !(/^\d{12}$/.test(aadhaarNumber) || /^[X*]{8}\d{4}$/i.test(aadhaarNumber))
                 ) {
                     await deleteFromS3(key);
 
@@ -832,7 +860,8 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
             ? { ...maskAadhaarDeep(extractedData), aadhaarNumber: maskAadhaarNumber(extractedData?.aadhaarNumber) }
             : extractedData,
         verificationStatus,
-        verificationMeta
+        verificationMeta,
+        ...(imageRedactedAt ? { imageRedactedAt } : {})
     });
     const newDocumentId = userDocs.documents[userDocs.documents.length - 1]._id;
     await userDocs.save();

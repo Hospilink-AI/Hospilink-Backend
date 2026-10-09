@@ -74,6 +74,10 @@ module.exports = (text) => {
                 /(\d{4})(\d{4})(\d{4})/,
                 "$1 $2 $3"
             );
+    } else {
+        // UIDAI's masked Aadhaar shows only the last 4 digits
+        const masked = text.match(/[X*]{4}\s?[X*]{4}\s?(\d{4})/i);
+        if (masked) aadhaarNumber = `XXXX XXXX ${masked[1]}`;
     }
  
     // ADDRESS

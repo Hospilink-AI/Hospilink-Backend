@@ -110,6 +110,9 @@ const documentSchema = new Schema(
 
                 rejectionReason: String,
 
+                // Aadhaar: when the number on the stored file was blacked out
+                imageRedactedAt: Date,
+
                 verificationMeta: {
                     provider: String,
                     rawResponse: Schema.Types.Mixed,
