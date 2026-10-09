@@ -20,19 +20,14 @@ const { maskEmail } = require('../utils/maskPii');
 class AdminAuthService {
     async signin(email, password) {
         try {
-            // Parallel execution of independent operations
-            const [admin, rateLimitResult] = await Promise.all([
-                // Find admin user with password — deliberately NOT filtering by isActive here,
-                // so a deactivated admin's password still gets checked below. This lets us tell
-                // them *why* they're blocked without revealing deactivation status to someone
-                // who doesn't actually know the password.
-                User.findOne({
-                    email: email.toLowerCase(),
-                    role: 'admin'
-                }).select('+password'),
-                // Check rate limiting in parallel
-                this._checkRateLimit(email).catch(() => true) // Don't block on rate limit errors
-            ]);
+            // Find admin user with password — deliberately NOT filtering by isActive here,
+            // so a deactivated admin's password still gets checked below. This lets us tell
+            // them *why* they're blocked without revealing deactivation status to someone
+            // who doesn't actually know the password.
+            const admin = await User.findOne({
+                email: email.toLowerCase(),
+                role: 'admin'
+            }).select('+password');
 
             if (!admin) {
                 throw new UnauthorizedError('Invalid email or password.');
@@ -48,6 +43,10 @@ class AdminAuthService {
             if (admin.isActive === false) {
                 throw new ForbiddenError(DEACTIVATED_ADMIN_MESSAGE);
             }
+
+            // Limit OTP emails per admin. Checked only after a correct password,
+            // so typos don't use up the allowance.
+            await this._checkRateLimit(email);
 
             // Generate OTP
             const otp = OTPService.generateOTP();
@@ -271,17 +270,11 @@ class AdminAuthService {
 
     async resendOTP(email) {
         try {
-            // Parallel execution of rate limit and user lookup
-            const [admin, rateLimitResult] = await Promise.all([
-                // Find admin user
-                User.findOne({ 
-                    email: email.toLowerCase(), 
-                    role: 'admin' 
-                }),
-                // Check rate limiting in parallel
-                this._checkRateLimit(email).catch(() => true)
-            ]);
-            
+            const admin = await User.findOne({
+                email: email.toLowerCase(),
+                role: 'admin'
+            });
+
             if (!admin) {
                 throw new NotFoundError('Admin not found');
             }
@@ -289,6 +282,9 @@ class AdminAuthService {
             if (admin.isActive === false) {
                 throw new ForbiddenError(DEACTIVATED_ADMIN_MESSAGE);
             }
+
+            // Same OTP email allowance as sign-in
+            await this._checkRateLimit(email);
 
             // Generate new OTP
             const otp = OTPService.generateOTP();
@@ -355,12 +351,15 @@ class AdminAuthService {
     }
     
 
-    // Rate limiting helper — max 3 OTP send requests per hour per email
+    // OTP emails per admin: ADMIN_OTP_RATE_LIMIT (default 3) per
+    // ADMIN_OTP_RATE_WINDOW_HOURS (default 1). Throws when over the limit;
+    // a Redis failure lets the request through.
     async _checkRateLimit(email) {
+        const maxSends = parseInt(process.env.ADMIN_OTP_RATE_LIMIT, 10) || 3;
+        const windowSeconds = Math.round((parseFloat(process.env.ADMIN_OTP_RATE_WINDOW_HOURS) || 1) * 3600);
         const rateLimitKey = `admin_rate_limit:${email.toLowerCase()}`;
-        const redis = await redisClient.getClientAsync();
-
         try {
+            const redis = await redisClient.getClientAsync();
             // Atomic increment + set-expiry-on-first-write using a Lua script.
             // This avoids the TOCTOU race in the old incr→exists→expire pattern.
             const luaScript = `
@@ -370,9 +369,9 @@ class AdminAuthService {
                 end
                 return current
             `;
-            const currentCount = await redis.eval(luaScript, 1, rateLimitKey, 3600);
+            const currentCount = await redis.eval(luaScript, 1, rateLimitKey, windowSeconds);
 
-            if (currentCount > 3) {
+            if (currentCount > maxSends) {
                 const ttl = await redis.ttl(rateLimitKey);
                 const minutesLeft = Math.ceil(ttl / 60);
                 throw new ValidationError(
