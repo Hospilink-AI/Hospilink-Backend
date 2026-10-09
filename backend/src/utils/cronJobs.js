@@ -354,6 +354,27 @@ class CronJobs {
             'IDfy results'
         );
 
+        // Identity check reminders — days 3 and 7 after a serious difference
+        // was flagged (the first goes out when it's found). Runs hourly, acts
+        // at 10:00 IST, once a day.
+        this.scheduleJob(
+            async () => {
+                const now = new Date();
+                const istHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false }).format(now));
+                if (istHour !== 10) return;
+                const hasLock = await acquireCronLock(`identity-reminders:${istDateKey(now)}`, 23 * 60 * 60);
+                if (!hasLock) return;
+                try {
+                    const sent = await require('../services/identityCheck.service').sendDueReminders(now);
+                    if (sent > 0) console.log(`Identity check reminders sent: ${sent}`);
+                } catch (err) {
+                    console.error('Identity check reminder job failed:', err.message);
+                }
+            },
+            60,
+            'Identity check reminders'
+        );
+
         // Auto-relist repeat push — run every 5 minutes. State-based
         // (DutyService.sendAutoRelistRepeatPushes checks repeatPushCount
         // vs. minutes-since-relist), so a 5-minute cadence is precise

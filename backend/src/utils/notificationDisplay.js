@@ -57,6 +57,7 @@ const TYPES = {
     RESUME_ANALYZED: T('Resume reviewed', 'account', 'info', 'profile', 'file-text'),
     RATING_PENALTY_APPLIED: T('Rating penalty applied', 'account', 'warning', 'ticket_detail', 'trending-down'),
     RATING_PENALTY_REVERSED: T('Rating penalty reversed', 'account', 'success', 'ticket_detail', 'trending-up'),
+    IDENTITY_DETAILS_MISMATCH: T('Check your profile details', 'verification', 'warning', 'documents', 'id-card'),
 
     // Admin-only alerts
     NEW_HOSPITAL_REGISTRATION: T('New hospital registered', 'admin', 'info', 'admin_hospital', 'building'),

@@ -2,6 +2,7 @@ const Hospital = require('../models/Hospital');
 const Duty = require('../models/Duty');
 const User = require('../models/User')
 const AdminAuthService = require('../services/adminAuth.service');
+const identityCheck = require('../services/identityCheck.service');
 const adminService = require('../services/admin.service');
 const DutyService = require('../services/duty.service');
 const documentService = require('../services/document.service');
@@ -246,6 +247,8 @@ exports.getMedicalStaffList = asyncHandler(async (req, res) => {
         page,
         limit
     });
+    // Identity check summary per row (admins only)
+    await identityCheck.attachSummaries(result.staff);
 
     res.status(200).json({
         success: true,
@@ -277,6 +280,7 @@ exports.getVerifiedMedicalStaffList = asyncHandler(async (req, res) => {
 // GET /api/admin/medical-staff/:staffId — detailed view
 exports.getMedicalStaffDetail = asyncHandler(async (req, res) => {
     const result = await adminService.getMedicalStaffDetail(req.params.staffId);
+    result.identityCheck = await identityCheck.forAdmin(result.userId);
     res.status(200).json({ success: true, data: result });
 });
 
@@ -586,6 +590,7 @@ exports.getHospitalSimpleList = asyncHandler(async (req, res) => {
 exports.listHospitals = asyncHandler(async (req, res) => {
     const { search, status, city, location, page, limit } = req.validatedQuery;
     const result = await adminService.getHospitalList({ search, status, city, location, page, limit });
+    await identityCheck.attachSummaries(result.hospitals);
     res.status(200).json({ success: true, ...result });
 });
 
@@ -593,6 +598,7 @@ exports.listHospitals = asyncHandler(async (req, res) => {
 // GET /api/admin/hospitals/:hospitalId — preview modal
 exports.getHospitalDetail = asyncHandler(async (req, res) => {
     const result = await adminService.getHospitalDetail(req.params.hospitalId);
+    result.identityCheck = await identityCheck.forAdmin(result.user?.id);
     res.status(200).json({ success: true, data: result });
 });
 

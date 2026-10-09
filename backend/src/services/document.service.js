@@ -8,6 +8,7 @@ const { paginateArray } = require("../utils/pagination");
 const notificationEmitter = require('./notificationEmitter');
 const idfyService = require("./idfy.service");
 const idfyResults = require("./idfyResults.service");
+const identityCheck = require("./identityCheck.service");
 const { extractTextFromPDF } = require("./pdf.service");
 const { isDocumentExpired } = require("../utils/documentExpiryValidator");
 const logger = require('../utils/logger');
@@ -834,6 +835,9 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
     // before the response is returned to the client
     await syncDocumentsUploadedFlag(user._id, user.role);
 
+    // Compare the details on the identity documents again
+    identityCheck.checkSoon(user._id);
+
 
     if (documentType === "resume-experience" && user.role === "staff" && !options.skipAutoFill) {
         try {
@@ -1019,6 +1023,8 @@ exports.verifyDocument = async (documentId, adminId) => {
     try {
         const cacheService = require('./cache.service');
         await cacheService.invalidateProfile(docRecord.userId._id.toString(), docRecord.userRole);
+        // A rejected document is left out of the identity comparison
+        identityCheck.checkSoon(docRecord.userId._id);
     } catch (cacheErr) {
         console.error('Failed to invalidate profile cache after document verification:', cacheErr.message);
     }
@@ -1083,6 +1089,8 @@ exports.rejectDocument = async (documentId, adminId, reason) => {
     try {
         const cacheService = require('./cache.service');
         await cacheService.invalidateProfile(docRecord.userId._id.toString(), docRecord.userRole);
+        // A rejected document is left out of the identity comparison
+        identityCheck.checkSoon(docRecord.userId._id);
     } catch (cacheErr) {
         console.error('Failed to invalidate profile cache after document rejection:', cacheErr.message);
     }
@@ -1196,6 +1204,8 @@ exports.deleteDocument = async (user, documentId) => {
     // Sync the isDocumentsUploaded flag — awaited so cache is invalidated
     // before the response is returned to the client
     await syncDocumentsUploadedFlag(user._id, user.role);
+
+    identityCheck.checkSoon(user._id);
 
     if (wasResume && user.role === "staff") {
         try {

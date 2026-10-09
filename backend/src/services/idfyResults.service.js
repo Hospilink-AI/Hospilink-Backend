@@ -2,6 +2,7 @@ const Document = require('../models/Document');
 const idfyService = require('./idfy.service');
 const cacheService = require('./cache.service');
 const logger = require('../utils/logger');
+const identityCheck = require('./identityCheck.service');
 
 /**
  * Results of IDfy's PAN, GST and CIN checks.
@@ -49,7 +50,7 @@ async function settle(recordId, entryId, set) {
 
 /**
  * Fetch and apply the result for one waiting entry.
- * @returns {Promise<string>} 'verified' | 'rejected' | 'failed' | 'timed_out' | 'waiting'
+ * @returns {Promise<string>} 'verified' | 'review' | 'rejected' | 'failed' | 'timed_out' | 'waiting'
  */
 async function checkEntry(record, entry, now = Date.now()) {
     const requestId = entry.verificationMeta?.requestId;
@@ -61,10 +62,15 @@ async function checkEntry(record, entry, now = Date.now()) {
     if (task?.status === 'completed') {
         const source = task.result?.source_output;
         const verified = isVerified(entry.documentType, source);
-        outcome = verified ? 'verified' : 'rejected';
+        // A real PAN must also be this person's: the name on the card has to
+        // match the profile, or an admin checks it
+        const decision = verified && entry.documentType === 'pan-card'
+            ? await identityCheck.panDecision(record.userId, record.userRole, entry.extractedData?.name)
+            : { autoVerify: true, reason: null };
+        outcome = !verified ? 'rejected' : (decision.autoVerify ? 'verified' : 'review');
         changed = await settle(record._id, entry._id, {
-            verificationStatus: verified ? 'auto-verified' : 'rejected',
-            'verificationMeta.status': 'completed',
+            verificationStatus: !verified ? 'rejected' : (decision.autoVerify ? 'auto-verified' : 'manual-pending-verification'),
+            'verificationMeta.status': decision.autoVerify ? 'completed' : decision.reason,
             'verificationMeta.rawResponse': source,
             'verificationMeta.verifiedAt': new Date()
         });
@@ -85,6 +91,7 @@ async function checkEntry(record, entry, now = Date.now()) {
 
     if (changed) {
         await cacheService.invalidateProfile(record.userId.toString(), record.userRole).catch(() => {});
+        identityCheck.checkSoon(record.userId);
         logger.info(`IDfy result applied: type=${entry.documentType} requestId=${requestId} outcome=${outcome}`);
     }
     return outcome;
@@ -113,7 +120,7 @@ async function checkPending({ limit = BATCH } = {}) {
             }
         }
     })
-        .select('userId userRole documents._id documents.documentType documents.isDeleted documents.verificationStatus documents.uploadedAt documents.verificationMeta.provider documents.verificationMeta.status documents.verificationMeta.requestId')
+        .select('userId userRole documents._id documents.documentType documents.isDeleted documents.verificationStatus documents.uploadedAt documents.verificationMeta.provider documents.verificationMeta.status documents.verificationMeta.requestId documents.extractedData.name')
         .limit(limit)
         .lean();
 
@@ -141,7 +148,7 @@ function checkSoon(userId, requestId, delayMs = FIRST_CHECK_AFTER_MS) {
     const timer = setTimeout(async () => {
         try {
             const record = await Document.findOne({ userId })
-                .select('userId userRole documents._id documents.documentType documents.isDeleted documents.verificationStatus documents.uploadedAt documents.verificationMeta.provider documents.verificationMeta.status documents.verificationMeta.requestId')
+                .select('userId userRole documents._id documents.documentType documents.isDeleted documents.verificationStatus documents.uploadedAt documents.verificationMeta.provider documents.verificationMeta.status documents.verificationMeta.requestId documents.extractedData.name')
                 .lean();
             const entry = record && waitingEntries(record).find(e => e.verificationMeta.requestId === requestId);
             if (entry) await checkEntry(record, entry);

@@ -5,6 +5,12 @@ jest.mock('../src/services/notificationEmitter', () => ({
     emitDocumentAutoVerified: async (userId) => { mockVerifiedNotices.push(userId); }
 }));
 jest.mock('../src/services/activityLogEmitter', () => ({ emitDocumentActivity: async () => {} }));
+const mockDecision = { autoVerify: true, reason: null };
+const mockChecked = [];
+jest.mock('../src/services/identityCheck.service', () => ({
+    aadhaarDecision: async () => mockDecision,
+    checkSoon: (userId) => mockChecked.push(userId)
+}));
 
 const Document = require('../src/models/Document');
 const { handleAadhaarWebhook } = require('../src/controllers/webhook.controller');
@@ -14,6 +20,8 @@ beforeAll(() => { process.env.IDFY_WEBHOOK_TOKEN = 'secret-token'; });
 beforeEach(() => {
     updates = [];
     mockVerifiedNotices.length = 0;
+    mockChecked.length = 0;
+    Object.assign(mockDecision, { autoVerify: true, reason: null });
     Document.updateOne = async (q, u) => { updates.push(u.$set); return { modifiedCount: 1 }; };
     Document.findOne = () => ({ select: () => ({ lean: async () => ({ userId: 'u1', userRole: 'staff' }) }) });
 });
@@ -44,6 +52,16 @@ describe('IDfy Aadhaar webhook', () => {
         expect(updates[0]['documents.$.verificationStatus']).toBe('manual-pending-verification');
         expect(updates[0]['documents.$.verificationMeta.status']).toBe(payload.status || 'unknown');
         expect(mockVerifiedNotices).toEqual([]);
+    });
+
+    it('sends a real Aadhaar with a name that does not match the profile to an admin, with the DigiLocker details', async () => {
+        Object.assign(mockDecision, { autoVerify: false, reason: 'name_mismatch' });
+        await send({ reference_id: 'r1', status: 'completed', parsed_details: details });
+        expect(updates[0]['documents.$.verificationStatus']).toBe('manual-pending-verification');
+        expect(updates[0]['documents.$.verificationMeta.status']).toBe('name_mismatch');
+        expect(updates[0]['documents.$.extractedData']).toEqual(details);
+        expect(mockVerifiedNotices).toEqual([]);
+        expect(mockChecked).toEqual(['u1']);
     });
 
     it('still rejects a wrong token', async () => {

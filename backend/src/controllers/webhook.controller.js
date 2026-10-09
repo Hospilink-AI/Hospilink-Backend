@@ -3,6 +3,7 @@ const Document = require("../models/Document");
 const cacheService = require('../services/cache.service');
 const logger = require('../utils/logger');
 const notificationEmitter = require('../services/notificationEmitter');
+const identityCheck = require('../services/identityCheck.service');
 const activityLogEmitter = require('../services/activityLogEmitter');
 const { ACTIVITY_ACTIONS } = require('../utils/activityLog.constants');
 
@@ -63,9 +64,24 @@ exports.handleAadhaarWebhook = async (req, res) => {
         const reportedStatus = String(data.status || '').trim().toLowerCase();
         const hasDetails = data.parsed_details && typeof data.parsed_details === 'object'
             && Object.keys(data.parsed_details).length > 0;
-        const checkFailed = !(IDFY_SUCCESS_STATUSES.includes(reportedStatus) && hasDetails);
+        const owner = await Document.findOne({
+            "documents.verificationMeta.referenceId": requestId
+        }).select('userId userRole').lean();
+
+        let checkFailed = !(IDFY_SUCCESS_STATUSES.includes(reportedStatus) && hasDetails);
+        let reviewReason = reportedStatus || 'unknown';
         if (checkFailed) {
             logger.warn(`Aadhaar webhook sent to manual review: referenceId=${requestId}, status=${reportedStatus || 'none'}, details=${hasDetails}`);
+        } else if (owner) {
+            // DigiLocker says the Aadhaar is real; it must also be this
+            // person's: the name has to match the profile, and the date of
+            // birth must not differ from their other documents
+            const decision = await identityCheck.aadhaarDecision(owner.userId, owner.userRole, data.parsed_details);
+            if (!decision.autoVerify) {
+                checkFailed = true;
+                reviewReason = decision.reason;
+                logger.warn(`Aadhaar webhook sent to manual review: referenceId=${requestId}, reason=${decision.reason}`);
+            }
         }
 
         const result = await Document.updateOne(
@@ -77,8 +93,10 @@ exports.handleAadhaarWebhook = async (req, res) => {
                 $set: checkFailed
                     ? {
                         "documents.$.verificationStatus": "manual-pending-verification",
-                        "documents.$.verificationMeta.status": reportedStatus || 'unknown',
-                        "documents.$.verificationMeta.rawResponse": data
+                        "documents.$.verificationMeta.status": reviewReason,
+                        "documents.$.verificationMeta.rawResponse": data,
+                        // DigiLocker's details, for the admin who reviews it
+                        ...(hasDetails ? { "documents.$.extractedData": data.parsed_details } : {})
                     }
                     : {
                         "documents.$.verificationStatus": "auto-verified",
@@ -93,11 +111,10 @@ exports.handleAadhaarWebhook = async (req, res) => {
         // ── 4. Invalidate profile cache ───────────────────────────────────────
         if (result.modifiedCount > 0) {
             try {
-                const docRecord = await Document.findOne({
-                    "documents.verificationMeta.referenceId": requestId
-                }).select('userId userRole').lean();
+                const docRecord = owner;
 
                 if (docRecord) {
+                    identityCheck.checkSoon(docRecord.userId);
                     await cacheService.invalidateProfile(docRecord.userId.toString(), docRecord.userRole);
                     if (!checkFailed) {
                         await notificationEmitter.emitDocumentAutoVerified(docRecord.userId.toString(), 'aadhaar-card');

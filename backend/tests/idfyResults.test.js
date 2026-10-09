@@ -3,6 +3,11 @@
 jest.mock('../src/utils/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
 jest.mock('../src/services/cache.service', () => ({ invalidateProfile: jest.fn(async () => true) }));
 jest.mock('../src/services/idfy.service', () => ({ getTaskResult: jest.fn() }));
+const mockPanDecision = { autoVerify: true, reason: null };
+jest.mock('../src/services/identityCheck.service', () => ({
+    panDecision: async () => mockPanDecision,
+    checkSoon: () => {}
+}));
 
 const fs = require('fs');
 const path = require('path');
@@ -50,6 +55,16 @@ test('a completed PAN check verifies the document', async () => {
     expect(set['documents.$.verificationStatus']).toBe('auto-verified');
     expect(set['documents.$.verificationMeta.status']).toBe('completed');
     expect(cacheService.invalidateProfile).toHaveBeenCalledWith(String(userId), 'hospital');
+});
+
+test('a real PAN whose name does not match the profile goes to an admin', async () => {
+    Object.assign(mockPanDecision, { autoVerify: false, reason: 'name_mismatch' });
+    idfyService.getTaskResult.mockResolvedValue([{ status: 'completed', result: { source_output: { status: 'id_found' } } }]);
+    await idfyResults.checkPending();
+    Object.assign(mockPanDecision, { autoVerify: true, reason: null });
+    const set = updates[0].update.$set;
+    expect(set['documents.$.verificationStatus']).toBe('manual-pending-verification');
+    expect(set['documents.$.verificationMeta.status']).toBe('name_mismatch');
 });
 
 test('a completed check that does not match rejects, as before', async () => {

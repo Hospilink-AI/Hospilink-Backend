@@ -42,7 +42,9 @@ const notificationSchema = new mongoose.Schema({
             'DUTY_PENDING_CONFIRMATION', 'END_OTP_REGENERATED', 'RATING_PENALTY_APPLIED', 'RATING_PENALTY_REVERSED',
             // Duty, document and vacancy events that had no notification
             'DUTY_ASSIGNED_BY_ADMIN', 'DUTY_EXPIRED_UNFILLED', 'DUTY_MARKED_INCOMPLETE', 'DUTY_STATUS_OVERRIDDEN',
-            'DUTY_OPENED_TO_OTHERS', 'DOCUMENT_AUTO_VERIFIED', 'VACANCY_CLOSED'],
+            'DUTY_OPENED_TO_OTHERS', 'DOCUMENT_AUTO_VERIFIED', 'VACANCY_CLOSED',
+            // Identity document details don't match the profile (reminder only)
+            'IDENTITY_DETAILS_MISMATCH'],
         required: [true, 'Notification type is required']
     },
     payload: {

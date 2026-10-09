@@ -129,6 +129,7 @@ app.use("/api/account", require("./routes/accountStanding.routes"));
 app.use("/api/support/feedback", require("./routes/feedback.routes"));
 app.use("/api/admin/feedback", require("./routes/adminFeedback.routes"));
 app.use("/api/admin/analytics", require("./routes/adminAnalytics.routes"));
+app.use("/api/admin/identity-checks", require("./routes/adminIdentityChecks.routes"));
 app.use("/api/hospital/favourites", require("./routes/hospitalFavourites.routes"));
 app.use("/api/staff/availability", require("./routes/staffAvailability.routes"));
 

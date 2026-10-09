@@ -901,6 +901,11 @@ class ProfileService {
             // Invalidate profile status cache
             await cacheService.invalidateProfileStatus(userId);
 
+            // A new name is compared with the identity documents again
+            if (updateData.fullName || updateData.hospitalLegalName) {
+                require('./identityCheck.service').checkSoon(userId);
+            }
+
             // Get fresh data for response
             const freshProfile = await this.getUserProfile(userId);
 

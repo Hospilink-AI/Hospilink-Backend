@@ -142,6 +142,13 @@ documentSchema.index({ "documents.verifiedBy": 1 });
 // Soft-delete aware queries: skip deleted docs efficiently
 documentSchema.index({ userId: 1, "documents.isDeleted": 1 });
 
+// The same PAN on another account (identity checks). Partial: only
+// entries that have a PAN number.
+documentSchema.index(
+    { "documents.extractedData.panNumber": 1 },
+    { partialFilterExpression: { "documents.extractedData.panNumber": { $exists: true } } }
+);
+
 // IDfy checks still waiting for a result (the IDfy results job). Partial, so
 // it only holds those few documents.
 documentSchema.index(
