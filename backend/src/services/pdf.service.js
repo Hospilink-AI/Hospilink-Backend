@@ -51,7 +51,9 @@ exports.extractTextFromPDF = async (
         const pdf =
             await pdfjsLib
                 .getDocument({
-                    data: uint8Array
+                    data: uint8Array,
+                    // Never run code from a PDF's fonts (CVE-2024-4367)
+                    isEvalSupported: false
                 }).promise;
 
         let fullText = "";

@@ -1,4 +1,4 @@
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 
 # Install build tools needed to compile native modules (canvas, sharp) if prebuilt binaries are unavailable
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -18,7 +18,7 @@ COPY package*.json ./
 RUN npm install --omit=dev
 
 # ---- Final image ----
-FROM node:20-slim
+FROM node:22-slim
 
 # Runtime libs for canvas/sharp + chromium for puppeteer + curl for health checks
 RUN apt-get update && apt-get install -y --no-install-recommends \

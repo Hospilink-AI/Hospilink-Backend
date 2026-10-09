@@ -166,7 +166,8 @@ async function redactImage(buffer, mimetype) {
 
 async function redactPdf(buffer) {
     const pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
-    const source = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+    // isEvalSupported: never run code from a PDF's fonts (CVE-2024-4367)
+    const source = await pdfjs.getDocument({ data: new Uint8Array(buffer), isEvalSupported: false }).promise;
     if (source.numPages > MAX_PDF_PAGES) {
         throw new RedactionError(`PDF has ${source.numPages} pages`);
     }

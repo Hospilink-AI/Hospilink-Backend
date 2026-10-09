@@ -115,7 +115,8 @@ const determineMdvsDocType = (hospilinkDocType, extractedData) => {
 // MDVS's image pipeline handles small QRs reliably; its PDF pipeline does not.
 const convertPdfToPng = async (pdfBuffer) => {
     const uint8Array = new Uint8Array(pdfBuffer);
-    const pdf = await pdfjsLib.getDocument({ data: uint8Array }).promise;
+    // isEvalSupported: never run code from a PDF's fonts (CVE-2024-4367)
+    const pdf = await pdfjsLib.getDocument({ data: uint8Array, isEvalSupported: false }).promise;
     const page = await pdf.getPage(1);
 
     // Scale 4 → high enough for small QRs to survive rasterization
