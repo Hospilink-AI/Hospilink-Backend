@@ -572,19 +572,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         // Check if redirect_url is directly in the initial response
                         // let redirectUrl = idfyResponse.redirect_url || idfyResponse.redirect_uri || null;
 
-                        // if (!redirectUrl) {
-                        //     // Poll up to 3 times with short delays — if IDFY fails fast, stop early
-                        //     for (let attempt = 1; attempt <= 3; attempt++) {
-                        //         await new Promise(res => setTimeout(res, 1500));
-                        //         const taskResult = await idfyService.getTaskResult(idfyResponse.request_id);
-                        //         const task = taskResult?.[0];
-
-                        //         // If IDFY already failed, no point continuing
-                        //         if (task?.status === "failed") {
-                        //             logger.warn(`Aadhaar Digilocker task failed: ${task.error} - ${task.message}`);
-                        //             break;
-                        //         }
-
                         //         const sourceOutput = task?.result?.source_output;
                         //         redirectUrl =
                         //             task?.result?.redirect_url ||
@@ -593,13 +580,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                         //             sourceOutput?.redirect_uri ||
                         //             task?.redirect_url ||
                         //             null;
-
-                        //         if (redirectUrl) {
-                        //             logger.info(`Aadhaar redirect_url obtained on attempt ${attempt}`);
-                        //             break;
-                        //         }
-                        //     }
-                        // }
 
                         let redirectUrl = null;
 
@@ -641,112 +621,6 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
                 }
             }
 
-            // const {
-            //     extractQRFromBuffer,
-            //     detectQRType,
-            //     decodeBase64QR,
-            //     fetchQRUrlData
-            // } = require("./qr.service");
-
-            // if (
-            //     verificationStatus !== "rejected" &&
-            //     (
-            //         documentType === "mcim-certificate" ||
-            //         documentType === "ncim-certificate" ||
-            //         documentType === "license-permit"
-            //     )
-            // ) {
-            //     const parseMCIMHtml = require("./parsers/mcimHtml.parser");
-            //     const parseNCIMHtml = require("./parsers/ncimHtml.parser");
-            //     const { compareCertificateData } = require("../utils/compare");
-
-            //     let qrRaw = null;
-            //     let qrType = null;
-            //     let qrMatched = false;
-
-            //     try {
-            //         qrRaw = await extractQRFromBuffer(file.buffer);
-            //         qrType = detectQRType(qrRaw);
-
-            //         console.log("QR RAW:", qrRaw);
-            //         console.log("QR TYPE:", qrType);
-
-            //         // URL QR
-            //         if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "url") {
-
-            //             const html = await fetchQRUrlData(qrRaw);
-
-            //             if (html) {
-            //                 let qrData = {};
-
-            //                 if (documentType === "mcim-certificate" || documentType === "license-permit") {
-            //                     qrData = parseMCIMHtml(html);
-            //                 }
-
-            //                 if (documentType === "ncim-certificate") {
-            //                     qrData = parseNCIMHtml(html);
-            //                 }
-
-            //                 const normalizedOCR = {
-            //                     name: extractedData.doctorName || extractedData.name,
-            //                     registrationNumber: extractedData.registrationNumber || extractedData.licenseNumber
-            //                 };
-
-            //                 const result = compareCertificateData(normalizedOCR, qrData);
-
-            //                 if (result === "match" || result === "partial") {
-            //                     verificationStatus = "auto-verified";
-            //                     qrMatched = true;
-            //                 } else {
-            //                     verificationStatus = "manual-pending-verification";
-            //                 }
-            //             } else {
-            //                 verificationStatus = "manual-pending-verification";
-            //             }
-            //         }
-            //         // BASE64 QR
-            //         else if (verificationStatus !== "auto-verified" && verificationStatus !== "rejected" && qrType === "base64") {
-
-            //             const decoded = decodeBase64QR(qrRaw);
-            //             console.log("DECODED QR:", decoded);
-
-            //             let ocrReg = extractedData.registrationNumber;
-
-            //             // simple fallback
-            //             if (!ocrReg && decoded) {
-            //                 ocrReg = decoded;
-            //             }
-
-            //             if (decoded && ocrReg) {
-            //                 const ocrNumber = ocrReg.toString().replace(/\D/g, "");
-
-            //                 if (ocrNumber.endsWith(decoded)) {
-            //                     verificationStatus = "auto-verified";
-            //                     qrMatched = true;
-            //                 } else {
-            //                     verificationStatus = "manual-pending-verification";
-            //                 }
-            //                 extractedData.registrationNumber = ocrNumber;
-            //             } else if (verificationStatus !== "auto-verified") {
-            //                 verificationStatus = "manual-pending-verification";
-            //             }
-            //         }
-            //         // NO QR → DO NOT OVERRIDE IF ALREADY VERIFIED
-            //         else if (
-            //             verificationStatus !== "auto-verified" &&
-            //             documentType !== "aadhaar-card"
-            //         ) {
-            //             verificationStatus = "manual-pending-verification";
-            //         }
-            //     } catch (err) {
-            //         console.error("QR verification error:", err);
-            //         verificationStatus = "manual-pending-verification";
-            //     }
-            //     if (!qrMatched) {
-            //         verificationStatus = "manual-pending-verification";
-            //     }
-            // }
-
             // auto verification 
             if (
                 documentType === "aadhaar-card" &&
@@ -758,89 +632,10 @@ exports.uploadDocument = async (user, file, documentType, options = {}) => {
 
             // NAME VALIDATION
 
-            // const normalizeName = (value = "") => {
-            //     return value
-            //         .toString()
-            //         .toLowerCase()
-            //         .replace(/dr\.?/gi, "")
-            //         .replace(/mr\.?/gi, "")
-            //         .replace(/mrs\.?/gi, "")
-            //         .replace(/ms\.?/gi, "")
-            //         .replace(/[^a-z\s]/g, "")
-            //         .replace(/\s+/g, " ")
-            //         .trim();
-            // };
-
-            // const isNameMatching = (userName, documentName) => {
-
-            //     if (!userName || !documentName) {
-            //         return false;
-            //     }
-
-            //     const normalizedUser = normalizeName(userName);
-            //     const normalizedDoc = normalizeName(documentName);
-
-            //     if (normalizedUser === normalizedDoc) {
-            //         return true;
-            //     }
-
-            //     if (
-            //         normalizedUser.includes(normalizedDoc) ||
-            //         normalizedDoc.includes(normalizedUser)
-            //     ) {
-            //         return true;
-            //     }
-
-            //     const userWords = normalizedUser.split(" ");
-            //     const docWords = normalizedDoc.split(" ");
-
-            //     const matchedWords = userWords.filter(word =>
-            //         docWords.includes(word)
-            //     );
-
-            //     return matchedWords.length >= 2;
-            // };
-
-            // let extractedDocumentName = null;
-
-            // if (documentType === "aadhaar-card") {
-            //     extractedDocumentName = extractedData.name;
-            // }
-
-            // if (documentType === "pan-card") {
-            //     extractedDocumentName = extractedData.name;
-            // }
-
-            // if (
-            //     documentType === "mcim-certificate" ||
-            //     documentType === "ncim-certificate"
-            // ) {
-            //     extractedDocumentName = extractedData.doctorName;
-            // }
-
-            // if (documentType === "license-permit") {
-            //     extractedDocumentName = extractedData.name;
-            // }
-
             // if (
             //     user.role === "staff" &&
             //     extractedDocumentName
             // ) {
-
-            //     const matched = isNameMatching(
-            //         user.name,
-            //         extractedDocumentName
-            //     );
-
-            //     if (!matched) {
-
-            //         await deleteFromS3(key);
-
-            //         throw new Error(
-            //             `Name mismatch detected. User profile name "${user.name}" does not match document name "${extractedDocumentName}". Please upload a document with the correct name.`
-            //         );
-            //     }
-            // }
 
         }
     } catch (err) {

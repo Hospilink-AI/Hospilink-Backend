@@ -137,11 +137,6 @@ module.exports = (text) => {
         }
     }
 
-    // //Debug
-    // console.log("LINES:", lines);
-    // console.log("LEGAL LINE:", legalLine);
-    // console.log("TRADE LINE:", tradeLine);
-
     // FINAL OUTPUT
     return {
         legalName,

@@ -23,9 +23,6 @@ const ticketRoutes = require("./routes/ticket.routes");
 const logger = require("./utils/logger");
 // Older console.* calls go through the logger as well (not in tests)
 if (process.env.NODE_ENV !== "test") logger.captureConsole();
-// Only run interval-based cron in persistent environments (local dev)
-// On Vercel, cron jobs are handled via api/cron/* endpoints + vercel.json schedules
-
 const { buildCorsOptions } = require('./config/cors.config');
 
 const app = express();

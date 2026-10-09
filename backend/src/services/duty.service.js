@@ -1844,16 +1844,6 @@ class DutyService {
                         duration: distanceInfo.duration,
                         distanceText: distanceInfo.distanceText,
                         durationText: distanceInfo.durationText,
-                        // hospitalLocation: {
-                        //     latitude: hospitalLat,
-                        //     longitude: hospitalLng,
-                        //     address: {
-                        //         currentAddress: duty.hospital.currentAddress,
-                        //         city: duty.hospital.city,
-                        //         state: duty.hospital.state,
-                        //         pincode: duty.hospital.pincode
-                        //     }
-                        // }
                     };
 
                     jobsWithDistance.push(jobWithDistance);
@@ -1950,14 +1940,6 @@ class DutyService {
                     longitude: staffLng
 
                 },
-                // route: {
-                //     polyline: routeInfo.polyline,
-                //     distance: routeInfo.distance,
-                //     duration: routeInfo.duration,
-                //     distanceText: routeInfo.distanceText,
-                //     durationText: routeInfo.durationText,
-                //     steps: routeInfo.steps
-                // }
 
                 route: {
                     overviewPolyline: routeInfo.overviewPolyline,

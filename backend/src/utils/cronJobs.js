@@ -239,9 +239,7 @@ class CronJobs {
         // respondent-window reminders/lapse, the awaiting-raiser day-1/day-3
         // reminders + 5-day auto-close, and the priority-based claim-timeout
         // sweep into one tick, same "bundle several sweeps into one
-        // scheduled run" pattern as the interview lifecycle job above. No
-        // serverless (api/cron/) mirror yet — interview-lifecycle set the
-        // precedent that a bundled sweep like this stays interval-only.
+        // scheduled run" pattern as the interview lifecycle job above.
         this.scheduleJob(
             async () => {
                 const hasLock = await acquireCronLock('ticket-sla-sweeps', 14 * 60);
