@@ -30,7 +30,7 @@ module.exports = (text) => {
 
     // --- DOCTOR NAME ---
     // Card layout: "Name   : Dr. Sumit Sanjivan Thombre"
-    const nameLineMatch = normalized.match(/Name\s*[:\-]\s*(.+)/i);
+    const nameLineMatch = normalized.match(/Name\s*[:-]\s*(.+)/i);
     if (nameLineMatch) {
         doctorName = nameLineMatch[1]
             .replace(/\s+/g, ' ')
@@ -47,7 +47,7 @@ module.exports = (text) => {
 
     // --- QUALIFICATION ---
     // 1. Try to find the explicit label first
-    const qualMatch = normalized.match(/Qualification\s*[:\-]\s*([A-Za-z.\s]+)/i);
+    const qualMatch = normalized.match(/Qualification\s*[:-]\s*([A-Za-z.\s]+)/i);
     if (qualMatch) {
         qualification = qualMatch[1].trim().split('\n')[0].trim();
     }
@@ -62,19 +62,19 @@ module.exports = (text) => {
     }
 
     // --- DOB ---
-    const dobMatch = normalized.match(/DOB\s*[:\-]\s*(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+    const dobMatch = normalized.match(/DOB\s*[:-]\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/i);
     if (dobMatch) {
         dob = dobMatch[1].trim();
     }
 
     // --- REGISTRATION DATE ---
-    const regDateMatch = normalized.match(/Registration\s+Date\s*[:\-]\s*(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+    const regDateMatch = normalized.match(/Registration\s+Date\s*[:-]\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/i);
     if (regDateMatch) {
         registrationDate = regDateMatch[1].trim();
     }
 
     // --- VALID THRU ---
-    const validMatch = normalized.match(/(?:Valid\s*Thru|Valid\s*Upto|Valid\s*Until|Validity)\s*[:\-]?\s*(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+    const validMatch = normalized.match(/(?:Valid\s*Thru|Valid\s*Upto|Valid\s*Until|Validity)\s*[:-]?\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/i);
     if (validMatch) {
         validThru = validMatch[1].trim();
     }

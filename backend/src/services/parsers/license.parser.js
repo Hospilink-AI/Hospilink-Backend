@@ -45,7 +45,7 @@ module.exports = (text) => {
 
     // --- NAME ---
     // "Name : Dr. Sumit Sanjivan Thombre"
-    const nameLabelMatch = normalized.match(/Name\s*[:\-]\s*(.+)/i);
+    const nameLabelMatch = normalized.match(/Name\s*[:-]\s*(.+)/i);
     if (nameLabelMatch) {
         name = nameLabelMatch[1].replace(/\s+/g, ' ').trim().split('\n')[0];
     }
@@ -68,11 +68,11 @@ module.exports = (text) => {
     }
 
     // --- ISSUE DATE ---
-    const issueDateMatch = normalized.match(/(?:Registration\s+Date|Issue\s+Date|Issued)\s*[:\-]\s*(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+    const issueDateMatch = normalized.match(/(?:Registration\s+Date|Issue\s+Date|Issued)\s*[:-]\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/i);
     if (issueDateMatch) issueDate = issueDateMatch[1].trim();
 
     // --- EXPIRY DATE ---
-    const expiryMatch = normalized.match(/(?:Valid\s+Thru|Expiry|Expires?|Valid\s+Until)\s*[:\-]\s*(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+    const expiryMatch = normalized.match(/(?:Valid\s+Thru|Expiry|Expires?|Valid\s+Until)\s*[:-]\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/i);
     if (expiryMatch) expiryDate = expiryMatch[1].trim();
 
     // --- ISSUING BODY ---
@@ -81,7 +81,7 @@ module.exports = (text) => {
     else if (isMedicalCouncil) issuingBody = 'Medical Council';
 
     // --- QUALIFICATION ---
-    const qualMatch = normalized.match(/Qualification\s*[:\-]\s*([A-Za-z.\s]+)/i);
+    const qualMatch = normalized.match(/Qualification\s*[:-]\s*([A-Za-z.\s]+)/i);
     if (qualMatch) qualification = qualMatch[1].trim().split('\n')[0].trim();
 
     return {

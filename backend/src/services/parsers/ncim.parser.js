@@ -23,7 +23,7 @@ module.exports = (text) => {
     }
 
     const regMatch = normalized.match(
-        /(?:Registration\s*No\.?|Reg\.?\s*No\.?)\s*[:\-]?\s*([A-Z\-0-9]+)/i
+        /(?:Registration\s*No\.?|Reg\.?\s*No\.?)\s*[:-]?\s*([A-Z\-0-9]+)/i
     );
 
     if (regMatch) {
