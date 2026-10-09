@@ -971,7 +971,10 @@ const processIdfyResultAsync = async (userDocId, requestId, documentType) => {
 
 exports.getUserDocuments = async (user, options = {}) => {
 
-    const userDocs = await Document.findOne({ userId: user._id });
+    // The provider's raw response can be large and is never listed
+    const userDocs = await Document.findOne({ userId: user._id })
+        .select('-documents.verificationMeta.rawResponse')
+        .lean();
 
     if (!userDocs) {
         return {
@@ -1011,7 +1014,9 @@ exports.getUserDocuments = async (user, options = {}) => {
                 updatedAt: doc.updatedAt,
                 url: signedUrl,
                 extractedData: doc.extractedData,
-                fileName: doc.fileName
+                fileName: doc.fileName,
+                rejectionReason: doc.verificationStatus === 'rejected' ? (doc.rejectionReason || null) : null,
+                verifiedAt: doc.verifiedAt || null
             };
         })
     );
