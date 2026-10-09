@@ -49,24 +49,38 @@ async function authMiddleware(socket, next) {
         }
 
         // ── 4. Load user ──────────────────────────────────────────────────────
-        const user = await User.findById(decoded.id).select('-password');
+        // Plain objects with only what the handlers read: a socket lives for
+        // hours, and full documents on tens of thousands of them add up
+        const user = await User.findById(decoded.id).select('_id role name isActive deletion').lean();
 
         if (!user) {
             return next(new Error('User not found'));
         }
+        // Same account checks as the HTTP auth middleware
+        if (user.deletion?.requestedAt) {
+            return next(new Error('This account is scheduled for deletion. Sign in again to keep it.'));
+        }
+        if (user.role === 'admin' && user.isActive === false) {
+            return next(new Error('This admin account has been deactivated.'));
+        }
 
+        user.id = String(user._id);
         socket.user = user;
 
         // ── 5. Attach role-specific profile ───────────────────────────────────
         if (user.role === 'hospital') {
-            const hospital = await Hospital.findOne({ user: user._id });
+            const hospital = await Hospital.findOne({ user: user._id })
+                .select('_id isSuspended suspensionReason')
+                .lean();
             if (!hospital) {
                 return next(new Error('Hospital profile not found'));
             }
             socket.hospital = hospital;
 
         } else if (user.role === 'staff') {
-            const medicalStaff = await MedicalStaff.findOne({ user: user._id });
+            const medicalStaff = await MedicalStaff.findOne({ user: user._id })
+                .select('_id jobRole isSuspended suspensionReason')
+                .lean();
             if (!medicalStaff) {
                 return next(new Error('Medical staff profile not found'));
             }

@@ -44,9 +44,15 @@ const startServer = async () => {
         // Create HTTP server
         const server = http.createServer(app);
 
-        // Initialize Socket.IO
-        const io = initializeSocket(server);
-        
+        // Longer than the AWS load balancer's 60 s idle timeout, so the
+        // balancer never reuses a connection Node has already closed (502s)
+        server.keepAliveTimeout = parseInt(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS, 10) || 65000;
+        server.headersTimeout = server.keepAliveTimeout + 1000;
+
+        // Socket.IO must be fully set up (Redis adapter, auth, handlers)
+        // before the server takes connections
+        const io = await initializeSocket(server);
+
         // Set Socket.IO instance in WebSocket Manager
         websocketManager.setIO(io);
 
@@ -62,7 +68,7 @@ const startServer = async () => {
             logger.info(`WebSocket server initialized`);
         });
 
-        return server;
+        return { server, io };
     } catch (error) {
         logger.error(`Failed to start server: ${error.message}`);
         process.exit(1);
@@ -81,14 +87,41 @@ process.on('unhandledRejection', (reason, promise) => {
     process.exit(1);
 });
 
-startServer().then((server) => {
-    if (server) {
-        process.on('SIGTERM', () => {
-            logger.info('SIGTERM received, shutting down gracefully');
-            server.close(() => {
-                logger.info('HTTP server closed');
-                process.exit(0);
+// Stop taking requests, let in-flight ones finish, then close sockets and
+// connections. Sockets reconnect to the other tasks during a rolling deploy.
+const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 25000;
+
+function shutdown(signal, { server, io }) {
+    logger.info(`${signal} received, shutting down gracefully`);
+    const force = setTimeout(() => {
+        logger.warn('Shutdown timed out, exiting');
+        process.exit(0);
+    }, SHUTDOWN_TIMEOUT_MS);
+    force.unref();
+
+    // Disconnects every socket, then closes the HTTP server, which waits for
+    // in-flight requests
+    io.close(async () => {
+        logger.info('HTTP server closed');
+        await Promise.allSettled([
+            require('mongoose').connection.close(),
+            require('./src/config/redis').disconnect()
+        ]);
+        process.exit(0);
+    });
+    // Idle keep-alive connections would otherwise hold the close open
+    if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
+}
+
+startServer().then((started) => {
+    if (started) {
+        let stopping = false;
+        for (const signal of ['SIGTERM', 'SIGINT']) {
+            process.on(signal, () => {
+                if (stopping) return;
+                stopping = true;
+                shutdown(signal, started);
             });
-        });
+        }
     }
 });
