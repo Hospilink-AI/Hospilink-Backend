@@ -5,7 +5,6 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const compression = require("compression");
 const crypto = require("crypto");
-const mongoose = require("mongoose");
 require("dotenv").config();
 
 const authRoutes = require("./routes/auth.routes");
@@ -71,20 +70,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check endpoint
+// Health check for the load balancer and container. It's public, so it
+// only says the process is up: no memory, uptime or database details.
 app.get("/health", (req, res) => {
-  const healthCheck = {
-    status: "OK",
-    timestamp: new Date().toISOString(),
-    service: "HospiLink API",
-    version: "1.0.0",
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    requestId: req.requestId,
-    dbStatus: mongoose.connection.readyState,
-  };
-
-  res.status(200).json(healthCheck);
+  res.set("Cache-Control", "no-store");
+  res.status(200).json({ status: "OK" });
 });
 
 // CORS test endpoint
