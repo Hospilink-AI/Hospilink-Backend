@@ -115,7 +115,46 @@ exports.refreshHospitalVerificationCache = async (userId) => {
 };
 
 
-// staff user role 
+// staff user role
+// All three staff middlewares share `staff_verification:<userId>`, so it always
+// holds the same full shape. `status` mirrors verificationStatus for older
+// readers of req.staffVerification.
+const STAFF_VERIFICATION_TTL_SECONDS = 300;
+
+const isFullStaffShape = (data) => Boolean(
+    data && typeof data.verificationStatus === 'string' && typeof data.isAvailable === 'boolean'
+);
+
+const getStaffVerification = async (userId) => {
+    const cacheKey = `staff_verification:${userId}`;
+    const cached = await cacheService.get(cacheKey);
+    // Entries written in an older, partial shape are treated as a miss
+    if (isFullStaffShape(cached)) {
+        return cached;
+    }
+
+    const staff = await MedicalStaff.findOne({ user: userId })
+        .select('verificationStatus rejectionReason isAvailable')
+        .lean();
+
+    if (!staff) {
+        throw new ForbiddenError('Staff profile not found. Please complete your registration.');
+    }
+
+    const staffData = {
+        verificationStatus: staff.verificationStatus,
+        status: staff.verificationStatus,
+        rejectionReason: staff.rejectionReason || null,
+        isAvailable: staff.isAvailable === true
+    };
+
+    await cacheService.set(cacheKey, staffData, STAFF_VERIFICATION_TTL_SECONDS);
+    return staffData;
+};
+
+exports.getStaffVerification = getStaffVerification;
+exports.isFullStaffShape = isFullStaffShape;
+
 // Middleware to check staff verification status AND availability
 exports.requireStaffVerificationandisAvailable = asyncHandler(async (req, res, next) => {
     // Only apply to staff users
@@ -123,30 +162,7 @@ exports.requireStaffVerificationandisAvailable = asyncHandler(async (req, res, n
         return next();
     }
 
-    const cacheKey = `staff_verification:${req.user._id}`;
-    let staffData = await cacheService.get(cacheKey);
-
-    if (!staffData) {
-        // Cache miss - fetch from database
-        const staff = await MedicalStaff.findOne({ user: req.user._id })
-            .select('verificationStatus rejectionReason isAvailable')
-            .lean(); // lean() for better performance
-
-        if (!staff) {
-            throw new ForbiddenError('Staff profile not found. Please complete your registration.');
-        }
-
-        staffData = {
-            verificationStatus: staff.verificationStatus,
-            rejectionReason: staff.rejectionReason,
-            isAvailable: staff.isAvailable
-        };
-
-        // Cache for 5 minutes (300 seconds)
-        await cacheService.set(cacheKey, staffData, 300);
-        
-        logger.debug(`Cache set for staff user ${req.user._id}: ${staffData.verificationStatus}, available: ${staffData.isAvailable}`);
-    }
+    const staffData = await getStaffVerification(req.user._id);
 
     // Check verification status first
     switch (staffData.verificationStatus) {
@@ -189,23 +205,9 @@ exports.requireVerifiedStaff = asyncHandler(async (req, res, next) => {
         return next();
     }
 
-    const cacheKey = `staff_verification:${req.user._id}`;
-    let verificationStatus = await cacheService.get(cacheKey);
+    const verificationStatus = await getStaffVerification(req.user._id);
 
-    if (!verificationStatus) {
-        const staff = await MedicalStaff.findOne({ user: req.user._id })
-            .select('verificationStatus')
-            .lean();
-
-        if (!staff) {
-            throw new ForbiddenError('Staff profile not found. Please complete your registration.');
-        }
-
-        verificationStatus = { status: staff.verificationStatus };
-        await cacheService.set(cacheKey, verificationStatus, 300);
-    }
-
-    if (verificationStatus.status !== 'verified') {
+    if (verificationStatus.verificationStatus !== 'verified') {
         throw new ForbiddenError(
             'This feature requires a verified staff account. ' +
             'Please complete the verification process to access this functionality.'
@@ -238,29 +240,7 @@ exports.requireVerifiedStaffOnly = asyncHandler(async (req, res, next) => {
         return next();
     }
 
-    const cacheKey = `staff_verification:${req.user._id}`;
-    let staffData = await cacheService.get(cacheKey);
-
-    if (!staffData) {
-        // Cache miss - fetch from database
-        const staff = await MedicalStaff.findOne({ user: req.user._id })
-            .select('verificationStatus rejectionReason')
-            .lean();
-
-        if (!staff) {
-            throw new ForbiddenError('Staff profile not found. Please complete your registration.');
-        }
-
-        staffData = {
-            verificationStatus: staff.verificationStatus,
-            rejectionReason: staff.rejectionReason
-        };
-
-        // Cache for 5 minutes (300 seconds)
-        await cacheService.set(cacheKey, staffData, 300);
-        
-        logger.debug(`Cache set for staff user ${req.user._id}: ${staffData.verificationStatus}`);
-    }
+    const staffData = await getStaffVerification(req.user._id);
 
     // Check verification status only (NOT availability)
     switch (staffData.verificationStatus) {
