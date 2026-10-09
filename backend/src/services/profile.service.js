@@ -21,6 +21,7 @@ const SMSService = require('./sms.service');
 const ratingAlgorithmService = require('./ratingAlgorithm.service');
 const resumeExtractionService = require('./resumeExtraction.service');
 const resumeParsingService = require('./resumeParsing.service');
+const { maskEmail } = require('../utils/maskPii');
 const {
     AppError,
     ValidationError,
@@ -169,7 +170,7 @@ class ProfileService {
                 user.email,
                 medicalStaffProfile.fullName || user.name,
                 'staff'
-            ).catch(err => logger.error(`Failed to send staff profile confirmation email to ${user.email}: ${err.message}`));
+            ).catch(err => logger.error(`Failed to send staff profile confirmation email to ${maskEmail(user.email)}: ${err.message}`));
 
             return {
                 success: true,
@@ -456,7 +457,7 @@ class ProfileService {
                 user.email,
                 hospitalProfile.hospitalLegalName || user.name,
                 'hospital'
-            ).catch(err => logger.error(`Failed to send hospital profile confirmation email to ${user.email}: ${err.message}`));
+            ).catch(err => logger.error(`Failed to send hospital profile confirmation email to ${maskEmail(user.email)}: ${err.message}`));
 
             return {
                 success: true,

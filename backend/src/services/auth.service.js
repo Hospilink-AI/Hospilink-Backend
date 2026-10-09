@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const cacheService = require('./cache.service');
 const notificationDelivery = require('./notificationDelivery.service');
+const { maskEmail } = require('../utils/maskPii');
 const {
     AppError,
     ConflictError,
@@ -66,9 +67,9 @@ class AuthService {
         // If delivery fails the user can hit "resend OTP"; no need to block the
         // signup response on SMTP latency.
         EmailService.sendOTPEmail(email, otp, userData.name)
-            .catch(err => logger.error(`Failed to send signup OTP email to ${email}: ${err.message}`));
+            .catch(err => logger.error(`Failed to send signup OTP email to ${maskEmail(email)}: ${err.message}`));
 
-        logger.info(`New user registered: ${email}`);
+        logger.info(`New user registered: ${maskEmail(email)}`);
         
         return {
             message: 'User registered successfully. Please verify your email with the OTP sent.',
@@ -134,7 +135,7 @@ class AuthService {
                     { expiresIn: process.env.JWT_EXPIRES_IN }
                 );
 
-                logger.info(`Email verified and user created: ${user.email}`);
+                logger.info(`Email verified and user created: ${maskEmail(user.email)}`);
                 
                 return {
                     message: 'Email verified successfully',
@@ -187,9 +188,9 @@ class AuthService {
 
         // Send new OTP email — fire-and-forget, OTP is already updated in Redis
         EmailService.sendOTPEmail(tempUser.email, otp, tempUser.name)
-            .catch(err => logger.error(`Failed to resend OTP email to ${tempUser.email}: ${err.message}`));
+            .catch(err => logger.error(`Failed to resend OTP email to ${maskEmail(tempUser.email)}: ${err.message}`));
 
-        logger.info(`OTP resent to: ${tempUser.email}`);
+        logger.info(`OTP resent to: ${maskEmail(tempUser.email)}`);
         
         return {
             message: 'OTP resent successfully'
@@ -284,7 +285,7 @@ class AuthService {
             }
         ]);
 
-        logger.info(`User signed in: ${user.email}`);
+        logger.info(`User signed in: ${maskEmail(user.email)}`);
 
         // Fetch onboarding step and verificationStatus in parallel — non-blocking
         let onboardingStep = 'complete';
@@ -344,7 +345,7 @@ class AuthService {
         EmailService.sendPasswordResetEmail(user.email, user.name, resetUrl)
             .catch(err => logger.error(`Failed to send password reset email: ${err.message}`));
 
-        logger.info(`Password reset requested for: ${emailLower}`);
+        logger.info(`Password reset requested for: ${maskEmail(emailLower)}`);
         return { message: 'If this email is registered, a reset link has been sent.' };
     }
 

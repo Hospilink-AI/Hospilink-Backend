@@ -14,6 +14,7 @@ const {
 const DEACTIVATED_ADMIN_MESSAGE = 'This admin account has been deactivated. Please contact your super admin.';
 const deviceInfoService = require('./deviceInfo.service');
 const cacheService = require('./cache.service');
+const { maskEmail } = require('../utils/maskPii');
 
 
 class AdminAuthService {
@@ -78,7 +79,7 @@ class AdminAuthService {
             // doesn't add to the API response time. If delivery fails, the admin
             // can use the resend endpoint; the OTP is already stored.
             EmailService.sendAdminOTPEmail(admin.email, otp, admin.name)
-                .then(() => logger.info(`Admin signin OTP sent to: ${admin.email}`))
+                .then(() => logger.info(`Admin signin OTP sent to: ${maskEmail(admin.email)}`))
                 .catch(err => logger.error(`Failed to send admin OTP email: ${err.message}`));
 
             
@@ -124,7 +125,7 @@ class AdminAuthService {
                         { $unset: { otp: 1 } }
                     )
                 ]);
-                logger.warn(`Admin OTP locked out after ${MAX_ATTEMPTS} failed attempts: ${emailLower}`);
+                logger.warn(`Admin OTP locked out after ${MAX_ATTEMPTS} failed attempts: ${maskEmail(emailLower)}`);
                 throw new UnauthorizedError(
                     'Too many failed attempts. Your OTP has been invalidated. Please sign in again to receive a new OTP.'
                 );
@@ -166,7 +167,7 @@ class AdminAuthService {
 
             if (!isValidOTP) {
                 const remaining = MAX_ATTEMPTS - attempts;
-                logger.warn(`Admin OTP failed for ${emailLower} — attempt ${attempts}/${MAX_ATTEMPTS}`);
+                logger.warn(`Admin OTP failed for ${maskEmail(emailLower)} — attempt ${attempts}/${MAX_ATTEMPTS}`);
                 throw new UnauthorizedError(
                     remaining > 0
                         ? `Invalid or expired OTP. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`
@@ -239,7 +240,7 @@ class AdminAuthService {
                         EmailService.sendAdminLoginAlertEmail(
                             admin.name, admin.email, deviceInfo.deviceName, locationString, loginTime
                         ).then(sent => {
-                            if (sent) logger.info(`Admin login alert sent for ${admin.email}`);
+                            if (sent) logger.info(`Admin login alert sent for ${maskEmail(admin.email)}`);
                         }).catch(err => logger.error(`Admin login alert email failed: ${err.message}`));
                     } catch (err) {
                         logger.error(`Device tracking error: ${err.message}`);
@@ -247,7 +248,7 @@ class AdminAuthService {
                 });
             }
 
-            logger.info(`Admin signed in successfully via ${verificationSource}: ${admin.email}`);
+            logger.info(`Admin signed in successfully via ${verificationSource}: ${maskEmail(admin.email)}`);
             
             return {
                 message: 'Admin signed in successfully',
@@ -316,7 +317,7 @@ class AdminAuthService {
 
             // Fire-and-forget — OTP is already persisted, no need to block on SMTP
             EmailService.sendAdminOTPEmail(admin.email, otp, admin.name)
-                .then(() => logger.info(`Admin resend OTP sent to: ${admin.email}`))
+                .then(() => logger.info(`Admin resend OTP sent to: ${maskEmail(admin.email)}`))
                 .catch(err => logger.error(`Failed to send admin OTP email: ${err.message}`));
             
             return {
