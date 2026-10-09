@@ -208,7 +208,8 @@ const dutySchema = new mongoose.Schema({
 
     // Start handshake: geofence-triggered OTP sent to hospital, entered by staff
     startOtp: {
-        code: { type: String, default: null },
+        // Never sent in responses: the hospital reads it out to the doctor
+        code: { type: String, default: null, select: false },
         expiresAt: { type: Date, default: null },
         attempts: { type: Number, default: 0 },
         status: {
@@ -223,7 +224,8 @@ const dutySchema = new mongoose.Schema({
 
     // End handshake: staff-requested OTP entered by hospital along with payment attestation
     endOtp: {
-        code: { type: String, default: null },
+        // Never sent in responses: the doctor reads it out to the hospital
+        code: { type: String, default: null, select: false },
         expiresAt: { type: Date, default: null },
         attempts: { type: Number, default: 0 },
         status: {
@@ -383,6 +385,10 @@ const dutySchema = new mongoose.Schema({
                     ret[field] = new Date(ret[field].getTime() + (5.5 * 60 * 60 * 1000));
                 }
             });
+
+            // Handshake codes only travel by SMS, even when a path selected them
+            if (ret.startOtp) delete ret.startOtp.code;
+            if (ret.endOtp) delete ret.endOtp.code;
 
             // Convert statusHistory timestamps
             if (ret.statusHistory) {
