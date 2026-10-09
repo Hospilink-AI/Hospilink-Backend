@@ -22,7 +22,8 @@ const dutyCalendarService = require('../services/dutyCalendar.service');
 const dutyOfferService = require('../services/dutyOffer.service');
 const blockService = require('../services/block.service');
 const dutyInviteService = require('../services/dutyInvite.service');
-const systemConfigService = require('../services/systemConfig.service');                    
+const systemConfigService = require('../services/systemConfig.service');
+const { anesthesiaFields } = require('../utils/dutyPricing');                    
 
 // Extend logger with debug method
 logger.debug = (message) => {
@@ -73,7 +74,8 @@ exports.createDuty = asyncHandler(async (req, res) => {
         offeredRate: offered_rate,
         isOvernightDuty: is_overnight_duty || false,
         ...(staff_role === 'rmo' && { dutySubType: duty_sub_type }),
-        ...(typeof auto_relist_enabled === 'boolean' && { autoRelist: { enabled: auto_relist_enabled } })
+        ...(typeof auto_relist_enabled === 'boolean' && { autoRelist: { enabled: auto_relist_enabled } }),
+        ...anesthesiaFields(req.body)
     };
 
 

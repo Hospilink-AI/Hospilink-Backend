@@ -44,7 +44,53 @@ function priceRuleError(fields) {
     return null;
 }
 
+const CASE_NOTE_MIN = 10;
+const CASE_NOTE_MAX = 600;
+const MAX_FIXED_PRICE = 1000000;
+
+// Problems with an anesthesia booking's fields, as plain sentences
+function anesthesiaErrors(body) {
+    const errors = [];
+    if (body.category === undefined) return errors;
+    if (!['standard', 'anesthesia'].includes(body.category)) {
+        errors.push('category must be standard or anesthesia');
+        return errors;
+    }
+    if (body.category !== 'anesthesia') return errors;
+
+    if (body.staff_role !== 'anesthetist') {
+        errors.push('Anesthesia bookings are for anesthetists only.');
+    }
+    if (body.pricing_mode !== undefined && body.pricing_mode !== 'fixed') {
+        errors.push('Anesthesia bookings have one price for the case.');
+    }
+    const price = body.fixed_price === null || body.fixed_price === '' ? NaN : Number(body.fixed_price);
+    if (!Number.isFinite(price) || price <= 0 || price > MAX_FIXED_PRICE) {
+        errors.push('Enter the price for the case.');
+    }
+    const note = typeof body.case_note === 'string' ? body.case_note.trim() : '';
+    if (note.length < CASE_NOTE_MIN) {
+        errors.push(`Describe the case in at least ${CASE_NOTE_MIN} characters.`);
+    } else if (note.length > CASE_NOTE_MAX) {
+        errors.push(`The case note can't be longer than ${CASE_NOTE_MAX} characters.`);
+    }
+    return errors;
+}
+
+// Model fields for an anesthesia booking from the create request, or {}
+function anesthesiaFields(body) {
+    if (body.category !== 'anesthesia') return {};
+    return {
+        category: 'anesthesia',
+        pricing: { mode: 'fixed' },
+        fixedPrice: Math.round(Number(body.fixed_price) * 100) / 100,
+        caseNote: body.case_note.trim()
+    };
+}
+
 module.exports = {
+    anesthesiaErrors,
+    anesthesiaFields,
     MIN_TOTAL,
     MAX_TOTAL,
     MIN_HOURS,

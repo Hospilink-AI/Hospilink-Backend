@@ -2335,7 +2335,8 @@ class AdminService {
             offeredRate: offered_rate,
             isOvernightDuty: is_overnight_duty || false,
             ...(staff_role === 'rmo' && { dutySubType: duty_sub_type }),
-            ...(typeof auto_relist_enabled === 'boolean' && { autoRelist: { enabled: auto_relist_enabled } })
+            ...(typeof auto_relist_enabled === 'boolean' && { autoRelist: { enabled: auto_relist_enabled } }),
+            ...require('../utils/dutyPricing').anesthesiaFields(dutyPayload)
         };
 
         // Create multiple duties based on staff_count
