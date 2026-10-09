@@ -72,156 +72,78 @@ class GoneError extends AppError {
     }
 }
 
-// Error handler middleware
-const errorHandler = (err, req, res, next) => {
-    err.statusCode = err.statusCode || 500;
-    err.status = err.status || 'error';
-
-    // Log the error
-    logError(err, req);
-
-    // Development error response (detailed)
-    if (process.env.NODE_ENV === 'development') {
-        sendErrorDev(err, res);
-    } 
-    // Production error response (user-friendly)
-    else {
-        sendErrorProd(err, res);
-    }
-};
-
-// Fields that must never appear in logs
-const SENSITIVE_BODY_FIELDS = [
-    'password',
-    'newPassword',
-    'confirmPassword',
-    'currentPassword',
-    'otp',
-    'token',
-    'secret',
-    'apiKey',
-    'privateKey',
-];
-
 /**
- * Returns a shallow copy of body with sensitive fields replaced by '[REDACTED]'.
- * Handles null/non-object bodies safely.
+ * The one error handler for every route (app.js). Turns any error into a
+ * status and a safe message, and logs it once:
+ *   - 5xx: logged as an error with its stack; in production the client only
+ *     sees "Internal server error"
+ *   - 4xx: one info line (method, path, status, code), without the message,
+ *     which can echo what the user sent
  */
-const sanitizeBody = (body) => {
-    if (body === null || body === undefined) return body;
-    if (typeof body !== 'object' || Array.isArray(body)) return body;
-    const sanitized = { ...body };
-    for (const field of SENSITIVE_BODY_FIELDS) {
-        if (field in sanitized) sanitized[field] = '[REDACTED]';
+function normalizeError(err) {
+    // Our own errors (ValidationError, NotFoundError, ...)
+    if (err && err.isOperational) {
+        return { status: err.statusCode || 500, message: err.message, code: err.code };
     }
-    return sanitized;
-};
+    // Mongoose: a value that isn't the right type (e.g. a bad id)
+    if (err && err.name === 'CastError') {
+        return { status: 400, message: `Invalid ${err.path}` };
+    }
+    // Mongoose: schema validation failed on save
+    if (err && err.name === 'ValidationError' && err.errors) {
+        const details = Object.values(err.errors).map(e => e.message).join('. ');
+        return { status: 400, message: details || 'Invalid input' };
+    }
+    // MongoDB: unique index (the value itself isn't echoed)
+    if (err && err.code === 11000) {
+        const field = Object.keys(err.keyValue || err.keyPattern || {})[0];
+        return { status: 409, message: field ? `A record with this ${field} already exists` : 'This record already exists' };
+    }
+    // express.json: malformed or oversized body
+    if (err && err.type === 'entity.parse.failed') return { status: 400, message: 'Request body is not valid JSON' };
+    if (err && err.type === 'entity.too.large') return { status: 413, message: 'Request body is too large' };
+    // multer: uploads
+    if (err && err.name === 'MulterError') {
+        return err.code === 'LIMIT_FILE_SIZE'
+            ? { status: 413, message: 'File is too large' }
+            : { status: 400, message: err.message };
+    }
+    // jsonwebtoken
+    if (err && (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError')) {
+        return { status: 401, message: err.name === 'TokenExpiredError' ? 'Token expired. Please log in again.' : 'Invalid token' };
+    }
+    // Other libraries that set a 4xx status (e.g. CORS, http-errors)
+    const status = Number(err && (err.statusCode || err.status));
+    if (status >= 400 && status < 500) return { status, message: err.message };
+    return { status: 500, message: (err && err.message) || 'Internal server error' };
+}
 
-// Function to log errors
-const logError = (err, req) => {
-    const errorLog = {
-        timestamp: new Date().toISOString(),
+// Express needs all four arguments to treat this as an error handler
+const errorHandler = (err, req, res, next) => {
+    const { status, message, code } = normalizeError(err);
+    const production = process.env.NODE_ENV === 'production';
+    const context = {
+        requestId: req.requestId,
         method: req.method,
-        url: req.originalUrl,
-        ip: req.ip,
-        userAgent: req.get('user-agent'),
-        errorName: err.name,
-        errorMessage: err.message,
-        statusCode: err.statusCode,
-        stack: err.stack,
-        body: sanitizeBody(req.body),
-        params: req.params,
-        query: req.query,
-        user: req.user ? { id: req.user._id || req.user.id, role: req.user.role } : 'Anonymous'
+        path: (req.originalUrl || req.url || '').split('?')[0],
+        status,
+        ...(code && { code })
     };
 
-    if (err.statusCode >= 500) {
-        logger.error(JSON.stringify(errorLog, null, 2));
+    if (status >= 500) {
+        logger.error('Request failed', err instanceof Error ? err : new Error(String(err)), context);
     } else {
-        logger.warn(JSON.stringify(errorLog, null, 2));
+        logger.info('Request refused', context);
     }
-};
 
-// Send error in development environment
-const sendErrorDev = (err, res) => {
-    res.status(err.statusCode).json({
+    if (res.headersSent) return;
+    res.status(status).json({
         success: false,
-        status: err.status,
-        error: err,
-        message: err.message,
-        stack: err.stack
+        message: status >= 500 && production ? 'Internal server error' : message,
+        ...(code && { code }),
+        ...(!production && status >= 500 && err && err.stack && { stack: err.stack }),
+        requestId: req.requestId
     });
-};
-
-// Send error in production environment
-const sendErrorProd = (err, res) => {
-    // Operational, trusted error: send message to client
-    if (err.isOperational) {
-        res.status(err.statusCode).json({
-            success: false,
-            status: err.status,
-            message: err.message
-        });
-    } else {
-        // Log the error for debugging
-        logger.error('UNEXPECTED ERROR', err);
-
-        // Send generic message
-        res.status(500).json({
-            success: false,
-            status: 'error',
-            message: 'Something went wrong!'
-        });
-    }
-};
-
-// Handle MongoDB duplicate key errors
-const handleDuplicateFieldsDB = (err) => {
-    const value = err.errmsg.match(/(["'])(\\?.)*?\1/)[0];
-    const message = `Duplicate field value: ${value}. Please use another value!`;
-    return new AppError(message, 400);
-};
-
-// Handle MongoDB validation errors
-const handleValidationErrorDB = (err) => {
-    const errors = Object.values(err.errors).map(el => el.message);
-    const message = `Invalid input data. ${errors.join('. ')}`;
-    return new AppError(message, 400);
-};
-
-// Handle MongoDB cast errors
-const handleCastErrorDB = (err) => {
-    const message = `Invalid ${err.path}: ${err.value}`;
-    return new AppError(message, 400);
-};
-
-// Handle JWT errors
-const handleJWTError = () => {
-    return new AppError('Invalid token. Please log in again!', 401);
-};
-
-// Handle JWT expired errors
-const handleJWTExpiredError = () => {
-    return new AppError('Your token has expired! Please log in again.', 401);
-};
-
-// Global error handler for different error types
-const globalErrorHandler = (err, req, res, next) => {
-    let error = { ...err };
-    error.message = err.message;
-
-    // Log original error
-    logger.error(`Original Error: ${err.message}`);
-
-    // Handle specific error types
-    if (error.code === 11000) error = handleDuplicateFieldsDB(error);
-    if (error.name === 'ValidationError') error = handleValidationErrorDB(error);
-    if (error.name === 'CastError') error = handleCastErrorDB(error);
-    if (error.name === 'JsonWebTokenError') error = handleJWTError();
-    if (error.name === 'TokenExpiredError') error = handleJWTExpiredError();
-
-    // Pass to error handler
-    errorHandler(error, req, res, next);
 };
 
 // Async error handler wrapper (for async/await routes)
@@ -229,18 +151,6 @@ const asyncHandler = (fn) => {
     return (req, res, next) => {
         Promise.resolve(fn(req, res, next)).catch(next);
     };
-};
-
-// 404 Not Found middleware
-const notFoundHandler = (req, res, next) => {
-    const error = new NotFoundError(`Route ${req.originalUrl} not found`);
-    next(error);
-};
-
-// Rate limiting error handler
-const rateLimitHandler = (req, res, next) => {
-    const error = new RateLimitError();
-    next(error);
 };
 
 module.exports = {
@@ -254,10 +164,6 @@ module.exports = {
     UnprocessableEntityError,
     GoneError,
     errorHandler,
-    globalErrorHandler,
-    asyncHandler,
-    notFoundHandler,
-    rateLimitHandler,
-    sendErrorDev,
-    sendErrorProd
+    normalizeError,
+    asyncHandler
 };
