@@ -8,6 +8,7 @@ router.use(protect);
 router.use(authorize('staff', 'hospital'));
 
 router.get('/', accountDeletionController.getStatus);
+router.get('/preview', accountDeletionController.getPreview);
 router.post('/', accountDeletionController.requestDeletion);
 
 module.exports = router;

@@ -52,6 +52,51 @@ class AccountDeletionService {
         };
     }
 
+    // What deleting the account now would do, without doing it: duties that
+    // would be cancelled, applications withdrawn or vacancies closed, the date
+    // of deletion, and whether something under way blocks it today.
+    async preview(userId) {
+        const user = await User.findById(userId).select('role deletion').lean();
+        if (!user || !['staff', 'hospital'].includes(user.role)) {
+            throw new ForbiddenError('Only doctor and hospital accounts can be deleted here.');
+        }
+        const isHospital = user.role === 'hospital';
+        const profile = isHospital
+            ? await Hospital.findOne({ user: userId }).select('_id').lean()
+            : await MedicalStaff.findOne({ user: userId }).select('_id').lean();
+
+        const [duties, activeApplications, openVacancies] = await Promise.all([
+            profile
+                ? Duty.find(isHospital
+                    ? { hospital: profile._id, status: { $in: ['available', 'assigned', ...UNDER_WAY] } }
+                    : { assignedTo: profile._id, status: { $in: ['assigned', ...UNDER_WAY] } }
+                ).select('_id status date startTime').lean()
+                : [],
+            isHospital ? 0 : JobApplication.countDocuments({ user: userId, status: { $in: ACTIVE_APPLICATION_STATUSES } }),
+            isHospital && profile ? JobVacancy.countDocuments({ hospitalId: profile._id, deletedAt: null }) : 0
+        ]);
+
+        let blockedReason = null;
+        try {
+            await this._assertNothingImminent(duties, isHospital);
+        } catch (error) {
+            blockedReason = error.message;
+        }
+
+        const pending = !!(user.deletion?.requestedAt && !user.deletion.completedAt);
+        return {
+            upcomingDuties: duties.filter(d => !UNDER_WAY.includes(d.status)).length,
+            dutiesUnderWay: duties.filter(d => UNDER_WAY.includes(d.status)).length,
+            activeApplications,
+            openVacancies,
+            canDeleteNow: !pending && !blockedReason,
+            blockedReason,
+            alreadyScheduled: pending,
+            scheduledFor: pending ? user.deletion.scheduledFor : new Date(Date.now() + GRACE_DAYS * 24 * 60 * 60 * 1000),
+            graceDays: GRACE_DAYS
+        };
+    }
+
     // Locks the account now and schedules the personal data for removal.
     // Upcoming duties are cancelled first, so a failure leaves the account usable.
     async request(userId, password, reason, req = null) {
