@@ -943,7 +943,12 @@ exports.adminOverrideDutyStatus = asyncHandler(async (req, res) => {
     const shift = notificationEmitter.describeShift(duty);
     const overrideMessage = `HospiLink changed your ${shift} to "${status}". Reason: ${reason}`;
     await notificationEmitter.emitDutyNotice('DUTY_STATUS_OVERRIDDEN', duty, [duty.hospital?.user?._id], overrideMessage, { reason });
-    await notificationEmitter.emitDutyNotice('DUTY_STATUS_OVERRIDDEN', duty, [duty.assignedTo?.user?._id], overrideMessage, { reason });
+    if (status === 'completed') {
+        // The doctor hears it as a confirmed duty, with the amount
+        await notificationEmitter.emitDutyConfirmedToStaff(duty, duty.assignedTo?.user?._id, { confirmedBy: 'admin', reason });
+    } else {
+        await notificationEmitter.emitDutyNotice('DUTY_STATUS_OVERRIDDEN', duty, [duty.assignedTo?.user?._id], overrideMessage, { reason });
+    }
 
     res.status(200).json({
         success: true,

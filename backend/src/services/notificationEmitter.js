@@ -1318,6 +1318,45 @@ class NotificationEmitter {
         }
     }
 
+    // Tells the doctor their duty is confirmed, with the amount and how the
+    // hospital says it paid. confirmedBy: 'hospital' (end code) or 'admin'.
+    async emitDutyConfirmedToStaff(duty, staffUserId, { confirmedBy = 'hospital', reason = null } = {}) {
+        try {
+            if (!duty || !staffUserId) return;
+            const amount = typeof duty.totalPayment === 'number' ? `₹${Math.round(duty.totalPayment).toLocaleString('en-IN')}` : null;
+            const methods = { upi: 'UPI', cash: 'cash', bank: 'bank transfer' };
+            let payment = '';
+            if (duty.isPaid === true) payment = methods[duty.paymentMethod] ? ` Paid by ${methods[duty.paymentMethod]}.` : ' Marked paid.';
+            else if (duty.isPaid === false || duty.paymentMethod === 'will_pay_later') payment = ' The hospital will pay later.';
+
+            const who = confirmedBy === 'admin' ? 'HospiLink confirmed' : 'The hospital confirmed';
+            const message = `${who} your ${this.describeShift(duty)}${amount ? `: ${amount}` : ''}.${payment}${reason ? ` Reason: ${reason}` : ''}`;
+
+            const payload = {
+                type: 'DUTY_COMPLETED',
+                duty: {
+                    id: duty._id.toString(),
+                    staffRole: duty.staffRole,
+                    date: duty.date,
+                    startTime: duty.startTime,
+                    endTime: duty.endTime,
+                    totalPayment: duty.totalPayment,
+                    paymentMethod: duty.paymentMethod || null,
+                    isPaid: typeof duty.isPaid === 'boolean' ? duty.isPaid : null
+                },
+                confirmedBy,
+                message,
+                completedAt: new Date(duty.completedAt || Date.now()).toISOString(),
+                timestamp: new Date().toISOString()
+            };
+
+            const { unreadCount } = await notificationService.createNotificationWithCount(String(staffUserId), 'DUTY_COMPLETED', payload);
+            await notificationDelivery.deliverToUser(String(staffUserId), 'DUTY_COMPLETED', payload, unreadCount);
+        } catch (error) {
+            console.error('Error emitting duty confirmed notification to staff:', error);
+        }
+    }
+
     /**
      * Prompt staff to rate the hospital after a duty is marked completed
      * @param {Object} duty - Duty object
